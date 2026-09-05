@@ -1,0 +1,529 @@
+<?xml version="1.0" ?>
+<xmeml version="4">
+  <sequence id="ytp-sequence-1">
+    <name>YTP_Rick Beato flips thr</name>
+    <rate>
+      <timebase>30</timebase>
+      <ntsc>TRUE</ntsc>
+    </rate>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <width>1920</width>
+            <height>1080</height>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="vclip-0">
+            <name>000_rick_word</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-1">
+            <name>001_beato_word</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-2">
+            <name>002_F_phone</name>
+            <start>27</start>
+            <end>30</end>
+            <in>10609</in>
+            <out>10612</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-3">
+            <name>003_L_phone</name>
+            <start>30</start>
+            <end>32</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-4">
+            <name>004_IH1_phone</name>
+            <start>32</start>
+            <end>34</end>
+            <in>12290</in>
+            <out>12292</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-5">
+            <name>005_P_phone</name>
+            <start>34</start>
+            <end>37</end>
+            <in>7692</in>
+            <out>7695</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-6">
+            <name>006_S_phone</name>
+            <start>37</start>
+            <end>40</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-7">
+            <name>007_through_word</name>
+            <start>40</start>
+            <end>51</end>
+            <in>1011</in>
+            <out>1022</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-8">
+            <name>008_every_word</name>
+            <start>51</start>
+            <end>62</end>
+            <in>5384</in>
+            <out>5395</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-9">
+            <name>009_cd_word</name>
+            <start>62</start>
+            <end>80</end>
+            <in>11496</in>
+            <out>11514</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-10">
+            <name>010_and_word</name>
+            <start>80</start>
+            <end>84</end>
+            <in>6809</in>
+            <out>6813</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-11">
+            <name>011_HH_phone</name>
+            <start>84</start>
+            <end>86</end>
+            <in>1826</in>
+            <out>1828</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-12">
+            <name>012_EY1_phone</name>
+            <start>86</start>
+            <end>90</end>
+            <in>13536</in>
+            <out>13540</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-13">
+            <name>013_T_phone</name>
+            <start>90</start>
+            <end>91</end>
+            <in>12920</in>
+            <out>12921</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-14">
+            <name>014_S_phone</name>
+            <start>91</start>
+            <end>94</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-15">
+            <name>015_ai_word</name>
+            <start>94</start>
+            <end>108</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+        </track>
+      </video>
+      <audio>
+        <track>
+          <clipitem id="aclip1-0">
+            <name>000_rick_audio1</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-1">
+            <name>001_beato_audio1</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-2">
+            <name>002_F_audio1</name>
+            <start>27</start>
+            <end>30</end>
+            <in>10609</in>
+            <out>10612</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-3">
+            <name>003_L_audio1</name>
+            <start>30</start>
+            <end>32</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-4">
+            <name>004_IH1_audio1</name>
+            <start>32</start>
+            <end>34</end>
+            <in>12290</in>
+            <out>12292</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-5">
+            <name>005_P_audio1</name>
+            <start>34</start>
+            <end>37</end>
+            <in>7692</in>
+            <out>7695</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-6">
+            <name>006_S_audio1</name>
+            <start>37</start>
+            <end>40</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-7">
+            <name>007_through_audio1</name>
+            <start>40</start>
+            <end>51</end>
+            <in>1011</in>
+            <out>1022</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-8">
+            <name>008_every_audio1</name>
+            <start>51</start>
+            <end>62</end>
+            <in>5384</in>
+            <out>5395</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-9">
+            <name>009_cd_audio1</name>
+            <start>62</start>
+            <end>80</end>
+            <in>11496</in>
+            <out>11514</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-10">
+            <name>010_and_audio1</name>
+            <start>80</start>
+            <end>84</end>
+            <in>6809</in>
+            <out>6813</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-11">
+            <name>011_HH_audio1</name>
+            <start>84</start>
+            <end>86</end>
+            <in>1826</in>
+            <out>1828</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-12">
+            <name>012_EY1_audio1</name>
+            <start>86</start>
+            <end>90</end>
+            <in>13536</in>
+            <out>13540</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-13">
+            <name>013_T_audio1</name>
+            <start>90</start>
+            <end>91</end>
+            <in>12920</in>
+            <out>12921</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-14">
+            <name>014_S_audio1</name>
+            <start>91</start>
+            <end>94</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-15">
+            <name>015_ai_audio1</name>
+            <start>94</start>
+            <end>108</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1"/>
+          </clipitem>
+        </track>
+        <track>
+          <clipitem id="aclip2-0">
+            <name>000_rick_audio2</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-1">
+            <name>001_beato_audio2</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-2">
+            <name>002_F_audio2</name>
+            <start>27</start>
+            <end>30</end>
+            <in>10609</in>
+            <out>10612</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-3">
+            <name>003_L_audio2</name>
+            <start>30</start>
+            <end>32</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-4">
+            <name>004_IH1_audio2</name>
+            <start>32</start>
+            <end>34</end>
+            <in>12290</in>
+            <out>12292</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-5">
+            <name>005_P_audio2</name>
+            <start>34</start>
+            <end>37</end>
+            <in>7692</in>
+            <out>7695</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-6">
+            <name>006_S_audio2</name>
+            <start>37</start>
+            <end>40</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-7">
+            <name>007_through_audio2</name>
+            <start>40</start>
+            <end>51</end>
+            <in>1011</in>
+            <out>1022</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-8">
+            <name>008_every_audio2</name>
+            <start>51</start>
+            <end>62</end>
+            <in>5384</in>
+            <out>5395</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-9">
+            <name>009_cd_audio2</name>
+            <start>62</start>
+            <end>80</end>
+            <in>11496</in>
+            <out>11514</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-10">
+            <name>010_and_audio2</name>
+            <start>80</start>
+            <end>84</end>
+            <in>6809</in>
+            <out>6813</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-11">
+            <name>011_HH_audio2</name>
+            <start>84</start>
+            <end>86</end>
+            <in>1826</in>
+            <out>1828</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-12">
+            <name>012_EY1_audio2</name>
+            <start>86</start>
+            <end>90</end>
+            <in>13536</in>
+            <out>13540</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-13">
+            <name>013_T_audio2</name>
+            <start>90</start>
+            <end>91</end>
+            <in>12920</in>
+            <out>12921</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-14">
+            <name>014_S_audio2</name>
+            <start>91</start>
+            <end>94</end>
+            <in>8176</in>
+            <out>8179</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-15">
+            <name>015_ai_audio2</name>
+            <start>94</start>
+            <end>108</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1"/>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+    <duration>108</duration>
+  </sequence>
+</xmeml>

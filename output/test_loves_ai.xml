@@ -1,0 +1,250 @@
+<?xml version="1.0" ?>
+<xmeml version="4">
+  <sequence id="ytp-sequence-1">
+    <name>YTP_Rick_Beato_loves_AI</name>
+    <rate>
+      <timebase>30</timebase>
+      <ntsc>TRUE</ntsc>
+    </rate>
+    <media>
+      <video>
+        <format>
+          <samplecharacteristics>
+            <width>1920</width>
+            <height>1080</height>
+            <rate>
+              <timebase>30</timebase>
+              <ntsc>TRUE</ntsc>
+            </rate>
+          </samplecharacteristics>
+        </format>
+        <track>
+          <clipitem id="vclip-0">
+            <name>000_rick_word</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-1">
+            <name>001_beato_word</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-2">
+            <name>002_L_phone</name>
+            <start>27</start>
+            <end>29</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-3">
+            <name>003_AH1_phone</name>
+            <start>29</start>
+            <end>31</end>
+            <in>6829</in>
+            <out>6831</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-4">
+            <name>004_V_phone</name>
+            <start>31</start>
+            <end>34</end>
+            <in>1954</in>
+            <out>1957</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-5">
+            <name>005_Z_phone</name>
+            <start>34</start>
+            <end>37</end>
+            <in>10715</in>
+            <out>10718</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+          <clipitem id="vclip-6">
+            <name>006_ai_word</name>
+            <start>37</start>
+            <end>51</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1">
+              <name>Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</name>
+              <pathurl>file://localhost/C:/Users/Sean/Videos/YTP/YTP Sep 2026/vids/Another Reason I F＊cking Hate AI [7Hph0VSdh9w].mp4</pathurl>
+              <rate>
+                <timebase>30</timebase>
+                <ntsc>TRUE</ntsc>
+              </rate>
+            </file>
+          </clipitem>
+        </track>
+      </video>
+      <audio>
+        <track>
+          <clipitem id="aclip1-0">
+            <name>000_rick_audio1</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-1">
+            <name>001_beato_audio1</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-2">
+            <name>002_L_audio1</name>
+            <start>27</start>
+            <end>29</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-3">
+            <name>003_AH1_audio1</name>
+            <start>29</start>
+            <end>31</end>
+            <in>6829</in>
+            <out>6831</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-4">
+            <name>004_V_audio1</name>
+            <start>31</start>
+            <end>34</end>
+            <in>1954</in>
+            <out>1957</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-5">
+            <name>005_Z_audio1</name>
+            <start>34</start>
+            <end>37</end>
+            <in>10715</in>
+            <out>10718</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip1-6">
+            <name>006_ai_audio1</name>
+            <start>37</start>
+            <end>51</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1"/>
+          </clipitem>
+        </track>
+        <track>
+          <clipitem id="aclip2-0">
+            <name>000_rick_audio2</name>
+            <start>0</start>
+            <end>7</end>
+            <in>14885</in>
+            <out>14892</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-1">
+            <name>001_beato_audio2</name>
+            <start>7</start>
+            <end>27</end>
+            <in>14892</in>
+            <out>14912</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-2">
+            <name>002_L_audio2</name>
+            <start>27</start>
+            <end>29</end>
+            <in>9927</in>
+            <out>9929</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-3">
+            <name>003_AH1_audio2</name>
+            <start>29</start>
+            <end>31</end>
+            <in>6829</in>
+            <out>6831</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-4">
+            <name>004_V_audio2</name>
+            <start>31</start>
+            <end>34</end>
+            <in>1954</in>
+            <out>1957</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-5">
+            <name>005_Z_audio2</name>
+            <start>34</start>
+            <end>37</end>
+            <in>10715</in>
+            <out>10718</out>
+            <file id="file-1"/>
+          </clipitem>
+          <clipitem id="aclip2-6">
+            <name>006_ai_audio2</name>
+            <start>37</start>
+            <end>51</end>
+            <in>14507</in>
+            <out>14521</out>
+            <file id="file-1"/>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+    <duration>51</duration>
+  </sequence>
+</xmeml>
