@@ -1,0 +1,188 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0 
+xmax = 5.21 
+tiers? <exists> 
+size = 2 
+item []: 
+    item [1]:
+        class = "IntervalTier" 
+        name = "words" 
+        xmin = 0 
+        xmax = 5.21 
+        intervals: size = 14 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.2 
+            text = "i" 
+        intervals [2]:
+            xmin = 0.2 
+            xmax = 2.82 
+            text = "" 
+        intervals [3]:
+            xmin = 2.82 
+            xmax = 3.16 
+            text = "think" 
+        intervals [4]:
+            xmin = 3.16 
+            xmax = 3.24 
+            text = "the" 
+        intervals [5]:
+            xmin = 3.24 
+            xmax = 3.47 
+            text = "d" 
+        intervals [6]:
+            xmin = 3.47 
+            xmax = 3.71 
+            text = "ridge" 
+        intervals [7]:
+            xmin = 3.71 
+            xmax = 3.77 
+            text = "so" 
+        intervals [8]:
+            xmin = 3.77 
+            xmax = 3.83 
+            text = "yeah" 
+        intervals [9]:
+            xmin = 3.83 
+            xmax = 3.98 
+            text = "" 
+        intervals [10]:
+            xmin = 3.98 
+            xmax = 4.18 
+            text = "the" 
+        intervals [11]:
+            xmin = 4.18 
+            xmax = 4.47 
+            text = "snare" 
+        intervals [12]:
+            xmin = 4.47 
+            xmax = 4.5 
+            text = "" 
+        intervals [13]:
+            xmin = 4.5 
+            xmax = 4.98 
+            text = "is" 
+        intervals [14]:
+            xmin = 4.98 
+            xmax = 5.21 
+            text = "" 
+    item [2]:
+        class = "IntervalTier" 
+        name = "phones" 
+        xmin = 0 
+        xmax = 5.21 
+        intervals: size = 28 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.2 
+            text = "AY1" 
+        intervals [2]:
+            xmin = 0.2 
+            xmax = 2.82 
+            text = "" 
+        intervals [3]:
+            xmin = 2.82 
+            xmax = 2.99 
+            text = "TH" 
+        intervals [4]:
+            xmin = 2.99 
+            xmax = 3.09 
+            text = "IH1" 
+        intervals [5]:
+            xmin = 3.09 
+            xmax = 3.13 
+            text = "NG" 
+        intervals [6]:
+            xmin = 3.13 
+            xmax = 3.16 
+            text = "K" 
+        intervals [7]:
+            xmin = 3.16 
+            xmax = 3.19 
+            text = "DH" 
+        intervals [8]:
+            xmin = 3.19 
+            xmax = 3.24 
+            text = "AH0" 
+        intervals [9]:
+            xmin = 3.24 
+            xmax = 3.35 
+            text = "D" 
+        intervals [10]:
+            xmin = 3.35 
+            xmax = 3.47 
+            text = "IY1" 
+        intervals [11]:
+            xmin = 3.47 
+            xmax = 3.59 
+            text = "R" 
+        intervals [12]:
+            xmin = 3.59 
+            xmax = 3.63 
+            text = "IH1" 
+        intervals [13]:
+            xmin = 3.63 
+            xmax = 3.71 
+            text = "JH" 
+        intervals [14]:
+            xmin = 3.71 
+            xmax = 3.74 
+            text = "S" 
+        intervals [15]:
+            xmin = 3.74 
+            xmax = 3.77 
+            text = "OW1" 
+        intervals [16]:
+            xmin = 3.77 
+            xmax = 3.8 
+            text = "Y" 
+        intervals [17]:
+            xmin = 3.8 
+            xmax = 3.83 
+            text = "AE1" 
+        intervals [18]:
+            xmin = 3.83 
+            xmax = 3.98 
+            text = "" 
+        intervals [19]:
+            xmin = 3.98 
+            xmax = 4.01 
+            text = "DH" 
+        intervals [20]:
+            xmin = 4.01 
+            xmax = 4.18 
+            text = "AH1" 
+        intervals [21]:
+            xmin = 4.18 
+            xmax = 4.3 
+            text = "S" 
+        intervals [22]:
+            xmin = 4.3 
+            xmax = 4.34 
+            text = "N" 
+        intervals [23]:
+            xmin = 4.34 
+            xmax = 4.38 
+            text = "EH1" 
+        intervals [24]:
+            xmin = 4.38 
+            xmax = 4.47 
+            text = "R" 
+        intervals [25]:
+            xmin = 4.47 
+            xmax = 4.5 
+            text = "" 
+        intervals [26]:
+            xmin = 4.5 
+            xmax = 4.83 
+            text = "IH0" 
+        intervals [27]:
+            xmin = 4.83 
+            xmax = 4.98 
+            text = "Z" 
+        intervals [28]:
+            xmin = 4.98 
+            xmax = 5.21 
+            text = "" 
