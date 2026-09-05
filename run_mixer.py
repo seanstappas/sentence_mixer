@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Rick Beato YTP Sentence Mixing Pipeline CLI
+YTP Sentence Mixing Pipeline CLI
 Unified CLI tool to align video sources via MFA and synthesize target sentences.
-Supports explicit source video passing, automatic alignment caching, and multi-source libraries.
+Supports multiple source videos, in-memory corpus merging, and per-video alignment caching.
 """
 
 import argparse
@@ -196,16 +196,66 @@ def ensure_source_aligned(video_path: str, vtt_path: str = None, force_realign: 
     return str(inventory_path)
 
 
+def merge_inventories(inventories: list) -> dict:
+    """
+    Combines multiple unit inventories in memory into a single unified corpus index.
+    Preserves source_video reference on each unit for accurate multi-source rendering.
+    """
+    combined = {
+        "source_videos": [],
+        "total_unique_words": 0,
+        "total_words_instances": 0,
+        "total_unique_phones": 0,
+        "total_phones_instances": 0,
+        "words": {},
+        "phones": {}
+    }
+
+    words_db = combined["words"]
+    phones_db = combined["phones"]
+    seen_videos = set()
+
+    for inv in inventories:
+        src = inv.get("source_video")
+        if src and src not in seen_videos:
+            seen_videos.add(src)
+            combined["source_videos"].append(src)
+        elif "source_videos" in inv:
+            for s in inv["source_videos"]:
+                if s not in seen_videos:
+                    seen_videos.add(s)
+                    combined["source_videos"].append(s)
+
+        # Merge words
+        for word, instances in inv.get("words", {}).items():
+            if word not in words_db:
+                words_db[word] = []
+            words_db[word].extend(instances)
+            combined["total_words_instances"] += len(instances)
+
+        # Merge phones
+        for phone, instances in inv.get("phones", {}).items():
+            if phone not in phones_db:
+                phones_db[phone] = []
+            phones_db[phone].extend(instances)
+            combined["total_phones_instances"] += len(instances)
+
+    combined["total_unique_words"] = len(words_db)
+    combined["total_unique_phones"] = len(phones_db)
+    return combined
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Rick Beato YTP Sentence Mixing Engine")
+    parser = argparse.ArgumentParser(description="YTP Sentence Mixing Engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # 1. Mix (Primary command: accepts --video or --inventory)
-    p_mix = subparsers.add_parser("mix", help="Synthesize target sentence using source video (cached or newly aligned)")
+    # 1. Mix (Primary command: accepts multiple --video or --inventory)
+    p_mix = subparsers.add_parser("mix", help="Synthesize target sentence using one or more source videos (cached or newly aligned)")
     p_mix.add_argument("--text", required=True, help="Target text / sentence to synthesize")
-    p_mix.add_argument("--video", help="Path to source video (.mp4). Checks cache or automatically aligns.")
-    p_mix.add_argument("--vtt", help="Path to WebVTT subtitles (.vtt). Auto-detected if alongside video.")
-    p_mix.add_argument("--inventory", help="Direct path to units_index.json (bypasses video cache lookup)")
+    p_mix.add_argument("--video", nargs="+", help="Path(s) to source video(s) (.mp4). Accepts multiple paths or comma-separated lists. Checks cache or aligns.")
+    p_mix.add_argument("--vtt", nargs="+", help="Optional path(s) to WebVTT subtitles (.vtt). Auto-detected if alongside videos.")
+    p_mix.add_argument("--manifest", help="Path to JSON manifest containing a list of objects with 'video' and optional 'vtt' paths.")
+    p_mix.add_argument("--inventory", nargs="+", help="Direct path(s) to units_index.json (bypasses video cache lookup)")
     p_mix.add_argument("--xml", help="Output Premiere Pro XML path (e.g. output/my_mix.xml)")
     p_mix.add_argument("--render", help="Output rendered MP4 path (e.g. output/my_mix.mp4)")
     p_mix.add_argument("--fps", type=float, default=29.97, help="Timeline framerate (default: 29.97)")
@@ -240,26 +290,81 @@ def main():
     args = parser.parse_args()
 
     if args.command == "mix":
-        # Resolve inventory: either direct or via source video cache
-        inventory_path = None
+        # Parse video paths (supports space-separated nargs, comma-separated strings, or --manifest)
+        raw_videos = []
+        raw_vtts = []
+
+        if args.manifest:
+            if not os.path.exists(args.manifest):
+                sys.exit(f"Error: Manifest file not found: {args.manifest}")
+            with open(args.manifest, "r", encoding="utf-8") as mf:
+                manifest_data = json.load(mf)
+            for item in manifest_data:
+                if isinstance(item, dict) and "video" in item:
+                    raw_videos.append(item["video"])
+                    raw_vtts.append(item.get("vtt"))
+                elif isinstance(item, str):
+                    raw_videos.append(item)
+                    raw_vtts.append(None)
+
+        if args.video:
+            for item in args.video:
+                for part in item.split(","):
+                    clean = part.strip()
+                    if clean:
+                        raw_videos.append(clean)
+
+        if args.vtt:
+            for item in args.vtt:
+                for part in item.split(","):
+                    clean = part.strip()
+                    if clean:
+                        raw_vtts.append(clean)
+
+        raw_inventories = []
         if args.inventory:
-            inventory_path = args.inventory
-        elif args.video:
-            inventory_path = ensure_source_aligned(args.video, args.vtt, force_realign=args.force_realign)
-        else:
-            # Default fallback to legacy reference inventory if available
+            for item in args.inventory:
+                for part in item.split(","):
+                    clean = part.strip()
+                    if clean:
+                        raw_inventories.append(clean)
+
+        loaded_inventories = []
+
+        # 1. Load any directly specified inventory JSONs
+        for inv_p in raw_inventories:
+            if not os.path.exists(inv_p):
+                sys.exit(f"Error: Inventory index not found at {inv_p}")
+            with open(inv_p, "r", encoding="utf-8") as f:
+                loaded_inventories.append(json.load(f))
+
+        # 2. Load / align video sources
+        for idx, vid_p in enumerate(raw_videos):
+            custom_vtt = raw_vtts[idx] if idx < len(raw_vtts) else None
+            inv_p = ensure_source_aligned(vid_p, custom_vtt, force_realign=args.force_realign)
+            with open(inv_p, "r", encoding="utf-8") as f:
+                loaded_inventories.append(json.load(f))
+
+        # 3. Fallback to default reference inventory if nothing provided
+        if not loaded_inventories:
             default_inv = SCRIPT_DIR / "inventory" / "units_index.json"
             if default_inv.exists():
-                print(f"[*] No --video specified. Falling back to reference inventory: {default_inv}")
-                inventory_path = str(default_inv)
+                print(f"[*] No sources specified. Falling back to reference inventory: {default_inv}")
+                with open(default_inv, "r", encoding="utf-8") as f:
+                    loaded_inventories.append(json.load(f))
             else:
-                sys.exit("Error: Please provide --video <path_to_video> or --inventory <path_to_index.json>.")
+                sys.exit("Error: Please provide --manifest <file.json>, --video <path_to_video...>, or --inventory <path_to_index.json...>.")
 
-        if not os.path.exists(inventory_path):
-            sys.exit(f"Error: Inventory index not found at {inventory_path}")
-
-        with open(inventory_path, "r", encoding="utf-8") as f:
-            inv = json.load(f)
+        # Combine inventories in memory
+        if len(loaded_inventories) == 1:
+            inv = loaded_inventories[0]
+            print(f"[+] Loaded single corpus: {inv.get('total_unique_words', len(inv.get('words', {})))} unique words, "
+                  f"{inv.get('total_unique_phones', len(inv.get('phones', {})))} phonemes")
+        else:
+            inv = merge_inventories(loaded_inventories)
+            print(f"[+] Successfully merged {len(loaded_inventories)} source inventories in memory:")
+            print(f"    - Unique words across corpus: {inv['total_unique_words']} (total instances: {inv['total_words_instances']})")
+            print(f"    - Unique phonemes across corpus: {inv['total_unique_phones']} (total instances: {inv['total_phones_instances']})")
 
         units, plan = synthesize_sentence(args.text, inv)
         print("\n--- Synthesized Cut Plan ---")

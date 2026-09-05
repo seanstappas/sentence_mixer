@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 def generate_fcp_xml(
     units: List[Dict[str, Any]],
     output_xml_path: str,
-    sequence_name: str = "Beato_YTP_Sentence_Mix",
+    sequence_name: str = "YTP_Sentence_Mix",
     fps: float = 29.97,
     width: int = 1920,
     height: int = 1080

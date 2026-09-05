@@ -70,7 +70,7 @@ mfa model download g2p english_us_arpa
 Agents can invoke `tools/sentence_mixer/run_mixer.py` using system Python.
 
 ### 1. Basic Sentence Mixing (Using Any Source Video)
-Agents should **always pass `--video`**. 
+Pass `--video` with your source file:
 - If the video has already been aligned, alignment is loaded from cache in `~0.05s`.
 - If the video is new, the toolkit automatically detects the adjacent `.vtt` file, runs preprocessing and MFA alignment, caches the index, and synthesizes the sentence.
 
@@ -82,7 +82,44 @@ python "tools/sentence_mixer/run_mixer.py" mix \
 ```
 *(XML output is omitted by default. If an FCP7/Premiere Pro sequence timeline is specifically desired, add `--xml "path/to/output.xml"`).*
 
-### 2. Auto-Detecting Subtitles vs Explicit `--vtt`
+### 2. Multi-Source Sentence Mixing (Expanding Vocabulary & Corpus)
+You can provide multiple video sources by separating them with spaces or commas:
+
+```bash
+python "tools/sentence_mixer/run_mixer.py" mix \
+  --video "vids/source1.mp4" "vids/source2.mp4" "vids/source3.mp4" \
+  --text "Your sentence to synthesize across multiple sources" \
+  --render "output/multisource_mix.mp4"
+```
+
+Or pass a JSON manifest file listing all video and VTT paths:
+```bash
+python "tools/sentence_mixer/run_mixer.py" mix \
+  --manifest "tools/sentence_mixer/sources_manifest.json" \
+  --text "Your sentence to synthesize across entire library" \
+  --render "output/library_mix.mp4"
+```
+
+Manifest format (`sources_manifest.json`):
+```json
+[
+  {
+    "video": "path/to/video1.mp4",
+    "vtt": "path/to/video1.en.vtt"
+  },
+  {
+    "video": "path/to/video2.mp4"
+  }
+]
+```
+
+**How Caching & Pooling Works:**
+- Each video is checked against its own independent cache (`cache/<source_id>/`).
+- Previously aligned videos load instantly. Any new video is aligned once and saved to cache.
+- The unit inventories (all words and phonemes) are merged seamlessly in memory into a single combined dictionary.
+- Each selected unit retains its own `source_video` path, so FFmpeg cuts directly from whichever video provides the word or phoneme.
+
+### 3. Auto-Detecting Subtitles vs Explicit `--vtt`
 If the subtitle file is named after the video (e.g. `source.mp4` and `source.en.vtt` or `source.vtt` in the same directory), `--vtt` is auto-detected. If the subtitle file is located elsewhere or named differently, pass `--vtt`:
 
 ```bash
@@ -93,7 +130,7 @@ python "tools/sentence_mixer/run_mixer.py" mix \
   --render "output/mix.mp4"
 ```
 
-### 3. Force Re-alignment
+### 4. Force Re-alignment
 If you modified subtitles or added custom dictionary entries:
 ```bash
 python "tools/sentence_mixer/run_mixer.py" mix \
@@ -102,7 +139,7 @@ python "tools/sentence_mixer/run_mixer.py" mix \
   --force-realign
 ```
 
-### 4. Inspecting Alignment Quality & Phoneme Boundaries
+### 5. Inspecting Alignment Quality & Phoneme Boundaries
 To verify boundary accuracy on any speech chunk:
 
 ```bash

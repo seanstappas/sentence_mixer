@@ -1,0 +1,164 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0 
+xmax = 2.96 
+tiers? <exists> 
+size = 2 
+item []: 
+    item [1]:
+        class = "IntervalTier" 
+        name = "words" 
+        xmin = 0 
+        xmax = 2.96 
+        intervals: size = 10 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.69 
+            text = "hoop" 
+        intervals [2]:
+            xmin = 0.69 
+            xmax = 0.74 
+            text = "" 
+        intervals [3]:
+            xmin = 0.74 
+            xmax = 0.84 
+            text = "is" 
+        intervals [4]:
+            xmin = 0.84 
+            xmax = 0.98 
+            text = "that" 
+        intervals [5]:
+            xmin = 0.98 
+            xmax = 1.04 
+            text = "the" 
+        intervals [6]:
+            xmin = 1.04 
+            xmax = 1.35 
+            text = "1" 
+        intervals [7]:
+            xmin = 1.35 
+            xmax = 2.31 
+            text = "6" 
+        intervals [8]:
+            xmin = 2.31 
+            xmax = 2.7 
+            text = "millimeter" 
+        intervals [9]:
+            xmin = 2.7 
+            xmax = 2.89 
+            text = "hoop" 
+        intervals [10]:
+            xmin = 2.89 
+            xmax = 2.96 
+            text = "on" 
+    item [2]:
+        class = "IntervalTier" 
+        name = "phones" 
+        xmin = 0 
+        xmax = 2.96 
+        intervals: size = 26 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.44 
+            text = "HH" 
+        intervals [2]:
+            xmin = 0.44 
+            xmax = 0.58 
+            text = "UW1" 
+        intervals [3]:
+            xmin = 0.58 
+            xmax = 0.69 
+            text = "P" 
+        intervals [4]:
+            xmin = 0.69 
+            xmax = 0.74 
+            text = "" 
+        intervals [5]:
+            xmin = 0.74 
+            xmax = 0.78 
+            text = "IH1" 
+        intervals [6]:
+            xmin = 0.78 
+            xmax = 0.84 
+            text = "Z" 
+        intervals [7]:
+            xmin = 0.84 
+            xmax = 0.88 
+            text = "DH" 
+        intervals [8]:
+            xmin = 0.88 
+            xmax = 0.91 
+            text = "AH0" 
+        intervals [9]:
+            xmin = 0.91 
+            xmax = 0.98 
+            text = "T" 
+        intervals [10]:
+            xmin = 0.98 
+            xmax = 1.01 
+            text = "DH" 
+        intervals [11]:
+            xmin = 1.01 
+            xmax = 1.04 
+            text = "AH1" 
+        intervals [12]:
+            xmin = 1.04 
+            xmax = 1.35 
+            text = "spn" 
+        intervals [13]:
+            xmin = 1.35 
+            xmax = 2.31 
+            text = "spn" 
+        intervals [14]:
+            xmin = 2.31 
+            xmax = 2.34 
+            text = "M" 
+        intervals [15]:
+            xmin = 2.34 
+            xmax = 2.37 
+            text = "IH1" 
+        intervals [16]:
+            xmin = 2.37 
+            xmax = 2.45 
+            text = "L" 
+        intervals [17]:
+            xmin = 2.45 
+            xmax = 2.48 
+            text = "AH0" 
+        intervals [18]:
+            xmin = 2.48 
+            xmax = 2.54 
+            text = "M" 
+        intervals [19]:
+            xmin = 2.54 
+            xmax = 2.6 
+            text = "IY2" 
+        intervals [20]:
+            xmin = 2.6 
+            xmax = 2.64 
+            text = "T" 
+        intervals [21]:
+            xmin = 2.64 
+            xmax = 2.7 
+            text = "ER0" 
+        intervals [22]:
+            xmin = 2.7 
+            xmax = 2.73 
+            text = "HH" 
+        intervals [23]:
+            xmin = 2.73 
+            xmax = 2.78 
+            text = "UW1" 
+        intervals [24]:
+            xmin = 2.78 
+            xmax = 2.89 
+            text = "P" 
+        intervals [25]:
+            xmin = 2.89 
+            xmax = 2.92 
+            text = "AA1" 
+        intervals [26]:
+            xmin = 2.92 
+            xmax = 2.96 
+            text = "N" 

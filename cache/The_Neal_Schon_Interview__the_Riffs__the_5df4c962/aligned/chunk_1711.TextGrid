@@ -1,0 +1,164 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0 
+xmax = 2.83 
+tiers? <exists> 
+size = 2 
+item []: 
+    item [1]:
+        class = "IntervalTier" 
+        name = "words" 
+        xmin = 0 
+        xmax = 2.83 
+        intervals: size = 11 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.09 
+            text = "" 
+        intervals [2]:
+            xmin = 0.09 
+            xmax = 0.36 
+            text = "makes" 
+        intervals [3]:
+            xmin = 0.36 
+            xmax = 0.58 
+            text = "those" 
+        intervals [4]:
+            xmin = 0.58 
+            xmax = 0.99 
+            text = "work" 
+        intervals [5]:
+            xmin = 0.99 
+            xmax = 1.2 
+            text = "" 
+        intervals [6]:
+            xmin = 1.2 
+            xmax = 1.49 
+            text = "yeah" 
+        intervals [7]:
+            xmin = 1.49 
+            xmax = 1.92 
+            text = "" 
+        intervals [8]:
+            xmin = 1.92 
+            xmax = 2.31 
+            text = "neil" 
+        intervals [9]:
+            xmin = 2.31 
+            xmax = 2.52 
+            text = "" 
+        intervals [10]:
+            xmin = 2.52 
+            xmax = 2.67 
+            text = "it's" 
+        intervals [11]:
+            xmin = 2.67 
+            xmax = 2.83 
+            text = "such" 
+    item [2]:
+        class = "IntervalTier" 
+        name = "phones" 
+        xmin = 0 
+        xmax = 2.83 
+        intervals: size = 25 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.09 
+            text = "" 
+        intervals [2]:
+            xmin = 0.09 
+            xmax = 0.15 
+            text = "M" 
+        intervals [3]:
+            xmin = 0.15 
+            xmax = 0.24 
+            text = "EY1" 
+        intervals [4]:
+            xmin = 0.24 
+            xmax = 0.3 
+            text = "K" 
+        intervals [5]:
+            xmin = 0.3 
+            xmax = 0.36 
+            text = "S" 
+        intervals [6]:
+            xmin = 0.36 
+            xmax = 0.4 
+            text = "DH" 
+        intervals [7]:
+            xmin = 0.4 
+            xmax = 0.49 
+            text = "OW1" 
+        intervals [8]:
+            xmin = 0.49 
+            xmax = 0.58 
+            text = "Z" 
+        intervals [9]:
+            xmin = 0.58 
+            xmax = 0.68 
+            text = "W" 
+        intervals [10]:
+            xmin = 0.68 
+            xmax = 0.82 
+            text = "ER1" 
+        intervals [11]:
+            xmin = 0.82 
+            xmax = 0.99 
+            text = "K" 
+        intervals [12]:
+            xmin = 0.99 
+            xmax = 1.2 
+            text = "" 
+        intervals [13]:
+            xmin = 1.2 
+            xmax = 1.34 
+            text = "Y" 
+        intervals [14]:
+            xmin = 1.34 
+            xmax = 1.49 
+            text = "AE1" 
+        intervals [15]:
+            xmin = 1.49 
+            xmax = 1.92 
+            text = "" 
+        intervals [16]:
+            xmin = 1.92 
+            xmax = 1.99 
+            text = "N" 
+        intervals [17]:
+            xmin = 1.99 
+            xmax = 2.11 
+            text = "IY1" 
+        intervals [18]:
+            xmin = 2.11 
+            xmax = 2.31 
+            text = "L" 
+        intervals [19]:
+            xmin = 2.31 
+            xmax = 2.52 
+            text = "" 
+        intervals [20]:
+            xmin = 2.52 
+            xmax = 2.6 
+            text = "IH0" 
+        intervals [21]:
+            xmin = 2.6 
+            xmax = 2.64 
+            text = "T" 
+        intervals [22]:
+            xmin = 2.64 
+            xmax = 2.67 
+            text = "S" 
+        intervals [23]:
+            xmin = 2.67 
+            xmax = 2.75 
+            text = "S" 
+        intervals [24]:
+            xmin = 2.75 
+            xmax = 2.82 
+            text = "AH1" 
+        intervals [25]:
+            xmin = 2.82 
+            xmax = 2.83 
+            text = "CH" 
