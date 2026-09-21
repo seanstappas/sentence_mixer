@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 Inventory Builder for Sentence Mixing
-Parses Praat .TextGrid alignment files and source video manifests into a searchable
-unit database (words and phonemes) with global video timestamps.
+Parses Praat .TextGrid alignment files and source video manifests into a searchable,
+versioned unit database (InventoryIndex) with sample-accurate intervals, speaker
+eligibility, ordered event streams, and backward-compatible legacy views.
 """
+
+from __future__ import annotations
 
 import argparse
 import glob
@@ -11,7 +14,8 @@ import json
 import os
 import re
 import sys
-from typing import Dict, List, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -21,13 +25,24 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+from contracts import (
+    INVENTORY_SCHEMA_VERSION,
+    AlignedEvent,
+    InventoryIndex,
+    SourceRecord,
+    UtteranceRecord,
+    WordOccurrence,
+)
+from lexicon import get_phone_stress, strip_phone_stress
+from media_time import extract_source_record, seconds_to_samples
+
 
 def parse_textgrid_pure_python(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Pure Python parser for Praat .TextGrid files (both short and long text formats).
     Returns dict mapping tier name -> list of intervals [{'xmin': float, 'xmax': float, 'text': str}].
     """
-    tiers = {}
+    tiers: Dict[str, List[Dict[str, Any]]] = {}
     with open(tg_path, "r", encoding="utf-8", errors="replace") as f:
         lines = [line.strip() for line in f if line.strip()]
 
@@ -72,149 +87,305 @@ def parse_textgrid_pure_python(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
     return tiers
 
 
+def parse_textgrid(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Parse TextGrid using praatio if available, else pure python fallback."""
+    try:
+        from praatio import textgrid
+        tg = textgrid.openTextgrid(tg_path, False)
+        parsed_tiers: Dict[str, List[Dict[str, Any]]] = {}
+        for tname in tg.tierNames:
+            entries = []
+            for entry in tg.getTier(tname).entries:
+                entries.append({"xmin": entry.start, "xmax": entry.end, "text": entry.label})
+            parsed_tiers[tname.lower()] = entries
+        return parsed_tiers
+    except Exception:
+        return parse_textgrid_pure_python(tg_path)
+
+
 def build_units_inventory(
     aligned_dir: str,
     manifest_path: str,
-    output_index_path: str
+    output_index_path: str,
+    speaker_id: Optional[str] = None,
+    single_speaker_verified: bool = False,
+    source_record: Optional[SourceRecord] = None,
 ) -> Dict[str, Any]:
     """
     Builds a JSON unit inventory of all words and phonemes from aligned TextGrids.
+    Produces an InventoryIndex conforming to the v2.0.0 schema while maintaining
+    legacy words_inventory and phones_inventory dictionaries for backward compatibility.
     """
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    manifest_p = Path(manifest_path).resolve()
+    with open(manifest_p, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    source_video = manifest["source_video"]
-    chunks_meta = manifest["chunks"]
+    # Resolve source video path relative to manifest's parent directory
+    rel_video = manifest.get("source_video", "")
+    source_video_path = (manifest_p.parent / rel_video).resolve() if rel_video else manifest_p.parent
 
-    words_inventory: Dict[str, List[Dict[str, Any]]] = {}
-    phones_inventory: Dict[str, List[Dict[str, Any]]] = {}
+    # Determine speaker identity & verification
+    effective_speaker = (
+        speaker_id
+        or manifest.get("speaker_id")
+        or "default_speaker"
+    )
+    is_verified = (
+        single_speaker_verified
+        or manifest.get("single_speaker_verified", False)
+        or manifest.get("assume_single_speaker", False)
+    )
 
+    # Source Record & native sample rate
+    if source_record is None:
+        try:
+            source_record = extract_source_record(source_video_path)
+        except Exception:
+            # Fallback for synthetic test fixtures without video file
+            source_record = SourceRecord(
+                content_id=Path(source_video_path).stem or "synth_source",
+                source_path=str(source_video_path),
+                native_sample_rate=48000,
+                native_channels=2,
+            )
+
+    sr = source_record.native_sample_rate
+    content_id = source_record.content_id
+
+    chunks_meta = manifest.get("chunks", {})
     tg_files = glob.glob(os.path.join(aligned_dir, "*.TextGrid"))
     print(f"[*] Found {len(tg_files)} .TextGrid files in {aligned_dir}")
 
+    events_dict: Dict[str, AlignedEvent] = {}
+    words_dict: Dict[str, WordOccurrence] = {}
+    utterances_dict: Dict[str, UtteranceRecord] = {}
+
+    word_to_word_ids: Dict[str, List[str]] = {}
+    phone_to_event_ids: Dict[str, List[str]] = {}
+    base_phone_to_event_ids: Dict[str, List[str]] = {}
+
+    # Legacy inventory structures for backward compatibility
+    legacy_words: Dict[str, List[Dict[str, Any]]] = {}
+    legacy_phones: Dict[str, List[Dict[str, Any]]] = {}
+
+    total_events_indexed = 0
     total_words_indexed = 0
-    total_phones_indexed = 0
+
+    # Sort textgrid files for deterministic event ordering
+    tg_files = sorted(tg_files)
 
     for tg_file in tg_files:
-        chunk_id = os.path.splitext(os.path.basename(tg_file))[0]
+        chunk_id = Path(tg_file).stem
         if chunk_id not in chunks_meta:
             continue
 
-        chunk_start_sec = float(chunks_meta[chunk_id]["start_sec"])
+        chunk_info = chunks_meta[chunk_id]
+        chunk_start_sec = float(chunk_info.get("start_sec", 0.0))
+        chunk_end_sec = float(chunk_info.get("end_sec", 0.0))
+        chunk_text = chunk_info.get("text", "")
 
-        # Attempt to parse TextGrid using praatio if installed, else fallback to built-in parser
-        parsed_tiers = None
-        try:
-            from praatio import textgrid
-            tg = textgrid.openTextgrid(tg_file, False)
-            parsed_tiers = {}
-            for tname in tg.tierNames:
-                entries = []
-                for entry in tg.getTier(tname).entries:
-                    entries.append({"xmin": entry.start, "xmax": entry.end, "text": entry.label})
-                parsed_tiers[tname.lower()] = entries
-        except Exception:
-            parsed_tiers = parse_textgrid_pure_python(tg_file)
+        utt_start_sample = seconds_to_samples(chunk_start_sec, sr)
+        utt_end_sample = seconds_to_samples(chunk_end_sec, sr)
 
-        # Process words tier
+        utterances_dict[chunk_id] = UtteranceRecord(
+            utterance_id=chunk_id,
+            source_content_id=content_id,
+            start_sample=utt_start_sample,
+            end_sample=utt_end_sample,
+            transcript=chunk_text,
+            speaker_id=effective_speaker,
+            verification_method="verified_manifest" if is_verified else "unverified",
+        )
+
+        parsed_tiers = parse_textgrid(tg_file)
+        phones_tier = parsed_tiers.get("phones", [])
         words_tier = parsed_tiers.get("words", [])
-        for entry in words_tier:
-            raw_text = entry["text"].strip()
-            clean_word = re.sub(r"[^\w\']", "", raw_text).lower()
-            # Skip empty, silence, or noise tokens
+
+        # 1. Process phone tier into AlignedEvents
+        chunk_event_ids: List[str] = []
+        for p_idx, p_entry in enumerate(phones_tier):
+            raw_label = p_entry["text"].strip()
+            loc_xmin = float(p_entry["xmin"])
+            loc_xmax = float(p_entry["xmax"])
+            if loc_xmax <= loc_xmin:
+                continue
+
+            glob_start_sec = chunk_start_sec + loc_xmin
+            glob_end_sec = chunk_start_sec + loc_xmax
+            start_sample = seconds_to_samples(glob_start_sec, sr)
+            end_sample = seconds_to_samples(glob_end_sec, sr)
+
+            clean_label = raw_label.upper()
+            kind: Literal["phone", "silence", "noise"]
+            if not clean_label or clean_label in {"SIL", "SP", "<EPS>", ""}:
+                kind = "silence"
+                label = "sil"
+                base_phone = "sil"
+                stress = None
+            elif clean_label in {"SPN", "NOISE", "<UNK>"}:
+                kind = "noise"
+                label = "spn"
+                base_phone = "spn"
+                stress = None
+            else:
+                kind = "phone"
+                label = clean_label
+                base_phone = strip_phone_stress(clean_label)
+                stress = get_phone_stress(clean_label)
+
+            event_id = f"ev_{content_id}_{chunk_id}_{p_idx:04d}"
+            ev = AlignedEvent(
+                event_id=event_id,
+                source_content_id=content_id,
+                utterance_id=chunk_id,
+                speaker_id=effective_speaker,
+                kind=kind,
+                start_sample=start_sample,
+                end_sample=end_sample,
+                label=label,
+                base_phone=base_phone,
+                stress=stress,
+            )
+
+            # Link predecessors and successors within the chunk
+            if chunk_event_ids:
+                prev_id = chunk_event_ids[-1]
+                ev.predecessor_id = prev_id
+                events_dict[prev_id].successor_id = event_id
+
+            events_dict[event_id] = ev
+            chunk_event_ids.append(event_id)
+            total_events_indexed += 1
+
+            if kind == "phone":
+                if label not in phone_to_event_ids:
+                    phone_to_event_ids[label] = []
+                phone_to_event_ids[label].append(event_id)
+
+                if base_phone not in base_phone_to_event_ids:
+                    base_phone_to_event_ids[base_phone] = []
+                base_phone_to_event_ids[base_phone].append(event_id)
+
+                # Legacy phone entry
+                if label not in legacy_phones:
+                    legacy_phones[label] = []
+                legacy_phones[label].append({
+                    "source_video": str(source_video_path),
+                    "chunk_id": chunk_id,
+                    "label": label,
+                    "start_sec": glob_start_sec,
+                    "end_sec": glob_end_sec,
+                    "duration": glob_end_sec - glob_start_sec,
+                    "sample_start": start_sample,
+                    "sample_end": end_sample,
+                })
+
+        # 2. Process words tier and associate with constituent phone events
+        for w_idx, w_entry in enumerate(words_tier):
+            raw_w = w_entry["text"].strip()
+            clean_word = re.sub(r"[^\w\'-]", "", raw_w).lower()
             if not clean_word or clean_word in {"sil", "sp", "spn", "eps", "<eps>"}:
                 continue
 
-            local_start = float(entry["xmin"])
-            local_end = float(entry["xmax"])
-            duration = local_end - local_start
-            if duration <= 0.01:
+            w_loc_xmin = float(w_entry["xmin"])
+            w_loc_xmax = float(w_entry["xmax"])
+            if w_loc_xmax <= w_loc_xmin:
                 continue
 
-            global_start = chunk_start_sec + local_start
-            global_end = chunk_start_sec + local_end
+            w_glob_start = chunk_start_sec + w_loc_xmin
+            w_glob_end = chunk_start_sec + w_loc_xmax
+            w_start_sample = seconds_to_samples(w_glob_start, sr)
+            w_end_sample = seconds_to_samples(w_glob_end, sr)
 
-            item = {
-                "source_video": source_video,
-                "chunk_id": chunk_id,
-                "label": clean_word,
-                "start_sec": round(global_start, 4),
-                "end_sec": round(global_end, 4),
-                "duration": round(duration, 4),
-                "type": "word"
-            }
+            # Find phone events falling within this word's sample range
+            constituent_ids: List[str] = []
+            realized_phones: List[str] = []
+            for ev_id in chunk_event_ids:
+                ev = events_dict[ev_id]
+                if ev.kind == "phone":
+                    # Check overlap with word interval
+                    if max(ev.start_sample, w_start_sample) < min(ev.end_sample, w_end_sample):
+                        constituent_ids.append(ev_id)
+                        realized_phones.append(ev.label)
+                        ev.word_occurrence_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
 
-            if clean_word not in words_inventory:
-                words_inventory[clean_word] = []
-            words_inventory[clean_word].append(item)
+            if not constituent_ids:
+                continue
+
+            word_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
+            wo = WordOccurrence(
+                word_id=word_id,
+                source_content_id=content_id,
+                speaker_id=effective_speaker,
+                word_normalized=clean_word,
+                word_original=raw_w,
+                start_sample=w_start_sample,
+                end_sample=w_end_sample,
+                phone_event_ids=constituent_ids,
+                realized_phones=realized_phones,
+            )
+            words_dict[word_id] = wo
             total_words_indexed += 1
 
-        # Process phones tier
-        phones_tier = parsed_tiers.get("phones", [])
-        for entry in phones_tier:
-            raw_phone = entry["text"].strip().upper()
-            if not raw_phone or raw_phone in {"SIL", "SP", "SPN", "EPS", "<EPS>", ""}:
-                continue
+            if clean_word not in word_to_word_ids:
+                word_to_word_ids[clean_word] = []
+            word_to_word_ids[clean_word].append(word_id)
 
-            # Strip stress numbers for base phone matching (e.g., IY1 -> IY)
-            base_phone = re.sub(r"\d", "", raw_phone)
-            if not base_phone:
-                continue
-
-            local_start = float(entry["xmin"])
-            local_end = float(entry["xmax"])
-            duration = local_end - local_start
-            if duration <= 0.01:
-                continue
-
-            global_start = chunk_start_sec + local_start
-            global_end = chunk_start_sec + local_end
-
-            item = {
-                "source_video": source_video,
+            # Legacy word entry
+            if clean_word not in legacy_words:
+                legacy_words[clean_word] = []
+            legacy_words[clean_word].append({
+                "source_video": str(source_video_path),
                 "chunk_id": chunk_id,
-                "label": raw_phone,
-                "base_phone": base_phone,
-                "start_sec": round(global_start, 4),
-                "end_sec": round(global_end, 4),
-                "duration": round(duration, 4),
-                "type": "phone"
-            }
+                "label": clean_word,
+                "start_sec": w_glob_start,
+                "end_sec": w_glob_end,
+                "duration": w_glob_end - w_glob_start,
+                "sample_start": w_start_sample,
+                "sample_end": w_end_sample,
+                "phones": realized_phones,
+            })
 
-            # Index by both exact phone (with stress) and base phone
-            for key in {raw_phone, base_phone}:
-                if key not in phones_inventory:
-                    phones_inventory[key] = []
-                phones_inventory[key].append(item)
+    inv = InventoryIndex(
+        schema_version=INVENTORY_SCHEMA_VERSION,
+        sources={content_id: source_record},
+        utterances=utterances_dict,
+        events=events_dict,
+        words=words_dict,
+        word_to_word_ids=word_to_word_ids,
+        phone_to_event_ids=phone_to_event_ids,
+        base_phone_to_event_ids=base_phone_to_event_ids,
+    )
+    inv.validate()
 
-            total_phones_indexed += 1
+    out_dict = inv.to_dict()
+    # Add legacy compatibility fields
+    out_dict["source_video"] = str(source_video_path)
+    out_dict["words_inventory"] = legacy_words
+    out_dict["phones_inventory"] = legacy_phones
 
-    inventory_data = {
-        "source_video": source_video,
-        "total_unique_words": len(words_inventory),
-        "total_words_instances": total_words_indexed,
-        "total_unique_phones": len(phones_inventory),
-        "total_phones_instances": total_phones_indexed,
-        "words": words_inventory,
-        "phones": phones_inventory
-    }
+    out_p = Path(output_index_path).resolve()
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_p, "w", encoding="utf-8") as f:
+        json.dump(out_dict, f, indent=2)
 
-    os.makedirs(os.path.dirname(os.path.abspath(output_index_path)), exist_ok=True)
-    with open(output_index_path, "w", encoding="utf-8") as f:
-        json.dump(inventory_data, f, indent=2)
-
-    print(f"[+] Inventory build complete:")
-    print(f"    - Unique words: {len(words_inventory)} (Total instances: {total_words_indexed})")
-    print(f"    - Unique phonemes: {len(phones_inventory)} (Total instances: {total_phones_indexed})")
-    print(f"    - Index saved to: {output_index_path}")
-    return inventory_data
+    print(f"[+] Successfully indexed {total_words_indexed} words and {total_events_indexed} events to {out_p}")
+    return out_dict
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build unit inventory from aligned TextGrids.")
-    parser.add_argument("--aligned", required=True, help="Directory containing .TextGrid files")
+    parser = argparse.ArgumentParser(description="Build units inventory from aligned TextGrids.")
+    parser.add_argument("--aligned-dir", required=True, help="Directory containing Praat .TextGrid files")
     parser.add_argument("--manifest", required=True, help="Path to corpus_manifest.json")
-    parser.add_argument("--output", default="./inventory/units_index.json", help="Output JSON index path")
+    parser.add_argument("--output", default="./units_index.json", help="Path to output units_index.json")
+    parser.add_argument("--speaker", default=None, help="Speaker identity")
+    parser.add_argument("--assume-single-speaker", action="store_true", help="Assume single speaker")
     args = parser.parse_args()
 
-    build_units_inventory(args.aligned, args.manifest, args.output)
+    build_units_inventory(
+        args.aligned_dir,
+        args.manifest,
+        args.output,
+        speaker_id=args.speaker,
+        single_speaker_verified=args.assume_single_speaker,
+    )

@@ -7,8 +7,6 @@ and falling back to G2P phonemes when words are unavailable.
 
 import argparse
 import json
-import os
-import random
 import re
 import sys
 from typing import List, Dict, Any, Tuple

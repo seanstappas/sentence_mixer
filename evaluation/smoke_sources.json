@@ -1,0 +1,16 @@
+[
+  {
+    "video": "..\\input\\obi_wan_ep2.mp4",
+    "vtt": "..\\input\\obi_wan_ep2.en.vtt",
+    "speaker_id": "obi-wan",
+    "recording_id": "star_wars_ep2",
+    "single_speaker_verified": true
+  },
+  {
+    "video": "..\\input\\obi_wan_ep3.mp4",
+    "vtt": "..\\input\\obi_wan_ep3.en.vtt",
+    "speaker_id": "obi-wan",
+    "recording_id": "star_wars_ep3",
+    "single_speaker_verified": true
+  }
+]

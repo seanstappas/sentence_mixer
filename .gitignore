@@ -1,2 +1,17 @@
 /input
 /.vscode
+/.venv
+/.mamba
+/bin
+/.build
+/cache
+/output
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/.agents
+environment-win-64.lock.yml
+requirements-dev.lock
+requirements-wavlm.lock

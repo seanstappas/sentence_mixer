@@ -1,0 +1,7 @@
+{
+  "model_id": "microsoft/wavlm-base-plus",
+  "revision": "4c66d4806a428f2e922ccfa1a962776e232d487b",
+  "layer": 6,
+  "feature_dim": 768,
+  "sample_rate": 16000
+}

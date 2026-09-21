@@ -130,10 +130,60 @@ python "tools/sentence_mixer/run_mixer.py" mix \
   --render "output/mix.mp4"
 ```
 
+### 3. Advanced Variable-Span Unit Selection & Features (Milestones M0-M6)
+
+The engine now supports variable-span selection (Phrase -> Word -> Whole Phone), canonical edit planning, master PCM-first rendering, and optional WavLM neural feature reranking:
+
+```bash
+# Variable-span unit selection with basic acoustic features
+python run_mixer.py mix \
+  --manifest evaluation/smoke_sources.json \
+  --speaker obi-wan \
+  --text "Hello there" \
+  --selector span \
+  --features basic \
+  --mode source-derived \
+  --fps 30000/1001 \
+  --render output/mix.mp4 \
+  --plan output/mix.plan.json \
+  --xml output/mix.xml
+
+# Variable-span unit selection with neural WavLM feature reranking
+python run_mixer.py mix \
+  --manifest evaluation/smoke_sources.json \
+  --speaker obi-wan \
+  --text "Hello there" \
+  --selector span \
+  --features wavlm \
+  --mode source-derived \
+  --render output/mix_wavlm.mp4
+
+# Validate output timing, sample count, provenance, and XML agreement
+python tools/validate_mix.py --stem output/mix
+
+# Run the automated multi-stratum evaluation suite
+python tools/evaluate.py --suite evaluation/suite.json --output-dir output/evaluation
+```
+
+#### Supported CLI Options
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--selector legacy\|span` | Unit selection backend (`legacy` word-first or `span` variable-span) | `legacy` |
+| `--speaker <id>` | Filter inventory to verified speaker identity | `None` (or auto-resolved if single verified speaker) |
+| `--assume-single-speaker` | Explicit assertion of single-speaker status | `False` |
+| `--mode source-derived\|cuts-only` | Join smoothing mode | `source-derived` |
+| `--features basic\|wavlm` | Acoustic feature backend (`basic` continuous acoustics or `wavlm` neural) | `basic` |
+| `--fps <rate>` | Rational framerate (e.g. `30000/1001`, `24`, `25`, `29.97`) | `30000/1001` |
+| `--plan <path>` | Path to output canonical `EditPlan` JSON | `<render_stem>.plan.json` |
+| `--xml <path>` | Optional Final Cut Pro 7 / Premiere Pro XML timeline | `None` |
+| `--guide <audio>` | Optional human prosody guide audio (analysis-only) | `None` |
+| `--force-realign` | Invalidate cache and force fresh MFA alignment | `False` |
+
 ### 4. Force Re-alignment
 If you modified subtitles or added custom dictionary entries:
 ```bash
-python "tools/sentence_mixer/run_mixer.py" mix \
+python run_mixer.py mix \
   --video "path/to/source_video.mp4" \
   --text "Your sentence" \
   --force-realign

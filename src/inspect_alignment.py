@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -19,11 +18,14 @@ if sys.platform == "win32":
         pass
 
 
+from typing import Optional
+
+
 def inspect_chunk(
     chunk_id: str,
     aligned_dir: str,
-    corpus_dir: str = None,
-    plot_path: str = None
+    corpus_dir: Optional[str] = None,
+    plot_path: Optional[str] = None
 ):
     from praatio import textgrid
 

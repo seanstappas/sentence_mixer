@@ -1,0 +1,26 @@
+{
+  "suite_name": "Star Wars Sentence Mixer Evaluation Suite",
+  "version": "1.0.0",
+  "manifest": "smoke_sources.json",
+  "speaker_id": "obi-wan",
+  "cases": [
+    {
+      "case_id": "case_intact_phrase_01",
+      "stratum": "intact_phrases",
+      "target_text": "Hello there",
+      "description": "Classic intact Obi-Wan greeting in Episode III"
+    },
+    {
+      "case_id": "case_novel_combination_01",
+      "stratum": "novel_combinations",
+      "target_text": "Anakin is chancellor",
+      "description": "Novel combination of recorded words across Episode II and III"
+    },
+    {
+      "case_id": "case_subword_01",
+      "stratum": "subword_fallback",
+      "target_text": "Geonosis and Kamino",
+      "description": "Proper names requiring pronunciation lookup and subword assembly"
+    }
+  ]
+}

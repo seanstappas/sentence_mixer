@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentence_mixer"
+version = "0.1.0"
+description = "Source-Preserving Sentence Mixing Pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "soundfile",
+    "librosa",
+    "praatio",
+    "webvtt-py",
+    "g2p_en",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "pip-tools",
+]
+wavlm = [
+    "torch",
+    "transformers",
+    "huggingface-hub",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+markers = [
+    "model: tests that load or evaluate neural models (e.g. WavLM)",
+    "real_corpus: integration tests requiring real audio/video corpus alignment and rendering",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E402"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+ignore_missing_imports = true
+disable_error_code = ["union-attr"]

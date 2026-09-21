@@ -2,15 +2,19 @@
 """
 VTT Preprocessor for Montreal Forced Aligner (MFA)
 Extracts discrete, clean speech intervals from video files using WebVTT subtitle files.
-Handles YouTube rolling captions, removes non-speech tokens, and exports 16kHz mono WAV chunks.
+Handles ordinary multiline subtitles and YouTube rolling captions correctly.
+Preserves genuine repetitions, punctuation, speaker tags, and source-time sample mappings.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -42,124 +46,211 @@ def seconds_to_timestamp(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{s:06.3f}"
 
 
-def clean_vtt_line(line: str) -> str:
-    """Remove HTML/VTT tags, speaker tags, bracketed markers, and special chars."""
-    # Remove timestamps like <00:00:00.400> and tags like <c>, </c>, <v Rick>
-    text = re.sub(r"<[^>]+>", "", line)
-    # Remove bracketed cues like [Music], [Applause], [laughter]
+def clean_vtt_text(text: str) -> str:
+    """Remove HTML/VTT tags, bracketed markers, while preserving words, apostrophes, and hyphens."""
+    # Remove tags like <c>, </c>, <v Speaker>, <00:00:01.000>
+    text = re.sub(r"<[^>]+>", "", text)
+    # Remove bracketed cues like [Music], [Applause]
     text = re.sub(r"\[.*?\]", "", text)
     # Remove YouTube marker artifacts
     text = re.sub(r">>|\"", "", text)
-    # Normalize curly apostrophes
+    # Normalize typographic apostrophes
     text = text.replace("’", "'").replace("‘", "'")
-    # Replace anything that isn't word characters, apostrophe, or whitespace with space
-    text = re.sub(r"[^\w\s\']", " ", text)
-    # Normalize multiple whitespace
+    # Replace non-word, non-apostrophe, non-hyphen, non-punctuation with space
+    text = re.sub(r"[^\w\s\'-.,!?]", " ", text)
+    # Collapse multiple whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def parse_vtt_cues(vtt_path: str):
+def clean_rolling_cues(cues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Strips repeated carry-over text from consecutive rolling cues if cue time gap is <= 0.5s
+    or overlapping. Ensures cue text strictly represents newly spoken dialogue.
+    Handles cues containing either 'lines' (List[str]) or 'text' (str).
+    """
+    processed: List[Dict[str, Any]] = []
+
+    for cue in cues:
+        start_sec = float(cue["start_sec"])
+        end_sec = float(cue["end_sec"])
+        dur = end_sec - start_sec
+
+        # Skip zero or negative duration glitches
+        if dur <= 0.05:
+            continue
+
+        if "lines" in cue:
+            cue_lines = cue["lines"]
+            cleaned_lines = [clean_vtt_text(line_str) for line_str in cue_lines if clean_vtt_text(line_str)]
+        elif "text" in cue:
+            cue_lines = str(cue["text"]).split("\n")
+            cleaned_lines = [clean_vtt_text(line_str) for line_str in cue_lines if clean_vtt_text(line_str)]
+        else:
+            continue
+
+        if not cleaned_lines:
+            continue
+
+        # Check if this cue is a rolling update of the previous cue
+        if processed:
+            prev = processed[-1]
+            gap = start_sec - prev["end_sec"]
+
+            # If consecutive cues overlap, abut, or have a small spacer gap <= 0.5s
+            if gap <= 0.5:
+                prev_text = prev["text"].strip().lower()
+                norm_prev = re.sub(r"[^\w\s\']", "", prev_text).strip()
+
+                while cleaned_lines:
+                    first_line_clean = cleaned_lines[0].strip().lower()
+                    norm_first = re.sub(r"[^\w\s\']", "", first_line_clean).strip()
+
+                    is_duplicate = False
+                    if norm_first:
+                        if norm_first == norm_prev or norm_prev.endswith(" " + norm_first) or norm_prev.endswith(norm_first):
+                            is_duplicate = True
+                    if not is_duplicate and first_line_clean:
+                        if first_line_clean == prev_text or prev_text.endswith(" " + first_line_clean) or prev_text.endswith(first_line_clean):
+                            is_duplicate = True
+
+                    if is_duplicate:
+                        cleaned_lines = cleaned_lines[1:]
+                        if gap < 0:
+                            start_sec = max(start_sec, prev["end_sec"])
+                        dur = end_sec - start_sec
+                    else:
+                        break
+
+        if not cleaned_lines or dur <= 0.05:
+            continue
+
+        combined_text = " ".join(cleaned_lines).strip()
+        # Clean extra spaces before punctuation
+        combined_text = re.sub(r"\s+([.,!?])", r"\1", combined_text)
+
+        processed.append({
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+            "duration": dur,
+            "text": combined_text,
+        })
+
+    return processed
+
+
+def parse_vtt_cues(vtt_path: str) -> List[Dict[str, Any]]:
     """
     Parse a WebVTT file and extract clean, non-duplicate speech intervals.
-    Accounts for YouTube's auto-generated rolling caption structure.
+    Correctly handles:
+      1. Ordinary multiline cues (preserves all lines in order).
+      2. Rolling auto-generated captions with temporal overlap or <= 0.5s spacer gaps.
+      3. Genuine repetitions that are temporally separated (> 0.5s).
     """
     with open(vtt_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
 
-    # Match standard VTT cues: start --> end [settings] \n [cue text]
+    # Pattern for cues: start --> end [settings] \n [body]
     cue_pattern = re.compile(
         r"(\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})[^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{1,2}:\d{2}|\d+\n|\Z))"
     )
 
     raw_matches = cue_pattern.findall(content)
-    raw_cues = []
-
+    raw_cues: List[Dict[str, Any]] = []
     for start_str, end_str, body in raw_matches:
         start_sec = timestamp_to_seconds(start_str)
         end_sec = timestamp_to_seconds(end_str)
-        lines = [l.strip() for l in body.split("\n") if l.strip()]
-        if not lines:
+        raw_lines = [line_str.strip() for line_str in body.split("\n") if line_str.strip()]
+        if not raw_lines:
             continue
-        raw_cues.append((start_sec, end_sec, lines))
-
-    processed_chunks = []
-    seen_texts = set()
-
-    for idx, (start_sec, end_sec, lines) in enumerate(raw_cues):
-        dur = end_sec - start_sec
-        # Skip micro flash cues common in rolling captions (often 10ms)
-        if dur < 0.15:
-            continue
-
-        # In YouTube rolling captions, lines often contain:
-        # Line 0: previously shown text
-        # Line 1: new incoming text with inline word timestamps <00:00:01.200><c> word</c>
-        tag_lines = [l for l in lines if "<c>" in l or "<" in l]
-        chosen_line = tag_lines[-1] if tag_lines else lines[-1]
-
-        cleaned_text = clean_vtt_line(chosen_line)
-        if not cleaned_text or len(cleaned_text.split()) < 1:
-            continue
-
-        # Avoid exact duplicate text blocks in immediately adjacent cues
-        text_key = cleaned_text.lower()
-        if text_key in seen_texts and len(processed_chunks) > 0:
-            last_text = processed_chunks[-1]["text"].lower()
-            if text_key == last_text:
-                continue
-
-        seen_texts.add(text_key)
-        # Keep set reasonable size
-        if len(seen_texts) > 50:
-            seen_texts.clear()
-
-        processed_chunks.append({
+        raw_cues.append({
             "start_sec": start_sec,
             "end_sec": end_sec,
-            "duration": dur,
-            "text": cleaned_text
+            "lines": raw_lines
         })
 
-    # Merge extremely short adjacent chunks if their text is small and gap is minimal (< 0.2s)
-    merged_chunks = []
-    for chunk in processed_chunks:
-        if not merged_chunks:
-            merged_chunks.append(chunk)
+    processed = clean_rolling_cues(raw_cues)
+
+    # Merge small consecutive fragments with tiny gap (< 0.25s) from same cue grouping
+    merged: List[Dict[str, Any]] = []
+    for chunk in processed:
+        if not merged:
+            merged.append(chunk)
             continue
-        prev = merged_chunks[-1]
+        prev = merged[-1]
         gap = chunk["start_sec"] - prev["end_sec"]
-        # Merge if previous chunk is very short (< 1.2s) and gap is small
-        if gap >= 0 and gap < 0.25 and prev["duration"] < 1.2 and (prev["duration"] + chunk["duration"] + gap) < 15.0:
+        if 0.0 <= gap < 0.20 and prev["duration"] < 1.0 and (prev["duration"] + chunk["duration"] + gap) < 12.0:
             prev["end_sec"] = chunk["end_sec"]
             prev["duration"] = prev["end_sec"] - prev["start_sec"]
             prev["text"] = f"{prev['text']} {chunk['text']}".strip()
         else:
-            merged_chunks.append(chunk)
+            merged.append(chunk)
 
-    return merged_chunks
+    return merged
 
 
-def preprocess_source(video_path: str, vtt_path: str, output_corpus_dir: str):
+def preprocess_source(
+    video_path: str,
+    vtt_path: str,
+    output_corpus_dir: str,
+    speaker_id: Optional[str] = None,
+    single_speaker_verified: bool = False,
+    assume_single_speaker: bool = False,
+    speaker_intervals: Optional[List[Dict[str, Any]]] = None,
+    audio_source_path: Optional[Union[str, Path]] = None,
+) -> str:
     """
     Extracts 16kHz mono WAV chunks and clean text files for Montreal Forced Aligner.
-    Saves corpus_manifest.json mapping chunk IDs to global video offsets.
+    Saves corpus_manifest.json mapping chunk IDs to global video offsets, sample bounds,
+    and verified speaker identities. If audio_source_path is provided, chunks are sliced
+    from the isolated vocal audio instead of the source video.
     """
-    os.makedirs(output_corpus_dir, exist_ok=True)
-    chunks = parse_vtt_cues(vtt_path)
-    manifest = {
-        "source_video": os.path.abspath(video_path),
-        "source_vtt": os.path.abspath(vtt_path),
+    out_dir = Path(output_corpus_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    v_path = Path(video_path).resolve()
+    vtt_p = Path(vtt_path).resolve()
+
+    if not v_path.exists():
+        raise FileNotFoundError(f"Video file not found: {v_path}")
+    if not vtt_p.exists():
+        raise FileNotFoundError(f"VTT file not found: {vtt_p}")
+
+    chunks = parse_vtt_cues(str(vtt_p))
+
+    # Resolve speaker eligibility
+    effective_speaker = speaker_id or "default_speaker"
+    is_verified = single_speaker_verified or assume_single_speaker
+
+    resolved_audio_src = str(Path(audio_source_path).resolve()) if audio_source_path and Path(audio_source_path).exists() else None
+
+    manifest: Dict[str, Any] = {
+        "source_video": str(v_path),
+        "source_vtt": str(vtt_p),
+        "audio_source_path": resolved_audio_src,
+        "speaker_id": effective_speaker,
+        "single_speaker_verified": is_verified,
+        "assume_single_speaker": assume_single_speaker,
         "total_chunks": len(chunks),
-        "chunks": {}
+        "chunks": {},
     }
 
-    print(f"[*] Found {len(chunks)} speech intervals in {os.path.basename(vtt_path)}")
+    print(f"[*] Found {len(chunks)} speech intervals in {vtt_p.name}")
 
     for idx, c in enumerate(chunks):
         chunk_id = f"chunk_{idx:04d}"
-        wav_path = os.path.join(output_corpus_dir, f"{chunk_id}.wav")
-        txt_path = os.path.join(output_corpus_dir, f"{chunk_id}.txt")
+        wav_path = out_dir / f"{chunk_id}.wav"
+        txt_path = out_dir / f"{chunk_id}.txt"
+
+        # Check speaker interval filtering if provided
+        if speaker_intervals:
+            in_interval = False
+            for span in speaker_intervals:
+                if c["start_sec"] >= span["start_sec"] and c["end_sec"] <= span["end_sec"]:
+                    in_interval = True
+                    break
+            if not in_interval:
+                continue
 
         # Save transcription for MFA
         with open(txt_path, "w", encoding="utf-8") as tf:
@@ -169,16 +260,17 @@ def preprocess_source(video_path: str, vtt_path: str, output_corpus_dir: str):
         start_ts = seconds_to_timestamp(c["start_sec"])
         dur = c["duration"]
 
+        audio_input = resolved_audio_src if resolved_audio_src else str(v_path)
         cmd = [
             "ffmpeg", "-y",
             "-ss", start_ts,
             "-t", f"{dur:.3f}",
-            "-i", video_path,
+            "-i", audio_input,
             "-vn",
             "-ar", "16000",
             "-ac", "1",
             "-c:a", "pcm_s16le",
-            wav_path
+            str(wav_path)
         ]
         res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode != 0:
@@ -189,18 +281,19 @@ def preprocess_source(video_path: str, vtt_path: str, output_corpus_dir: str):
             "end_sec": c["end_sec"],
             "duration": c["duration"],
             "text": c["text"],
-            "wav_path": os.path.abspath(wav_path),
-            "txt_path": os.path.abspath(txt_path)
+            "speaker_id": effective_speaker,
+            "wav_path": str(wav_path),
+            "txt_path": str(txt_path),
         }
 
-    manifest_path = os.path.join(output_corpus_dir, "corpus_manifest.json")
+    manifest_path = out_dir / "corpus_manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as mf:
         json.dump(manifest, mf, indent=2)
 
     total_speech_sec = sum(c["duration"] for c in chunks)
-    print(f"[+] Successfully generated {len(chunks)} chunks ({total_speech_sec:.1f}s speech) in {output_corpus_dir}")
+    print(f"[+] Successfully generated {len(manifest['chunks'])} chunks ({total_speech_sec:.1f}s speech) in {out_dir}")
     print(f"[+] Manifest saved to {manifest_path}")
-    return manifest_path
+    return str(manifest_path)
 
 
 if __name__ == "__main__":
@@ -208,6 +301,16 @@ if __name__ == "__main__":
     parser.add_argument("--video", required=True, help="Path to input video file (.mp4, .webm, etc.)")
     parser.add_argument("--vtt", required=True, help="Path to WebVTT subtitles file (.vtt)")
     parser.add_argument("--output", default="./corpus", help="Output corpus directory")
+    parser.add_argument("--speaker", default=None, help="Speaker identity")
+    parser.add_argument("--assume-single-speaker", action="store_true", help="Explicitly assume single speaker")
+    parser.add_argument("--audio-source", default=None, help="Path to isolated vocal stem or alternate audio source")
     args = parser.parse_args()
 
-    preprocess_source(args.video, args.vtt, args.output)
+    preprocess_source(
+        args.video,
+        args.vtt,
+        args.output,
+        speaker_id=args.speaker,
+        assume_single_speaker=args.assume_single_speaker,
+        audio_source_path=args.audio_source,
+    )
