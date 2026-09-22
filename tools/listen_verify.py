@@ -351,7 +351,11 @@ class TransformersBackend(ASRBackend):
             # Fallback without generate_kwargs if unsupported
             res = self.pipe(audio)
 
-        return res.get("text", "").strip()
+        if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
+            return str(res[0].get("text", "")).strip()
+        elif isinstance(res, dict):
+            return str(res.get("text", "")).strip()
+        return ""
 
 
 _BACKEND_CACHE: Dict[str, ASRBackend] = {}

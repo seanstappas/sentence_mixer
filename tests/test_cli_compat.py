@@ -55,7 +55,7 @@ def test_slugify_text():
 
     assert slugify_text("Hello World!") == "hello_world"
     assert slugify_text("Anakin, Chancellor Anakin is evil!!") == "anakin_chancellor_anakin_is_evil"
-    
+
     # Test word boundary truncation and max length limit
     long_phrase = "You have allowed this Sith lord to twist your mind until now you have become the very thing you swore to destroy"
     slug = slugify_text(long_phrase, max_words=8, max_length=40)

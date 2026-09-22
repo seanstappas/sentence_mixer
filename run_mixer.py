@@ -16,7 +16,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,7 +36,7 @@ CACHE_BASE_DIR = SCRIPT_DIR / ".build"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from contracts import InventoryIndex, RationalTime
+from contracts import InventoryIndex, RationalTime, SourceRecord
 from lexicon import Lexicon
 from target_graph import TargetGraphBuilder
 from span_selector import SpanSelector
@@ -152,7 +151,7 @@ def run_mfa_align(
 
     c_path = Path(corpus_dir).resolve()
     out_aligned = Path(output_aligned_dir).resolve()
-    wav_files = sorted(list(c_path.glob("chunk_*.wav")))
+    wav_files = sorted(list(c_path.rglob("chunk_*.wav")))
 
     def _execute_mfa(src_dir: Path, dst_dir: Path):
         if mm_exe and mamba_root:
@@ -205,7 +204,7 @@ def run_mfa_align(
                     if txt.exists():
                         shutil.copy2(str(txt), str(b_corpus / txt.name))
                 _execute_mfa(b_corpus, b_aligned)
-                for tg in b_aligned.glob("*.TextGrid"):
+                for tg in b_aligned.rglob("*.TextGrid"):
                     shutil.move(str(tg), str(out_aligned / tg.name))
             finally:
                 shutil.rmtree(b_corpus, ignore_errors=True)
@@ -233,7 +232,7 @@ def ensure_source_aligned(
         raise FileNotFoundError(f"Source video not found: {v_abs}")
 
     source_id = get_source_id(str(v_abs))
-    CACHE_BASE_DIR / "sources" / source_id
+    (CACHE_BASE_DIR / "sources" / source_id).mkdir(parents=True, exist_ok=True)
     corpus_dir = CACHE_BASE_DIR / "alignment" / source_id / "corpus"
     aligned_dir = CACHE_BASE_DIR / "alignment" / source_id / "aligned"
     manifest_path = corpus_dir / "corpus_manifest.json"
@@ -252,14 +251,7 @@ def ensure_source_aligned(
         # 1. Check if VTT was modified after inventory
         if vtt_candidate and os.path.exists(vtt_candidate) and os.path.getmtime(vtt_candidate) > inv_mtime:
             is_stale = True
-        # 2. Check if preprocessor or inventory builder was modified after inventory
-        prep_code = SCRIPT_DIR / "src" / "vtt_preprocessor.py"
-        inv_code = SCRIPT_DIR / "src" / "inventory_builder.py"
-        if prep_code.exists() and os.path.getmtime(prep_code) > inv_mtime:
-            is_stale = True
-        if inv_code.exists() and os.path.getmtime(inv_code) > inv_mtime:
-            is_stale = True
-        # 3. Check if chunk count changed
+        # 2. Check if chunk count changed
         if not is_stale and manifest_path.exists() and vtt_candidate and os.path.exists(vtt_candidate):
             try:
                 from vtt_preprocessor import parse_vtt_cues
@@ -319,6 +311,7 @@ def ensure_source_aligned(
     os.makedirs(inventory_path.parent, exist_ok=True)
 
     vocal_stem_path: Optional[Path] = None
+    source_rec: Optional[SourceRecord] = None
     if isolate_vocals:
         print("\n--- [0/3] Isolating Vocal Track (audio-separator / Demucs) ---")
         from vocal_isolation import isolate_vocals as run_isolate_vocals
@@ -330,7 +323,7 @@ def ensure_source_aligned(
         )
         from media_time import extract_source_record
         try:
-            extract_source_record(
+            source_rec = extract_source_record(
                 v_abs,
                 build_dir=CACHE_BASE_DIR,
                 vocal_stem_path=vocal_stem_path,
@@ -364,6 +357,7 @@ def ensure_source_aligned(
         str(inventory_path),
         speaker_id=speaker_id,
         single_speaker_verified=single_speaker_verified or assume_single_speaker,
+        source_record=source_rec,
     )
 
     return str(inventory_path)
@@ -482,15 +476,21 @@ def main():
         )
         p.add_argument(
             "--isolate-vocals",
-            action="store_true",
+            action=argparse.BooleanOptionalAction,
             default=False,
             help="Isolate speech stems using audio-separator/Demucs before alignment",
         )
         p.add_argument(
             "--audio-track",
-            choices=["combined", "isolated", "recombined", "both", "all"],
-            default="combined",
-            help="Audio track for rendering: 'combined' (raw full mix), 'isolated' (isolated speech stem), 'recombined' (normalized vocals + original background instrumental), 'both' (combined & isolated), or 'all' (combined, isolated, and recombined) (default: combined)",
+            choices=["raw", "vocals", "recombined", "all", "combined", "isolated", "both"],
+            default="raw",
+            help="Audio track for rendering: 'raw' (raw full mix, formerly combined, default), 'vocals' (formerly isolated speech stem), 'recombined' (normalized vocals + original background instrumental), 'both' (raw & vocals), or 'all' (raw, vocals, and recombined)",
+        )
+        p.add_argument(
+            "--non-interactive",
+            action="store_true",
+            default=False,
+            help="Disable interactive prompts (for OOV words, speaker naming, etc.) and fallback to defaults",
         )
 
     # 1. Mix command
@@ -510,7 +510,7 @@ def main():
     p_prep.add_argument("--assume-single-speaker", action="store_true", help="Assume single speaker")
     p_prep.add_argument(
         "--isolate-vocals",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=False,
         help="Isolate speech stems using audio-separator/Demucs before alignment",
     )
@@ -522,7 +522,7 @@ def main():
     p_align.add_argument("--dict", default=str(SCRIPT_DIR / "dictionaries" / "merged_dictionary.dict"), help="Dictionary path")
     p_align.add_argument(
         "--isolate-vocals",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=False,
         help="Isolate speech stems using audio-separator/Demucs before alignment",
     )
@@ -582,8 +582,8 @@ def main():
                         inventory_paths.append(str(Path(clean).resolve()))
 
         # Align any unaligned sources
-        audio_track = getattr(args, "audio_track", "combined")
-        isolate_vocals_flag = getattr(args, "isolate_vocals", False) or (audio_track in ("isolated", "recombined", "both", "all"))
+        audio_track = getattr(args, "audio_track", "raw")
+        isolate_vocals_flag = getattr(args, "isolate_vocals", False) or (audio_track in ("isolated", "vocals", "recombined", "both", "all"))
         for item in source_items:
             inv_path = ensure_source_aligned(
                 item["video"],
@@ -605,10 +605,12 @@ def main():
 
         # Resolve effective speaker (handle single verified speaker automatically)
         unique_speakers = {wo.speaker_id for wo in inventory_index.words.values() if wo.speaker_id}
-        if len(unique_speakers) == 1:
+        if args.speaker is not None:
+            effective_speaker = args.speaker
+        elif len(unique_speakers) == 1:
             effective_speaker = next(iter(unique_speakers))
         else:
-            effective_speaker = args.speaker
+            effective_speaker = None
 
         slug = slugify_text(args.text)
         if not args.render:
@@ -637,6 +639,13 @@ def main():
                 SCRIPT_DIR / "dictionaries" / "merged_dictionary.dict",
             ]
             lex = Lexicon([p for p in dict_files if p.exists()])
+
+            # Interactive Out-of-Vocabulary (OOV) Learning Assistant (enabled by default unless headless or --non-interactive)
+            from oov_assistant import OOVAssistant
+            is_interactive = sys.stdin.isatty() and not getattr(args, "non_interactive", False)
+            oov_assistant = OOVAssistant(lex, custom_dict_path=SCRIPT_DIR / "dictionaries" / "custom_pronunciations.txt")
+            oov_assistant.resolve_all_in_text(args.text, interactive=is_interactive)
+
             graph_builder = TargetGraphBuilder(lex)
             graph = graph_builder.build(args.text)
 
@@ -682,7 +691,7 @@ def main():
             )
             plan.metadata["features"] = args.features
             plan.metadata["normalize_loudness"] = args.normalize_loudness
-            plan.metadata["isolate_vocals"] = getattr(args, "isolate_vocals", False)
+            plan.metadata["isolate_vocals"] = isolate_vocals_flag
             plan.metadata["audio_track"] = getattr(args, "audio_track", "combined")
             if wavlm_config:
                 plan.metadata["wavlm_config"] = {
@@ -704,7 +713,7 @@ def main():
                 plan,
                 out_render,
                 normalize_loudness=args.normalize_loudness,
-                audio_track=getattr(args, "audio_track", "combined"),
+                audio_track=getattr(args, "audio_track", "raw"),
             )
 
             if out_xml_path:
@@ -724,7 +733,7 @@ def main():
                 out_render,
                 target_fps=fps,
                 normalize_loudness=args.normalize_loudness,
-                audio_track=getattr(args, "audio_track", "combined"),
+                audio_track=getattr(args, "audio_track", "raw"),
             )
 
             if out_xml_path:

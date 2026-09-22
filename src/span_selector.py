@@ -14,6 +14,7 @@ import numpy as np
 
 from contracts import InventoryIndex, SpanCandidate, TargetGraph, WordOccurrence
 from features import compute_join_cost
+from lexicon import strip_phone_stress
 
 
 class SpanSelector:
@@ -30,6 +31,17 @@ class SpanSelector:
         self.edit_penalty = edit_penalty
         self.max_candidates_per_span = max_candidates_per_span
         self._wavlm_cache: Dict[Any, np.ndarray] = {}
+        self._acoustic_metrics_cache: Dict[Tuple[str, int, int], Tuple[float, float]] = {}
+
+        # Reverse pronunciation index from realized phones to intact recorded WordOccurrences
+        self.pron_to_words: Dict[Tuple[str, ...], List[WordOccurrence]] = {}
+        self.base_pron_to_words: Dict[Tuple[str, ...], List[WordOccurrence]] = {}
+        for wo in self.inv.words.values():
+            if wo.realized_phones:
+                key = tuple(wo.realized_phones)
+                self.pron_to_words.setdefault(key, []).append(wo)
+                base_key = tuple(strip_phone_stress(p) for p in wo.realized_phones)
+                self.base_pron_to_words.setdefault(base_key, []).append(wo)
 
     def retrieve_candidates(self, graph: TargetGraph, speaker_id: Optional[str] = None) -> List[SpanCandidate]:
         """
@@ -41,12 +53,11 @@ class SpanSelector:
         # Map word_normalized to matching word occurrences in inventory
         # Filter by speaker if requested
         eligible_words: Dict[str, List[WordOccurrence]] = {}
-        for w_norm, w_ids in self.inv.word_to_word_ids.items():
-            matches = []
-            for wid in w_ids:
-                wo = self.inv.words.get(wid)
-                if wo and (speaker_id is None or wo.speaker_id == speaker_id):
-                    matches.append(wo)
+        for w_norm in set(graph.normalized_words):
+            word_ids = self.inv.word_to_word_ids.get(w_norm, [])
+            matches = [self.inv.words[wid] for wid in word_ids if wid in self.inv.words]
+            if speaker_id is not None:
+                matches = [wo for wo in matches if wo.speaker_id == speaker_id]
             if matches:
                 eligible_words[w_norm] = matches
 
@@ -91,7 +102,7 @@ class SpanSelector:
                             break
 
                         next_wo = self.inv.words.get(succ_ev.word_occurrence_id)
-                        if next_wo and next_wo.word_normalized == next_tok:
+                        if next_wo and next_wo.word_normalized == next_tok and (speaker_id is None or next_wo.speaker_id == speaker_id):
                             matched_wos.append(next_wo)
                             curr_wo = next_wo
                         else:
@@ -108,6 +119,9 @@ class SpanSelector:
                         for wo in matched_wos:
                             all_events.extend(wo.phone_event_ids)
 
+                        bias_adj = self._compute_prosodic_bias_adjustment(
+                            covered, first_wo.source_content_id, matched_wos[0].start_sample, matched_wos[-1].end_sample, graph
+                        )
                         c = SpanCandidate(
                             candidate_id=f"cand_phrase_{cand_id_counter:05d}",
                             target_node_start=covered[0],
@@ -120,7 +134,7 @@ class SpanSelector:
                             event_ids=all_events,
                             span_type="phrase",
                             matched_word=" ".join(phrase_tokens),
-                            target_cost=0.0,
+                            target_cost=0.0 + bias_adj,
                             quality_cost=0.0,
                         )
                         candidates.append(c)
@@ -130,9 +144,26 @@ class SpanSelector:
         for t_idx in range(n_tokens):
             w_norm = graph.normalized_words[t_idx]
             target_nodes = token_to_nodes[t_idx]
-            word_candidates = eligible_words.get(w_norm, [])
+            target_phones = tuple(graph.nodes[nid].phone for nid in target_nodes)
+            target_base_phones = tuple(graph.nodes[nid].base_phone for nid in target_nodes)
+
+            word_candidates = list(eligible_words.get(w_norm, []))
+
+            # Reverse pronunciation lookup for intact recorded words matching this phone sequence
+            pron_matches = self.pron_to_words.get(target_phones, [])
+            if not pron_matches:
+                pron_matches = self.base_pron_to_words.get(target_base_phones, [])
+
+            for p_wo in pron_matches:
+                if speaker_id is not None and p_wo.speaker_id != speaker_id:
+                    continue
+                if p_wo not in word_candidates:
+                    word_candidates.append(p_wo)
 
             for wo in word_candidates[:self.max_candidates_per_span]:
+                bias_adj = self._compute_prosodic_bias_adjustment(
+                    target_nodes, wo.source_content_id, wo.start_sample, wo.end_sample, graph
+                )
                 c = SpanCandidate(
                     candidate_id=f"cand_word_{cand_id_counter:05d}",
                     target_node_start=target_nodes[0],
@@ -144,8 +175,8 @@ class SpanSelector:
                     end_sample=wo.end_sample,
                     event_ids=wo.phone_event_ids,
                     span_type="word",
-                    matched_word=w_norm,
-                    target_cost=0.05,
+                    matched_word=wo.word_normalized,
+                    target_cost=0.05 + bias_adj,
                     quality_cost=0.0,
                 )
                 candidates.append(c)
@@ -175,6 +206,9 @@ class SpanSelector:
                 dur = (ev.end_sample - ev.start_sample) / float(sr)
                 prior = node.duration_prior_sec or 0.10
                 dur_cost = 0.2 * min(abs(dur - prior) / prior, 3.0)
+                bias_adj = self._compute_prosodic_bias_adjustment(
+                    [node.node_id], ev.source_content_id, ev.start_sample, ev.end_sample, graph
+                )
 
                 c = SpanCandidate(
                     candidate_id=f"cand_phone_{cand_id_counter:05d}",
@@ -188,13 +222,138 @@ class SpanSelector:
                     event_ids=[ev.event_id],
                     span_type="phone",
                     matched_word=node.word_text,
-                    target_cost=0.15 + dur_cost,
+                    target_cost=0.15 + dur_cost + bias_adj,
                     quality_cost=0.0,
                 )
                 candidates.append(c)
                 cand_id_counter += 1
 
         return candidates
+
+    def _get_candidate_acoustic_features(
+        self,
+        source_content_id: str,
+        start_sample: int,
+        end_sample: int,
+    ) -> Tuple[float, float]:
+        """
+        Returns (f0_slope, rms_energy) for the audio interval.
+        Caches results by (source_content_id, start_sample, end_sample).
+        """
+        cache_key = (source_content_id, start_sample, end_sample)
+        if cache_key in self._acoustic_metrics_cache:
+            return self._acoustic_metrics_cache[cache_key]
+
+        src_rec = self.inv.sources.get(source_content_id)
+        if not src_rec:
+            return 0.0, 0.0
+
+        pcm_path = None
+        for cand_path in [src_rec.cached_analysis_pcm_path, src_rec.cached_pcm_path, src_rec.source_path]:
+            if cand_path and Path(cand_path).exists():
+                pcm_path = Path(cand_path)
+                break
+
+        if not pcm_path:
+            return 0.0, 0.0
+
+        try:
+            import soundfile as sf
+            import librosa
+
+            info = sf.info(str(pcm_path))
+            native_sr = src_rec.native_sample_rate or info.samplerate or 16000
+
+            if info.samplerate != native_sr and native_sr > 0:
+                s_file = int(round(start_sample * info.samplerate / native_sr))
+                e_file = int(round(end_sample * info.samplerate / native_sr))
+            else:
+                s_file = start_sample
+                e_file = end_sample
+
+            s_file = max(0, min(info.frames, s_file))
+            e_file = max(0, min(info.frames, e_file))
+            if e_file <= s_file:
+                return 0.0, 0.0
+
+            audio_slice, file_sr = sf.read(str(pcm_path), start=s_file, stop=e_file, dtype="float32")
+            if audio_slice.ndim > 1:
+                audio_slice = np.mean(audio_slice, axis=1)
+
+            if len(audio_slice) == 0:
+                return 0.0, 0.0
+
+            rms = float(np.sqrt(np.mean(audio_slice ** 2)))
+
+            if file_sr != 16000 and len(audio_slice) > 10:
+                audio_slice = librosa.resample(audio_slice, orig_sr=file_sr, target_sr=16000)
+
+            f0_slope = 0.0
+            if len(audio_slice) >= 320:
+                f0 = librosa.yin(audio_slice, fmin=80, fmax=500, sr=16000)
+                valid = [float(f) for f in f0 if f is not None and not np.isnan(f) and 80 <= f <= 500]
+                if len(valid) >= 2:
+                    dt = len(valid) * (len(audio_slice) / (16000.0 * len(f0)))
+                    if dt > 0:
+                        f0_slope = (valid[-1] - valid[0]) / dt
+
+            self._acoustic_metrics_cache[cache_key] = (f0_slope, rms)
+            return f0_slope, rms
+        except Exception:
+            return 0.0, 0.0
+
+    def _compute_prosodic_bias_adjustment(
+        self,
+        covered_node_ids: List[int],
+        source_content_id: str,
+        start_sample: int,
+        end_sample: int,
+        graph: TargetGraph,
+    ) -> float:
+        """
+        Computes Viterbi target cost adjustments based on punctuation-driven prosodic bias:
+        - Question ('?'): rewards rising pitch slope (f0_slope > 0) and penalizes falling pitch.
+        - Exclamation ('!'): rewards high RMS energy and primary lexical stress.
+        """
+        if not covered_node_ids:
+            return 0.0
+
+        last_node_idx = covered_node_ids[-1]
+        if last_node_idx >= len(graph.nodes):
+            return 0.0
+        last_node = graph.nodes[last_node_idx]
+
+        bias = last_node.prosodic_bias
+        if not bias and last_node.is_phrase_final:
+            if graph.terminal_punctuation == "?":
+                bias = "question"
+            elif graph.terminal_punctuation == "!":
+                bias = "exclamation"
+
+        if not bias:
+            return 0.0
+
+        f0_slope, rms = self._get_candidate_acoustic_features(source_content_id, start_sample, end_sample)
+
+        cost_adj = 0.0
+        if bias == "question":
+            if f0_slope > 20.0:
+                cost_adj -= min(3.0, f0_slope * 0.015)
+            elif f0_slope < -20.0:
+                cost_adj += 2.0
+
+        elif bias == "exclamation":
+            has_primary_stress = any(
+                graph.nodes[nid].stress == 1 for nid in covered_node_ids if nid < len(graph.nodes)
+            )
+            if has_primary_stress:
+                cost_adj -= 1.5
+            if rms > 0.08:
+                cost_adj -= min(2.0, (rms - 0.08) * 15.0)
+            elif 0.0 < rms < 0.03:
+                cost_adj += 1.0
+
+        return cost_adj
 
     def is_source_continuation(self, pred: SpanCandidate, curr: SpanCandidate) -> bool:
         """

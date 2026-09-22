@@ -9,9 +9,7 @@ eligibility, ordered event streams, and backward-compatible legacy views.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -67,6 +65,7 @@ def parse_textgrid_pure_python(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
                 xmin = float(xmin_m.group(1))
                 xmax = None
                 text = ""
+                found_text = False
                 # Scan next lines for xmax and text
                 j = i + 1
                 while j < min(i + 5, len(lines)):
@@ -76,10 +75,11 @@ def parse_textgrid_pure_python(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
                     text_m = re.match(r'text\s*=\s*"([^"]*)"', lines[j])
                     if text_m:
                         text = text_m.group(1)
+                        found_text = True
                         i = j
                         break
                     j += 1
-                if xmax is not None:
+                if xmax is not None and found_text:
                     tiers[current_tier].append({"xmin": xmin, "xmax": xmax, "text": text})
 
         i += 1
@@ -91,7 +91,7 @@ def parse_textgrid(tg_path: str) -> Dict[str, List[Dict[str, Any]]]:
     """Parse TextGrid using praatio if available, else pure python fallback."""
     try:
         from praatio import textgrid
-        tg = textgrid.openTextgrid(tg_path, False)
+        tg = textgrid.openTextgrid(tg_path, readEmpty=True)
         parsed_tiers: Dict[str, List[Dict[str, Any]]] = {}
         for tname in tg.tierNames:
             entries = []
@@ -137,9 +137,17 @@ def build_units_inventory(
     )
 
     # Source Record & native sample rate
+    audio_src = manifest.get("audio_source_path")
+    vocal_stem_path = Path(audio_src) if audio_src and Path(audio_src).exists() else None
+    is_isolated = bool(vocal_stem_path and "vocal" in vocal_stem_path.name.lower())
+
     if source_record is None:
         try:
-            source_record = extract_source_record(source_video_path)
+            source_record = extract_source_record(
+                source_video_path,
+                vocal_stem_path=vocal_stem_path,
+                isolate_vocals=is_isolated,
+            )
         except Exception:
             # Fallback for synthetic test fixtures without video file
             source_record = SourceRecord(
@@ -148,12 +156,16 @@ def build_units_inventory(
                 native_sample_rate=48000,
                 native_channels=2,
             )
+            if vocal_stem_path:
+                source_record.cached_vocal_pcm_path = str(vocal_stem_path.resolve())
+    elif not source_record.cached_vocal_pcm_path and vocal_stem_path:
+        source_record.cached_vocal_pcm_path = str(vocal_stem_path.resolve())
 
     sr = source_record.native_sample_rate
     content_id = source_record.content_id
 
     chunks_meta = manifest.get("chunks", {})
-    tg_files = glob.glob(os.path.join(aligned_dir, "*.TextGrid"))
+    tg_files = [str(p) for p in sorted(Path(aligned_dir).rglob("*.TextGrid"))]
     print(f"[*] Found {len(tg_files)} .TextGrid files in {aligned_dir}")
 
     events_dict: Dict[str, AlignedEvent] = {}
@@ -183,6 +195,7 @@ def build_units_inventory(
         chunk_start_sec = float(chunk_info.get("start_sec", 0.0))
         chunk_end_sec = float(chunk_info.get("end_sec", 0.0))
         chunk_text = chunk_info.get("text", "")
+        chunk_speaker = chunk_info.get("speaker_id") or effective_speaker
 
         utt_start_sample = seconds_to_samples(chunk_start_sec, sr)
         utt_end_sample = seconds_to_samples(chunk_end_sec, sr)
@@ -193,7 +206,7 @@ def build_units_inventory(
             start_sample=utt_start_sample,
             end_sample=utt_end_sample,
             transcript=chunk_text,
-            speaker_id=effective_speaker,
+            speaker_id=chunk_speaker,
             verification_method="verified_manifest" if is_verified else "unverified",
         )
 
@@ -238,7 +251,7 @@ def build_units_inventory(
                 event_id=event_id,
                 source_content_id=content_id,
                 utterance_id=chunk_id,
-                speaker_id=effective_speaker,
+                speaker_id=chunk_speaker,
                 kind=kind,
                 start_sample=start_sample,
                 end_sample=end_sample,
@@ -316,7 +329,7 @@ def build_units_inventory(
             wo = WordOccurrence(
                 word_id=word_id,
                 source_content_id=content_id,
-                speaker_id=effective_speaker,
+                speaker_id=chunk_speaker,
                 word_normalized=clean_word,
                 word_original=raw_w,
                 start_sample=w_start_sample,
@@ -380,7 +393,29 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="./units_index.json", help="Path to output units_index.json")
     parser.add_argument("--speaker", default=None, help="Speaker identity")
     parser.add_argument("--assume-single-speaker", action="store_true", help="Assume single speaker")
+    parser.add_argument("--vocal-stem", default=None, help="Path to cached vocal stem WAV")
     args = parser.parse_args()
+
+    custom_source_rec = None
+    if args.vocal_stem:
+        v_stem_p = Path(args.vocal_stem).resolve()
+        with open(args.manifest, "r", encoding="utf-8") as mf:
+            m_data = json.load(mf)
+        v_path = Path(m_data.get("source_video", ""))
+        try:
+            custom_source_rec = extract_source_record(
+                v_path,
+                vocal_stem_path=v_stem_p,
+                isolate_vocals=True,
+            )
+        except Exception:
+            custom_source_rec = SourceRecord(
+                content_id=v_path.stem or "source",
+                source_path=str(v_path),
+                native_sample_rate=48000,
+                native_channels=2,
+                cached_vocal_pcm_path=str(v_stem_p),
+            )
 
     build_units_inventory(
         args.aligned_dir,
@@ -388,4 +423,5 @@ if __name__ == "__main__":
         args.output,
         speaker_id=args.speaker,
         single_speaker_verified=args.assume_single_speaker,
+        source_record=custom_source_rec,
     )

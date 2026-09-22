@@ -2,17 +2,34 @@
 Target pronunciation graph representation and construction.
 Preserves sentence punctuation, word/phrase position, lexical stress,
 alternative pronunciation realizations, and cross-word phonetic context.
+Supports:
+- Hybrid phonetic syntax: space-delimited ARPAbet tokens enclosed in braces (e.g. {B AE1 K AH0 N})
+- Explicit cadence gaps: <gap:250ms> or <gap:1.5s>
+- Punctuation-based cadence and intonation biasing (! and ?)
+- Strict syntax validation (unclosed braces, invalid ARPAbet phones raise ValueError)
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 from contracts import TargetGraph, TargetPhoneNode
-from lexicon import Lexicon, get_phone_stress, normalize_text_to_words, strip_phone_stress
+from lexicon import Lexicon, get_phone_stress, strip_phone_stress
+
+# Standard 39 ARPAbet base phones
+VALID_BASE_PHONES = {
+    "AA", "AE", "AH", "AO", "AW", "AY", "B", "CH", "D", "DH", "EH", "ER", "EY",
+    "F", "G", "HH", "IH", "IY", "JH", "K", "L", "M", "N", "NG", "OW", "OY",
+    "P", "R", "S", "SH", "T", "TH", "UH", "UW", "V", "W", "Y", "Z", "ZH",
+}
+
+VOWEL_PHONES = {
+    "AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"
+}
 
 # Robust duration priors by phone manner category (in seconds)
-# Avoids any universal 90ms prior
 DEFAULT_DURATION_PRIORS: Dict[str, float] = {
     # Vowels / Diphthongs
     "AA": 0.16, "AE": 0.17, "AH": 0.10, "AO": 0.16, "AW": 0.18, "AY": 0.18,
@@ -29,47 +46,180 @@ DEFAULT_DURATION_PRIORS: Dict[str, float] = {
 }
 
 
+@dataclass
+class HybridToken:
+    kind: str  # "word", "phonetic", "gap", "punctuation"
+    orig_text: str
+    norm_text: str
+    phones: Optional[List[str]] = None
+    gap_seconds: Optional[float] = None
+
+
+def tokenize_hybrid_syntax(text: str) -> List[HybridToken]:
+    """
+    Parses input text into typed tokens:
+    - Words: 'Hello', 'Obi-Wan', "I'm"
+    - Explicit phonetic groups: '{B AE1 K AH0 N}'
+    - Explicit cadence gaps: '<gap:250ms>' or '<gap:1.5s>'
+    - Punctuation marks: '.', ',', '!', '?', ';', ':'
+
+    Raises ValueError on syntax violations (unmatched braces/brackets, invalid phones).
+    """
+    # Normalize typographical quotation marks
+    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+
+    # Syntax boundary checks
+    if text.count("{") != text.count("}"):
+        raise ValueError(f"Unmatched braces in target text: '{text}'")
+    if text.count("<") != text.count(">"):
+        raise ValueError(f"Unmatched angle brackets in target text: '{text}'")
+
+    # Scanner pattern matching discrete units in left-to-right order
+    pattern = re.compile(
+        r"(\{[^}]*\})|"                             # 1. Phonetic group: {B AE1 K AH0 N} or {}
+        r"(<gap:[^>]+>)|"                           # 2. Explicit gap tag: <gap:250ms>
+        r"([.,!?;:])|"                              # 3. Punctuation
+        r"([A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*)|"     # 4. Standard lexical word
+        r"(\S+)"                                    # 5. Any other non-whitespace (error candidate)
+    )
+
+    tokens: List[HybridToken] = []
+
+    for m in pattern.finditer(text):
+        phonetic, gap, punct, word, unrecognized = m.groups()
+
+        if phonetic:
+            content = phonetic[1:-1].strip()
+            if not content:
+                raise ValueError("Empty phonetic group: '{}'")
+            raw_phones = content.split()
+            valid_phones: List[str] = []
+            for raw_p in raw_phones:
+                p_up = raw_p.upper()
+                base = strip_phone_stress(p_up)
+                if base not in VALID_BASE_PHONES:
+                    raise ValueError(f"Invalid ARPAbet phone '{p_up}' in phonetic group '{phonetic}'")
+                stress = get_phone_stress(p_up)
+                if stress is not None and base not in VOWEL_PHONES:
+                    # Consonants do not take stress digits in standard ARPAbet
+                    p_up = base
+                valid_phones.append(p_up)
+
+            norm_group = "{" + " ".join(valid_phones) + "}"
+            tokens.append(
+                HybridToken(
+                    kind="phonetic",
+                    orig_text=phonetic,
+                    norm_text=norm_group,
+                    phones=valid_phones,
+                )
+            )
+
+        elif gap:
+            gm = re.match(r"^<gap:\s*(\d+(?:\.\d+)?)\s*(ms|s)?>$", gap.lower())
+            if not gm:
+                raise ValueError(
+                    f"Invalid gap format: '{gap}'. Expected format: <gap:250ms> or <gap:1.5s>"
+                )
+            val = float(gm.group(1))
+            unit = gm.group(2)
+            if unit == "ms":
+                sec = val / 1000.0
+            elif unit == "s":
+                sec = val
+            else:
+                # Default to ms if >= 10, else seconds
+                sec = val / 1000.0 if val >= 10.0 else val
+
+            tokens.append(
+                HybridToken(
+                    kind="gap",
+                    orig_text=gap,
+                    norm_text=gap,
+                    gap_seconds=sec,
+                )
+            )
+
+        elif punct:
+            tokens.append(
+                HybridToken(
+                    kind="punctuation",
+                    orig_text=punct,
+                    norm_text=punct,
+                )
+            )
+
+        elif word:
+            tokens.append(
+                HybridToken(
+                    kind="word",
+                    orig_text=word,
+                    norm_text=word.lower(),
+                )
+            )
+
+        elif unrecognized:
+            raise ValueError(f"Unrecognized token or malformed syntax: '{unrecognized}'")
+
+    return tokens
+
+
 class TargetGraphBuilder:
     """
-    Builds a directed acyclic graph of legal phonetic paths for a target utterance.
+    Builds a directed acyclic graph of legal phonetic paths for a target utterance,
+    incorporating hybrid phonetic tokens, explicit gaps, and intonation inflection.
     """
     def __init__(self, lexicon: Lexicon):
         self.lexicon = lexicon
 
     def build(self, target_text: str) -> TargetGraph:
-        tokens_with_orig = normalize_text_to_words(target_text)
-        if not tokens_with_orig:
+        tokens = tokenize_hybrid_syntax(target_text)
+        if not tokens:
             raise ValueError(f"No valid tokens found in target text: {target_text}")
 
         normalized_words: List[str] = []
         punctuation_pauses: Dict[int, float] = {}
+        token_prosodic_bias: Dict[int, str] = {}
 
-        # Separate words from punctuation
-        word_tokens: List[Tuple[str, str]] = []
-        for orig_tok, norm_tok in tokens_with_orig:
-            if norm_tok in ".,!?;:":
-                # Assign pause to the preceding word
-                w_idx = max(0, len(word_tokens) - 1)
-                pause_sec = 0.45 if norm_tok in ".!?" else 0.25
-                punctuation_pauses[w_idx] = pause_sec
+        # Separate speech tokens (words and phonetic groups) from gap tags and punctuation
+        speech_tokens: List[HybridToken] = []
+        terminal_punctuation: Optional[str] = None
+
+        for tok in tokens:
+            if tok.kind == "gap":
+                w_idx = max(0, len(speech_tokens) - 1)
+                punctuation_pauses[w_idx] = tok.gap_seconds or 0.25
+            elif tok.kind == "punctuation":
+                w_idx = max(0, len(speech_tokens) - 1)
+                pause_sec = 0.45 if tok.norm_text in ".!?;:" else 0.25
+                # Do not overwrite an explicit gap if one was already set
+                if w_idx not in punctuation_pauses:
+                    punctuation_pauses[w_idx] = pause_sec
+                terminal_punctuation = tok.norm_text
+                if tok.norm_text == "?":
+                    token_prosodic_bias[w_idx] = "question"
+                elif tok.norm_text == "!":
+                    token_prosodic_bias[w_idx] = "exclamation"
             else:
-                word_tokens.append((orig_tok, norm_tok))
-                normalized_words.append(norm_tok)
+                speech_tokens.append(tok)
+                normalized_words.append(tok.norm_text)
 
-        if not word_tokens:
-            raise ValueError("Target text contains only punctuation")
+        if not speech_tokens:
+            raise ValueError("Target text contains no spoken words or phonetic units")
 
         nodes: List[TargetPhoneNode] = []
         edges: List[Tuple[int, int]] = []
-
-        # Track entry and exit node indices for each word
-        # word_index -> List[Tuple[branch_start_node_id, branch_end_node_id]]
         word_branches: List[List[Tuple[int, int]]] = []
 
-        for w_idx, (orig_w, norm_w) in enumerate(word_tokens):
-            prons = self.lexicon.get_pronunciations(norm_w)
-            if not prons:
-                raise ValueError(f"No pronunciation could be determined for target word: '{norm_w}'")
+        for w_idx, tok in enumerate(speech_tokens):
+            if tok.kind == "phonetic" and tok.phones:
+                # Explicit phonetic group: deterministic pronunciation
+                prons = [tok.phones]
+            else:
+                # Ordinary lexical word: lookup in lexicon
+                prons = self.lexicon.get_pronunciations(tok.norm_text)
+                if not prons:
+                    raise ValueError(f"No pronunciation could be determined for target word: '{tok.norm_text}'")
 
             branches: List[Tuple[int, int]] = []
             for p_list in prons:
@@ -80,17 +230,22 @@ class TargetGraphBuilder:
                     stress = get_phone_stress(phone)
                     prior_dur = DEFAULT_DURATION_PRIORS.get(base, 0.10)
 
+                    is_word_init = (p_pos == 0)
+                    is_word_fin = (p_pos == len(p_list) - 1)
+                    is_phrase_fin = (w_idx == len(speech_tokens) - 1 and is_word_fin)
+
                     node = TargetPhoneNode(
                         node_id=node_id,
                         token_index=w_idx,
-                        word_text=norm_w,
+                        word_text=tok.norm_text,
                         phone=phone,
                         base_phone=base,
                         stress=stress,
-                        is_word_initial=(p_pos == 0),
-                        is_word_final=(p_pos == len(p_list) - 1),
-                        is_phrase_final=(w_idx == len(word_tokens) - 1 and p_pos == len(p_list) - 1),
+                        is_word_initial=is_word_init,
+                        is_word_final=is_word_fin,
+                        is_phrase_final=is_phrase_fin,
                         duration_prior_sec=prior_dur,
+                        prosodic_bias=token_prosodic_bias.get(w_idx),
                     )
                     nodes.append(node)
                     branch_node_ids.append(node_id)
@@ -114,7 +269,6 @@ class TargetGraphBuilder:
                     edges.append((curr_exit, next_entry))
 
         # Assign context across nodes
-        # Forward pass for right context, backward for left context
         edge_dict_fwd: Dict[int, List[int]] = {}
         edge_dict_bwd: Dict[int, List[int]] = {}
         for src, dst in edges:
@@ -122,11 +276,9 @@ class TargetGraphBuilder:
             edge_dict_bwd.setdefault(dst, []).append(src)
 
         for node in nodes:
-            # Right context
             succs = edge_dict_fwd.get(node.node_id, [])
             if succs:
                 node.right_context_phone = nodes[succs[0]].phone
-            # Left context
             preds = edge_dict_bwd.get(node.node_id, [])
             if preds:
                 node.left_context_phone = nodes[preds[0]].phone
@@ -142,6 +294,7 @@ class TargetGraphBuilder:
             start_nodes=start_nodes,
             end_nodes=end_nodes,
             punctuation_pauses=punctuation_pauses,
+            terminal_punctuation=terminal_punctuation or "",
         )
         graph.validate()
         return graph

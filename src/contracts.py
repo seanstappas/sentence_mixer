@@ -242,6 +242,7 @@ class TargetPhoneNode:
     is_phrase_final: bool = False
     duration_prior_sec: Optional[float] = None
     target_pitch_semitones: Optional[float] = None
+    prosodic_bias: Optional[str] = None  # e.g. "question", "exclamation"
 
 
 @dataclass
@@ -254,6 +255,7 @@ class TargetGraph:
     start_nodes: List[int]
     end_nodes: List[int]
     punctuation_pauses: Dict[int, float] = field(default_factory=dict)  # token index -> pause seconds
+    terminal_punctuation: str = ""
 
     def validate(self) -> None:
         if not self.nodes:
@@ -309,6 +311,7 @@ class PlanSegment:
     video_start_frame: int = 0
     video_frame_count: int = 0
     video_source_pts_sec: float = 0.0
+    freeze_video: bool = False
 
     @property
     def duration_samples(self) -> int:

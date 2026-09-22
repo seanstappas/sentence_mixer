@@ -103,7 +103,7 @@ def evaluate_suite(
             res = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
             success = (res.returncode == 0 and render_mp4.exists())
 
-            config_metrics = {
+            config_metrics: Dict[str, Any] = {
                 "success": success,
                 "selector": selector,
                 "features": "basic",
@@ -167,10 +167,10 @@ def evaluate_suite(
 
             case_results["configurations"][config_name] = config_metrics
             asr_info = ""
-            if "asr" in config_metrics:
-                asr_data = config_metrics["asr"]
+            if "asr" in config_metrics and isinstance(config_metrics["asr"], dict):
+                asr_data: Dict[str, Any] = config_metrics["asr"]
                 asr_tag = "PASS" if asr_data.get("passed") else "FAIL"
-                asr_wer = asr_data.get("wer", 0.0)
+                asr_wer = float(asr_data.get("wer", 0.0))
                 asr_info = f" (ASR: {asr_tag}, WER={asr_wer:.2f})"
             print(f"    - {config_name}: {'PASS' if success else 'FAIL'}{asr_info}")
 
@@ -226,7 +226,9 @@ def evaluate_suite(
     print(f"    - Assignment Key: {key_path}")
     if mean_wer is not None:
         print(f"    - Mean WER: {mean_wer:.3f}")
+    if mean_cer is not None:
         print(f"    - Mean CER: {mean_cer:.3f}")
+    if asr_pass_rate is not None:
         print(f"    - ASR Pass Rate: {asr_pass_rate * 100:.1f}% ({asr_passes}/{total_asr_evaluated})")
 
     return eval_report

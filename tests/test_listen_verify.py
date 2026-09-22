@@ -248,6 +248,7 @@ def test_audio_extraction_wav_and_mp4():
         assert not np.any(np.isnan(mp4_audio))
 
 
+@pytest.mark.model
 def test_real_audio_verification():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     mp4_p = REPO_ROOT / "output" / "smoke_basic.mp4"
@@ -273,6 +274,7 @@ def test_real_audio_verification():
         assert res_mp4["wer"] == 0.0
 
 
+@pytest.mark.model
 def test_cli_exit_code_success():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -282,6 +284,7 @@ def test_cli_exit_code_success():
     assert code == 0
 
 
+@pytest.mark.model
 def test_cli_exit_code_failure():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -297,6 +300,7 @@ def test_cli_exit_code_operational_error():
     assert code == 2
 
 
+@pytest.mark.model
 def test_cli_json_output(capsys):
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -316,6 +320,7 @@ def test_cli_json_output(capsys):
     assert "normalized_transcribed" in data
 
 
+@pytest.mark.model
 def test_validate_mix_asr_acceptance_gate():
     smoke_stem = REPO_ROOT / "output" / "smoke_basic"
     if smoke_stem.with_suffix(".plan.json").exists() and smoke_stem.with_suffix(".wav").exists():
@@ -328,6 +333,7 @@ def test_validate_mix_asr_acceptance_gate():
         assert validate_mix(stem=str(moxy_stem), require_asr=True) is False
 
 
+@pytest.mark.model
 def test_evaluate_suite_asr_integration(monkeypatch, tmp_path):
     import shutil
     from evaluate import evaluate_suite

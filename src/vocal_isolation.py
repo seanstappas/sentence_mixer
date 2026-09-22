@@ -48,13 +48,34 @@ def _find_vocal_candidates(directory: Path) -> List[Path]:
     candidates: List[Path] = []
     if not directory.exists():
         return candidates
+    negative_terms = (
+        "no_vocals",
+        "no-vocals",
+        "novocals",
+        "non_vocal",
+        "non-vocal",
+        "instrumental",
+        "accompaniment",
+        "other",
+        "drums",
+        "bass",
+    )
     for f in directory.rglob("*"):
         if f.is_file():
             name_lower = f.name.lower()
+            if any(neg in name_lower for neg in negative_terms):
+                continue
             if "vocal" in name_lower and f.suffix.lower() in {".wav", ".flac", ".mp3", ".m4a"}:
                 candidates.append(f)
-    # Sort most recently modified first
-    candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+
+    # Prioritize exact "vocals.wav" or "(vocals).wav", then sort by mtime
+    def _vocal_rank(p: Path) -> tuple[int, float]:
+        name_stem = p.stem.lower()
+        is_exact = 0 if name_stem in {"vocals", "vocal"} or name_stem.endswith("(vocals)") else 1
+        mtime = p.stat().st_mtime if p.exists() else 0.0
+        return (is_exact, -mtime)
+
+    candidates.sort(key=_vocal_rank)
     return candidates
 
 
@@ -63,12 +84,33 @@ def _find_instrumental_candidates(directory: Path) -> List[Path]:
     candidates: List[Path] = []
     if not directory.exists():
         return candidates
+    inst_terms = (
+        "instrumental",
+        "no_vocals",
+        "no-vocals",
+        "novocals",
+        "non_vocal",
+        "non-vocal",
+        "accompaniment",
+        "other",
+    )
     for f in directory.rglob("*"):
         if f.is_file():
             name_lower = f.name.lower()
-            if ("instrumental" in name_lower or "no_vocals" in name_lower or "other" in name_lower) and f.suffix.lower() in {".wav", ".flac", ".mp3", ".m4a"}:
+            if "vocal" in name_lower and not any(
+                neg in name_lower for neg in ("no_vocals", "no-vocals", "novocals", "non_vocal", "non-vocal")
+            ):
+                continue
+            if any(term in name_lower for term in inst_terms) and f.suffix.lower() in {".wav", ".flac", ".mp3", ".m4a"}:
                 candidates.append(f)
-    candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+
+    def _inst_rank(p: Path) -> tuple[int, float]:
+        name_stem = p.stem.lower()
+        is_exact = 0 if name_stem in {"instrumental", "no_vocals", "accompaniment"} or name_stem.endswith("(instrumental)") else 1
+        mtime = p.stat().st_mtime if p.exists() else 0.0
+        return (is_exact, -mtime)
+
+    candidates.sort(key=_inst_rank)
     return candidates
 
 
@@ -134,21 +176,43 @@ def isolate_vocals(
     stem_path = target_dir / "vocals.wav"
     metadata_path = target_dir / "metadata.json"
 
-    # Fast cache check
+    # Fast cache check with source content hash validation (R04)
     if not force:
-        if stem_path.exists() and stem_path.stat().st_size > 0:
+        def _is_cache_valid(vocal_file: Path, meta_file: Path) -> bool:
+            if not vocal_file.exists() or vocal_file.stat().st_size == 0:
+                return False
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    cached_hash = meta.get("source_sha256")
+                    if cached_hash:
+                        current_hash = compute_file_sha256(src_p)
+                        if cached_hash != current_hash:
+                            print(
+                                f"[*] Source hash mismatch for {src_p} "
+                                f"({cached_hash} != {current_hash}). Stale vocal stem invalidated."
+                            )
+                            return False
+                except Exception as e:
+                    print(f"[!] Warning reading stem metadata {meta_file}: {e}")
+            return True
+
+        if _is_cache_valid(stem_path, metadata_path):
             print(f"[+] Using cached vocal stem: {stem_path}")
             return stem_path
         direct_stem = out_base / "vocals.wav"
-        if direct_stem.exists() and direct_stem.stat().st_size > 0:
+        direct_meta = out_base / "metadata.json"
+        if direct_stem != stem_path and _is_cache_valid(direct_stem, direct_meta):
             print(f"[+] Using cached vocal stem: {direct_stem}")
             return direct_stem
 
-    if force and stem_path.exists():
-        try:
-            stem_path.unlink()
-        except Exception:
-            pass
+    # Forced rebuild or invalidated cache: clean up all stems and metadata (R04)
+    for to_remove in [stem_path, target_dir / "instrumental.wav", metadata_path]:
+        if to_remove.exists():
+            try:
+                to_remove.unlink()
+            except Exception:
+                pass
 
     target_dir.mkdir(parents=True, exist_ok=True)
     tool_used = ""

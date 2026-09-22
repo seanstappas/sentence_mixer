@@ -69,8 +69,16 @@ def test_generate_fcp_xml_from_edit_plan():
         vclips = root.findall(".//media/video/track/clipitem")
         assert len(vclips) == 1
         assert "hello" in vclips[0].find("name").text
+        v_file = vclips[0].find("file")
+        assert v_file is not None
+        assert v_file.find("name") is not None and v_file.find("name").text == "video1.mp4"
+        assert v_file.find("pathurl") is not None and "video1.mp4" in v_file.find("pathurl").text
 
         # Check master audio clipitem
         aclips = root.findall(".//media/audio/track/clipitem")
         assert len(aclips) >= 1
         assert any("Master_Audio" in ac.find("name").text for ac in aclips)
+        a_file = aclips[0].find("file")
+        assert a_file is not None
+        assert a_file.find("name") is not None and a_file.find("name").text == "master.wav"
+        assert a_file.find("pathurl") is not None and "master.wav" in a_file.find("pathurl").text

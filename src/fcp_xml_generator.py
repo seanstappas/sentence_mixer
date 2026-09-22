@@ -11,7 +11,7 @@ import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.dom import minidom
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 from contracts import EditPlan, RationalTime
 
@@ -98,7 +98,7 @@ def generate_fcp_xml(
     atrack2 = ET.SubElement(audio, "track")
 
     # File cache to reuse file elements
-    file_elements: Dict[str, Tuple[str, ET.Element]] = {}
+    file_elements: Dict[str, str] = {}
     file_counter = 1
 
     curr_timeline_frame = 0
@@ -121,21 +121,6 @@ def generate_fcp_xml(
         in_frame = int(round(start_pts * fps_float))
         out_frame = in_frame + duration_frames
 
-        # Register file node if not already seen
-        if src_path not in file_elements:
-            file_id = f"file-{file_counter}"
-            file_counter += 1
-            f_node = ET.Element("file", id=file_id)
-            ET.SubElement(f_node, "name").text = os.path.basename(src_path)
-            formatted_url = f"file://localhost/{src_path.replace(os.sep, '/')}"
-            ET.SubElement(f_node, "pathurl").text = formatted_url
-            f_rate = ET.SubElement(f_node, "rate")
-            ET.SubElement(f_rate, "timebase").text = str(timebase)
-            ET.SubElement(f_rate, "ntsc").text = ntsc_flag
-            file_elements[src_path] = (file_id, f_node)
-
-        file_id, f_def_node = file_elements[src_path]
-
         # Video clipitem
         vclip = ET.SubElement(vtrack, "clipitem", id=f"vclip-{idx}")
         ET.SubElement(vclip, "name").text = f"{idx:03d}_{label}_{unit_type}"
@@ -143,7 +128,22 @@ def generate_fcp_xml(
         ET.SubElement(vclip, "end").text = str(curr_timeline_frame + duration_frames)
         ET.SubElement(vclip, "in").text = str(in_frame)
         ET.SubElement(vclip, "out").text = str(out_frame)
-        ET.SubElement(vclip, "file", id=file_id)
+
+        # Register file node if not already seen
+        if src_path not in file_elements:
+            file_id = f"file-{file_counter}"
+            file_counter += 1
+            f_node = ET.SubElement(vclip, "file", id=file_id)
+            ET.SubElement(f_node, "name").text = os.path.basename(src_path)
+            formatted_url = f"file://localhost/{src_path.replace(os.sep, '/')}"
+            ET.SubElement(f_node, "pathurl").text = formatted_url
+            f_rate = ET.SubElement(f_node, "rate")
+            ET.SubElement(f_rate, "timebase").text = str(timebase)
+            ET.SubElement(f_rate, "ntsc").text = ntsc_flag
+            file_elements[src_path] = file_id
+        else:
+            file_id = file_elements[src_path]
+            ET.SubElement(vclip, "file", id=file_id)
 
         curr_timeline_frame += duration_frames
 
@@ -151,10 +151,6 @@ def generate_fcp_xml(
     if master_wav_path and Path(master_wav_path).exists():
         wav_path_abs = str(Path(master_wav_path).resolve())
         wav_id = "file-master-audio"
-        wav_node = ET.Element("file", id=wav_id)
-        ET.SubElement(wav_node, "name").text = os.path.basename(wav_path_abs)
-        formatted_url = f"file://localhost/{wav_path_abs.replace(os.sep, '/')}"
-        ET.SubElement(wav_node, "pathurl").text = formatted_url
 
         aclip1 = ET.SubElement(atrack1, "clipitem", id="aclip-master-1")
         ET.SubElement(aclip1, "name").text = "Master_Audio_L"
@@ -162,7 +158,13 @@ def generate_fcp_xml(
         ET.SubElement(aclip1, "end").text = str(curr_timeline_frame)
         ET.SubElement(aclip1, "in").text = "0"
         ET.SubElement(aclip1, "out").text = str(curr_timeline_frame)
-        ET.SubElement(aclip1, "file", id=wav_id)
+        wav_f1 = ET.SubElement(aclip1, "file", id=wav_id)
+        ET.SubElement(wav_f1, "name").text = os.path.basename(wav_path_abs)
+        formatted_url = f"file://localhost/{wav_path_abs.replace(os.sep, '/')}"
+        ET.SubElement(wav_f1, "pathurl").text = formatted_url
+        f_rate = ET.SubElement(wav_f1, "rate")
+        ET.SubElement(f_rate, "timebase").text = str(timebase)
+        ET.SubElement(f_rate, "ntsc").text = ntsc_flag
 
         aclip2 = ET.SubElement(atrack2, "clipitem", id="aclip-master-2")
         ET.SubElement(aclip2, "name").text = "Master_Audio_R"

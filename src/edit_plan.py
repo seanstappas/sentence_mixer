@@ -150,6 +150,7 @@ def build_edit_plan(
                     span_type="pause",
                     source_video_path=src_rec.source_path,
                     is_silence=True,
+                    freeze_video=True,
                     video_start_frame=p_start_frame,
                     video_frame_count=max(1, p_end_frame - p_start_frame),
                     video_source_pts_sec=p_source_pts,

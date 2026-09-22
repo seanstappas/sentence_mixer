@@ -8,7 +8,6 @@ Executed independently against implementation under test.
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,12 +28,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from contracts import EditPlan, PlanSegment, PlanTransition, SourceRecord
-from listen_verify import (
-    compute_cer,
-    compute_levenshtein_tokens,
-    normalize_text,
-    verify_listening,
-)
+from listen_verify import verify_listening
 from validate_mix import measure_audio_loudness
 from video_assembler import normalize_audio_ebur128, render_master_pcm
 
@@ -482,8 +476,6 @@ class TestLoudnessNormalization:
         - --no-normalize-loudness disables normalization
         - --normalize-loudness explicitly enables normalization
         """
-        from run_mixer import main as _  # ensure module loads without syntax error
-
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--normalize-loudness",

@@ -159,3 +159,96 @@ class Lexicon:
                 pass
 
         return []
+
+    def is_known(self, word: str) -> bool:
+        """Returns True if word exists in loaded dictionaries, False if OOV."""
+        w = word.strip().lower()
+        return w in self.word_to_pronunciations
+
+    def save_custom_pronunciation(
+        self,
+        word: str,
+        phones: List[str],
+        custom_path: Optional[Union[str, Path]] = None,
+    ) -> None:
+        """
+        Persists an approved pronunciation to custom_pronunciations.txt and updates in-memory dictionary.
+        """
+        clean_word = word.strip().lower()
+        clean_phones = [p.strip().upper() for p in phones if p.strip()]
+        if not clean_phones:
+            raise ValueError(f"Cannot save empty pronunciation for word '{word}'")
+
+        if custom_path is None:
+            # Default to repo root dictionaries/custom_pronunciations.txt
+            repo_root = Path(__file__).resolve().parent.parent
+            custom_path = repo_root / "dictionaries" / "custom_pronunciations.txt"
+        else:
+            custom_path = Path(custom_path).resolve()
+
+        custom_path.parent.mkdir(parents=True, exist_ok=True)
+        phones_str = " ".join(clean_phones)
+
+        # Atomic append
+        with open(custom_path, "a", encoding="utf-8") as f:
+            f.write(f"\n{clean_word}\t{phones_str}\n")
+
+        # Update in-memory entry
+        if clean_word not in self.word_to_pronunciations:
+            self.word_to_pronunciations[clean_word] = []
+        if clean_phones not in self.word_to_pronunciations[clean_word]:
+            self.word_to_pronunciations[clean_word].insert(0, clean_phones)
+
+
+ARPABET_EXEMPLARS: Dict[str, str] = {
+    "AA": "'a' in father / calm",
+    "AE": "'a' in apple / bat",
+    "AH": "'u' in cut / sofa",
+    "AO": "'aw' in law / caught",
+    "AW": "'ow' in cow / shout",
+    "AY": "'i' in bite / ride",
+    "B": "'b' in boy",
+    "CH": "'ch' in cheese",
+    "D": "'d' in dog",
+    "DH": "'th' in they / breathe",
+    "EH": "'e' in red / bed",
+    "ER": "'ur' in bird / hurt",
+    "EY": "'a' in say / make",
+    "F": "'f' in food",
+    "G": "'g' in go",
+    "HH": "'h' in hat",
+    "IH": "'i' in sit / big",
+    "IY": "'ee' in see / feel",
+    "JH": "'j' in jump",
+    "K": "'k' in kite",
+    "L": "'l' in look",
+    "M": "'m' in man",
+    "N": "'n' in no",
+    "NG": "'ng' in sing",
+    "OW": "'o' in go / boat",
+    "OY": "'oy' in boy / coin",
+    "P": "'p' in pet",
+    "R": "'r' in run",
+    "S": "'s' in sun",
+    "SH": "'sh' in ship",
+    "T": "'t' in top",
+    "TH": "'th' in thin / math",
+    "UH": "'oo' in book / put",
+    "UW": "'oo' in moon / two",
+    "V": "'v' in voice",
+    "W": "'w' in wet",
+    "Y": "'y' in yes",
+    "Z": "'z' in zoo",
+    "ZH": "'s' in vision / measure",
+}
+
+
+def format_phoneme_breakdown(phones: List[str]) -> str:
+    """Formats ARPAbet phones into human-readable exemplars for interactive review."""
+    out = []
+    for p in phones:
+        base = strip_phone_stress(p).upper()
+        stress = " (stressed)" if "1" in p else (" (unstressed)" if "0" in p else "")
+        desc = ARPABET_EXEMPLARS.get(base, base.lower())
+        out.append(f"    {p:<4} -> {desc}{stress}")
+    return "\n".join(out)

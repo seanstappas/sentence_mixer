@@ -77,7 +77,7 @@ def clean_rolling_cues(cues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         dur = end_sec - start_sec
 
         # Skip zero or negative duration glitches
-        if dur <= 0.05:
+        if dur <= 0.0:
             continue
 
         if "lines" in cue:
@@ -97,12 +97,17 @@ def clean_rolling_cues(cues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             prev = processed[-1]
             gap = start_sec - prev["end_sec"]
 
-            # If consecutive cues overlap, abut, or have a small spacer gap <= 0.5s
+            # In rolling displays (e.g. 2-line broadcast rolling captions),
+            # previous lines are carried over into multi-line cues.
+            # Only strip carry-over lines if the cue contains multiple lines (len(cleaned_lines) > 1),
+            # or if it strictly overlaps in time (gap < -0.05) as an exact redundant redraw.
+            # Genuine consecutive repetitions (e.g. "No!", "No!" with gap >= 0) must be preserved!
             if gap <= 0.5:
                 prev_text = prev["text"].strip().lower()
                 norm_prev = re.sub(r"[^\w\s\']", "", prev_text).strip()
 
-                while cleaned_lines:
+                # Multi-line rolling carry-over: strip leading line only if remaining lines exist
+                while len(cleaned_lines) > 1:
                     first_line_clean = cleaned_lines[0].strip().lower()
                     norm_first = re.sub(r"[^\w\s\']", "", first_line_clean).strip()
 
@@ -122,7 +127,21 @@ def clean_rolling_cues(cues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     else:
                         break
 
-        if not cleaned_lines or dur <= 0.05:
+                # For single-line cues, treat as duplicate if strongly overlapping in time (redraw glitch)
+                # or if extremely short (<= 50ms) spacer/redraw carrying over identical text from prev
+                if len(cleaned_lines) == 1:
+                    first_line_clean = cleaned_lines[0].strip().lower()
+                    norm_first = re.sub(r"[^\w\s\']", "", first_line_clean).strip()
+                    is_dup_single = False
+                    if norm_first and (norm_first == norm_prev or norm_prev.endswith(" " + norm_first) or norm_prev.endswith(norm_first)):
+                        is_dup_single = True
+                    if not is_dup_single and first_line_clean and (first_line_clean == prev_text or prev_text.endswith(" " + first_line_clean) or prev_text.endswith(first_line_clean)):
+                        is_dup_single = True
+
+                    if is_dup_single and (gap < -0.05 or dur <= 0.05):
+                        cleaned_lines = []
+
+        if not cleaned_lines or dur <= 0.0:
             continue
 
         combined_text = " ".join(cleaned_lines).strip()
