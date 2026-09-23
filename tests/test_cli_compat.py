@@ -78,3 +78,63 @@ def test_audio_track_cli_argument():
     assert "isolated" in res.stdout
     assert "both" in res.stdout
 
+
+def test_t20_cli_option_combinations_and_speaker_enforcement():
+    """
+    T20: Legacy/default wrong speaker, guide/features, cuts-only, requested plan:
+    Enforce shared behavior or reject unsupported combinations explicitly.
+    """
+    # 1. Cuts-only mode with explicit --normalize-loudness must fail with clear conflict error
+    res1 = run_cmd([str(RUN_MIXER), "mix", "--video", "dummy.mp4", "--vtt", "dummy.vtt", "--text", "hello", "--mode", "cuts-only", "--normalize-loudness"])
+    assert res1.returncode != 0
+    assert "cuts-only" in res1.stderr.lower() or "cuts-only" in res1.stdout.lower()
+
+    # 2. Legacy selector with --guide must fail
+    res2 = run_cmd([str(RUN_MIXER), "mix", "--video", "dummy.mp4", "--vtt", "dummy.vtt", "--text", "hello", "--selector", "legacy", "--guide", "guide.wav"])
+    assert res2.returncode != 0
+    assert "legacy selector does not support" in res2.stderr.lower() or "legacy selector does not support" in res2.stdout.lower()
+
+    # 3. Legacy selector with --plan must fail
+    res3 = run_cmd([str(RUN_MIXER), "mix", "--video", "dummy.mp4", "--vtt", "dummy.vtt", "--text", "hello", "--selector", "legacy", "--plan", "plan.json"])
+    assert res3.returncode != 0
+    assert "legacy selector does not generate editplan" in res3.stderr.lower() or "legacy selector does not generate editplan" in res3.stdout.lower()
+
+
+def test_t23_atomic_publication_and_failure_isolation(tmp_path: Path):
+    """
+    T23: Invalid source/plan, missing video, failure after each artifact stage:
+    Explicit error; prior complete generation preserved; no fake completed output.
+    """
+    out_dir = tmp_path / "mix_output"
+    out_dir.mkdir(parents=True)
+    out_render = out_dir / "target_mix.mp4"
+    out_wav = out_dir / "target_mix.wav"
+    out_plan = out_dir / "target_mix.plan.json"
+
+    # Write existing prior generation
+    out_render.write_bytes(b"prior_mp4_content_12345")
+    out_wav.write_bytes(b"prior_wav_content_67890")
+    out_plan.write_text('{"prior": "plan"}', encoding="utf-8")
+
+    # Run mix targeting this output with a nonexistent / invalid input video
+    res = run_cmd([
+        str(RUN_MIXER), "mix",
+        "--video", str(tmp_path / "nonexistent_source.mp4"),
+        "--text", "hello there",
+        "--render", str(out_render),
+        "--plan", str(out_plan),
+        "--selector", "span",
+        "--non-interactive",
+    ])
+
+    assert res.returncode != 0, f"Expected non-zero exit code on missing source, got {res.returncode}"
+    # Assert prior complete generation is strictly preserved and not overwritten or corrupted
+    assert out_render.read_bytes() == b"prior_mp4_content_12345"
+    assert out_wav.read_bytes() == b"prior_wav_content_67890"
+    assert out_plan.read_text(encoding="utf-8") == '{"prior": "plan"}'
+
+    # Assert no stray attempt directory left behind
+    attempt_dirs = list(out_dir.glob(".attempt_*"))
+    assert len(attempt_dirs) == 0
+
+

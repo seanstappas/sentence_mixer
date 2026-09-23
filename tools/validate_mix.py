@@ -90,25 +90,29 @@ def validate_mix(
     require_asr: bool = False,
     skip_asr: bool = False,
     asr_tolerance: float = 0.20,
+    xml_path: Optional[Union[str, Path]] = None,
     check_loudness: Optional[bool] = None,
     target_loudness: float = -16.0,
     loudness_tolerance: float = 1.0,
     max_true_peak: float = -1.0,
 ) -> bool:
+    explicit_xml_path = Path(xml_path).resolve() if xml_path else None
     if stem:
         stem_path = Path(stem).resolve()
         actual_plan_path = stem_path.with_suffix(".plan.json")
         wav_path = stem_path.with_suffix(".wav")
         mp4_path = stem_path.with_suffix(".mp4")
-        xml_path = stem_path.with_suffix(".xml")
+        resolved_xml_path = explicit_xml_path or stem_path.with_suffix(".xml")
     elif render_path and plan_path:
         mp4_path = Path(render_path).resolve()
         actual_plan_path = Path(plan_path).resolve()
         wav_path = mp4_path.with_suffix(".wav")
-        xml_path = mp4_path.with_suffix(".xml")
+        resolved_xml_path = explicit_xml_path or mp4_path.with_suffix(".xml")
         stem_path = mp4_path.with_suffix("")
     else:
         raise ValueError("Either stem or both render_path and plan_path must be provided to validate_mix")
+
+    xml_path = resolved_xml_path
 
     plan_path = actual_plan_path
     errors: List[str] = []
@@ -133,6 +137,22 @@ def validate_mix(
         plan = EditPlan.load(plan_path)
         plan.validate()
         print(f"[+] EditPlan is structurally valid (plan_id: {plan.plan_id}, segments: {len(plan.segments)})")
+
+        # Discover XML from completion manifest or plan metadata if default xml_path does not exist
+        if not xml_path.exists():
+            manifest_p = mp4_path.parent / f"{mp4_path.stem}.manifest.json"
+            if manifest_p.exists():
+                try:
+                    m_info = json.loads(manifest_p.read_text(encoding="utf-8"))
+                    xml_rec = m_info.get("artifacts", {}).get("xml", {}).get("path")
+                    if xml_rec and Path(xml_rec).exists():
+                        xml_path = Path(xml_rec).resolve()
+                except Exception:
+                    pass
+            if not xml_path.exists() and hasattr(plan, "metadata"):
+                xml_meta = plan.metadata.get("xml_path")
+                if xml_meta and Path(xml_meta).exists():
+                    xml_path = Path(xml_meta).resolve()
     except Exception as e:
         errors.append(f"EditPlan validation failed: {e}")
         for err in errors:
@@ -311,6 +331,7 @@ if __name__ == "__main__":
     parser.add_argument("--stem", help="Base path / stem of output artifacts (without extension)")
     parser.add_argument("--render", help="Path to rendered MP4 file (optional alternative to --stem)")
     parser.add_argument("--plan", help="Path to EditPlan JSON file (optional alternative to --stem)")
+    parser.add_argument("--xml", help="Path to exported Final Cut Pro XML file")
     parser.add_argument("--require-asr", action="store_true", help="Require ASR listening verification against plan.target_text")
     parser.add_argument("--skip-asr", action="store_true", help="Skip ASR listening verification")
     parser.add_argument("--asr-tolerance", type=float, default=0.20, help="ASR WER tolerance threshold (default: 0.20)")
@@ -327,6 +348,7 @@ if __name__ == "__main__":
         stem=args.stem,
         render_path=args.render,
         plan_path=args.plan,
+        xml_path=args.xml,
         require_asr=args.require_asr,
         skip_asr=args.skip_asr,
         asr_tolerance=args.asr_tolerance,

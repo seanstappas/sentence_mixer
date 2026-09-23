@@ -19,6 +19,7 @@ from typing import Optional
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOOLS_DIR = REPO_ROOT / "tools"
@@ -206,6 +207,7 @@ def test_verify_listening_allow_insertions_flag():
     assert res_high_tol["bleed_detected"] is True
 
 
+@pytest.mark.model
 def test_get_backend():
     # Test auto backend resolution
     backend = get_backend("auto")
@@ -229,17 +231,18 @@ def test_verify_listening_cer_threshold():
     assert any("CER" in r for r in res["failure_reasons"])
 
 
-def test_audio_extraction_wav_and_mp4():
-    wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
+def test_audio_extraction_wav_and_mp4(tmp_path: Path):
+    wav_p = tmp_path / "test_extract.wav"
+    dummy_audio = np.zeros(16000, dtype=np.float32)
+    sf.write(str(wav_p), dummy_audio, 16000)
+
+    wav_audio = extract_audio_16k(wav_p)
+    assert isinstance(wav_audio, np.ndarray)
+    assert wav_audio.ndim == 1
+    assert len(wav_audio) == 16000
+    assert not np.any(np.isnan(wav_audio))
+
     mp4_p = REPO_ROOT / "output" / "smoke_basic.mp4"
-
-    if wav_p.exists():
-        wav_audio = extract_audio_16k(wav_p)
-        assert isinstance(wav_audio, np.ndarray)
-        assert wav_audio.ndim == 1
-        assert len(wav_audio) > 0
-        assert not np.any(np.isnan(wav_audio))
-
     if mp4_p.exists():
         mp4_audio = extract_audio_16k(mp4_p)
         assert isinstance(mp4_audio, np.ndarray)
@@ -249,6 +252,7 @@ def test_audio_extraction_wav_and_mp4():
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_real_audio_verification():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     mp4_p = REPO_ROOT / "output" / "smoke_basic.mp4"
@@ -275,6 +279,7 @@ def test_real_audio_verification():
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_cli_exit_code_success():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -285,6 +290,7 @@ def test_cli_exit_code_success():
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_cli_exit_code_failure():
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -301,6 +307,7 @@ def test_cli_exit_code_operational_error():
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_cli_json_output(capsys):
     wav_p = REPO_ROOT / "output" / "smoke_basic.wav"
     if not wav_p.exists():
@@ -321,6 +328,7 @@ def test_cli_json_output(capsys):
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_validate_mix_asr_acceptance_gate():
     smoke_stem = REPO_ROOT / "output" / "smoke_basic"
     if smoke_stem.with_suffix(".plan.json").exists() and smoke_stem.with_suffix(".wav").exists():
@@ -334,6 +342,7 @@ def test_validate_mix_asr_acceptance_gate():
 
 
 @pytest.mark.model
+@pytest.mark.real_corpus
 def test_evaluate_suite_asr_integration(monkeypatch, tmp_path):
     import shutil
     from evaluate import evaluate_suite

@@ -64,13 +64,16 @@ def _generate_synthetic_speech(
 # R1: ASR Listening Verification & Bleed Detection Tests
 # ==============================================================================
 
+@pytest.mark.model
+@pytest.mark.real_corpus
 class TestASRListeningVerification:
     """Empirical verification of R1 ASR Listener CLI, metrics, and bleed rejection."""
 
     def test_cli_smoke_basic_wav_match(self):
         """Verify tools/listen_verify.py on smoke_basic.wav returns exit code 0 and WER 0.00."""
         wav_path = OUTPUT_DIR / "smoke_basic.wav"
-        assert wav_path.exists(), f"Missing test asset: {wav_path}"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
 
         cmd = [
             sys.executable,
@@ -96,7 +99,8 @@ class TestASRListeningVerification:
     def test_cli_smoke_basic_mp4_match(self):
         """Verify tools/listen_verify.py directly extracts audio from MP4 and succeeds."""
         mp4_path = OUTPUT_DIR / "smoke_basic.mp4"
-        assert mp4_path.exists(), f"Missing test asset: {mp4_path}"
+        if not mp4_path.exists():
+            pytest.skip(f"Missing test asset: {mp4_path}")
 
         cmd = [
             sys.executable,
@@ -117,6 +121,8 @@ class TestASRListeningVerification:
     def test_cli_corrupted_expected_text_fails(self):
         """Verify tools/listen_verify.py exits with code 1 when expected text is completely mismatched."""
         wav_path = OUTPUT_DIR / "smoke_basic.wav"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
         cmd = [
             sys.executable,
             str(TOOLS_DIR / "listen_verify.py"),
@@ -139,6 +145,8 @@ class TestASRListeningVerification:
         not in the expected text, resulting in exit code 1 and accurate bleeding_words.
         """
         wav_path = OUTPUT_DIR / "smoke_basic.wav"  # Transcribes to "Hello there"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
         cmd = [
             sys.executable,
             str(TOOLS_DIR / "listen_verify.py"),
@@ -162,6 +170,8 @@ class TestASRListeningVerification:
         not present in the audio.
         """
         wav_path = OUTPUT_DIR / "smoke_basic.wav"  # Transcribes to "Hello there"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
         cmd = [
             sys.executable,
             str(TOOLS_DIR / "listen_verify.py"),
@@ -179,22 +189,13 @@ class TestASRListeningVerification:
         assert "wan" in data["missing_words"]
         assert "kenobi" in data["missing_words"]
 
-    def test_cli_operational_error_on_missing_file(self):
-        """Verify tools/listen_verify.py exits with code 2 on missing input file."""
-        cmd = [
-            sys.executable,
-            str(TOOLS_DIR / "listen_verify.py"),
-            "--input", "nonexistent_media_path_12345.wav",
-            "--expected", "Hello",
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        assert proc.returncode == 2, f"Expected exit code 2 for missing file, got {proc.returncode}"
-
     def test_cli_allow_insertions_flag(self):
         """
         Verify --allow-insertions permits extra spoken words if WER threshold is loosened.
         """
         wav_path = OUTPUT_DIR / "smoke_basic.wav"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
         # Audio is "Hello there". Expected is "Hello". Without flag, insertion fails.
         # With --allow-insertions and tolerance=1.0, it should pass.
         cmd = [
@@ -214,6 +215,8 @@ class TestASRListeningVerification:
     def test_json_schema_completeness(self):
         """Verify that JSON output strictly satisfies the PROJECT.md interface contract."""
         wav_path = OUTPUT_DIR / "smoke_basic.wav"
+        if not wav_path.exists():
+            pytest.skip(f"Missing test asset: {wav_path}")
         cmd = [
             sys.executable,
             str(TOOLS_DIR / "listen_verify.py"),
@@ -591,4 +594,16 @@ class TestASREdgeCases:
         assert res["passed"] is False
         assert res["missing_words"] == ["hello", "there"]
         assert res["wer"] == 1.0
+
+    def test_cli_operational_error_on_missing_file(self):
+        """Verify tools/listen_verify.py exits with code 2 on missing input file."""
+        cmd = [
+            sys.executable,
+            str(TOOLS_DIR / "listen_verify.py"),
+            "--input", "nonexistent_media_path_12345.wav",
+            "--expected", "Hello",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        assert proc.returncode == 2, f"Expected exit code 2 for missing file, got {proc.returncode}"
+
 

@@ -8,6 +8,7 @@ Unit and integration tests for Milestone 3 (R2):
 
 from __future__ import annotations
 
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -203,3 +204,171 @@ def test_phoneme_recognizer_and_mic_safety():
     )
     with pytest.raises(AssertionError, match="Safety violation: microphone analysis audio"):
         assert_no_mic_audio_in_plan(contaminated_plan)
+
+
+def test_phoneme_recognizer_interface_and_audio_to_arpabet(monkeypatch):
+    """Verify PhonemeRecognizer exposes real interface and connects audio to arpabet."""
+    rec = PhonemeRecognizer()
+    assert hasattr(rec, "record_audio_snippet")
+    assert hasattr(rec, "audio_to_arpabet")
+    assert hasattr(rec, "transcribe_audio_to_text")
+    assert hasattr(rec, "text_to_arpabet")
+    assert hasattr(rec, "recognize_phonetic_string")
+
+    # audio_to_arpabet with mocked transcription
+    monkeypatch.setattr(rec, "transcribe_audio_to_text", lambda audio, sample_rate=16000: "bacon")
+    phones = rec.audio_to_arpabet(np.zeros(16000, dtype=np.float32))
+    assert phones in (["B", "EY1", "K", "AH0", "N"], ["B", "EY1", "K", "AH1", "N"])
+
+    # Empty audio transcription returns empty list
+    monkeypatch.setattr(rec, "transcribe_audio_to_text", lambda audio, sample_rate=16000: "")
+    assert rec.audio_to_arpabet(np.zeros(16000, dtype=np.float32)) == []
+
+    # Calling record_audio_snippet without sounddevice raises RuntimeError
+    with pytest.raises(RuntimeError, match="Microphone recording unavailable"):
+        rec.record_audio_snippet(duration=0.1)
+
+
+def test_t18_empty_recognition_raises_runtime_error(monkeypatch):
+    """T18: Empty recognition must raise RuntimeError, never fabricating {AH0}."""
+    rec = PhonemeRecognizer()
+    monkeypatch.setattr(rec, "transcribe_audio_to_text", lambda audio, sample_rate=16000: "")
+    with pytest.raises(RuntimeError, match="Empty audio recognition result"):
+        rec.recognize_phonetic_string(np.zeros(16000, dtype=np.float32), interactive=False)
+
+
+def test_t06_pronunciation_branch_isolation_and_compounds():
+    """T06: Two-pronunciation 'read', compounds, repeated ambiguous words. One connected pronunciation per occurrence/component."""
+    lex = Lexicon([])
+    # 'read' has two pronunciations: present (R IY1 D) and past (R EH1 D)
+    lex.word_to_pronunciations["read"] = [["R", "IY1", "D"], ["R", "EH1", "D"]]
+    lex.word_to_pronunciations["off"] = [["AO1", "F"]]
+
+    # 1. Compound 'read-off' must produce bounded Cartesian product (2 distinct pronunciations)
+    prons = lex.get_pronunciations("read-off")
+    assert len(prons) == 2, f"Expected 2 compound pronunciations, got {len(prons)}: {prons}"
+    assert ["R", "IY1", "D", "AO1", "F"] in prons
+    assert ["R", "EH1", "D", "AO1", "F"] in prons
+
+    # 2. TargetGraphBuilder assigns distinct branch_ids
+    builder = TargetGraphBuilder(lex)
+    graph = builder.build("read")
+    nodes_b0 = [n for n in graph.nodes if n.branch_id == 0]
+    nodes_b1 = [n for n in graph.nodes if n.branch_id == 1]
+    assert [n.phone for n in nodes_b0] == ["R", "IY1", "D"]
+    assert [n.phone for n in nodes_b1] == ["R", "EH1", "D"]
+
+    # 3. Span candidate branches do not cross: candidate covering branch 0 does not contain nodes from branch 1
+    inv = InventoryIndex()
+    inv.sources["src1"] = SourceRecord(
+        content_id="src1", source_path="v.mp4", native_sample_rate=16000, native_channels=1
+    )
+    # Source occurrence of "read" pronounced R IY1 D
+    evs = [
+        AlignedEvent(event_id=f"e{i}", source_content_id="src1", utterance_id="u1", speaker_id="spk1",
+                     kind="phone", start_sample=i*1600, end_sample=(i+1)*1600, label=p, base_phone=p[:2])
+        for i, p in enumerate(["R", "IY1", "D"])
+    ]
+    for i in range(len(evs)-1):
+        evs[i].successor_id = evs[i+1].event_id
+    wo = WordOccurrence(
+        word_id="wo_read", source_content_id="src1", speaker_id="spk1",
+        word_normalized="read", word_original="read", start_sample=0, end_sample=4800,
+        phone_event_ids=[e.event_id for e in evs], realized_phones=["R", "IY1", "D"],
+    )
+    inv.events = {e.event_id: e for e in evs}
+    inv.words = {"wo_read": wo}
+    inv.word_to_word_ids = {"read": ["wo_read"]}
+
+    selector = SpanSelector(inv)
+    cands = selector.retrieve_candidates(graph, speaker_id="spk1")
+    word_cands = [c for c in cands if c.span_type == "word"]
+    for c in word_cands:
+        # Branch IDs of all covered nodes must be identical
+        b_ids = {graph.nodes[nid].branch_id for nid in c.covered_nodes}
+        assert len(b_ids) == 1, f"Candidate {c.candidate_id} spans mixed branch IDs: {b_ids}"
+
+
+def test_t07_strict_phone_syntax_validation():
+    """T07: {AE9}, {AH10}, {T1}, malformed groups/gaps. Location-aware rejection; no silent repair/persistence."""
+    # 1. Invalid stress digit > 2
+    with pytest.raises(ValueError, match="Invalid stress '9'"):
+        tokenize_hybrid_syntax("Hello {AE9} world")
+
+    # 2. Extra stress digits
+    with pytest.raises(ValueError, match="Invalid stress '10'"):
+        tokenize_hybrid_syntax("Hello {AH10} world")
+
+    # 3. Consonant stress
+    with pytest.raises(ValueError, match="consonants cannot take stress"):
+        tokenize_hybrid_syntax("Hello {T1} world")
+
+    # 4. Negative gap duration
+    with pytest.raises(ValueError, match="must be finite and non-negative"):
+        tokenize_hybrid_syntax("Hello <gap:-50ms> world")
+
+    # 5. Empty phonetic group
+    with pytest.raises(ValueError, match="Empty phonetic group"):
+        tokenize_hybrid_syntax("Hello {} world")
+
+
+def test_t17_microphone_and_wav_adapter_rates_and_safety(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    T17: Microphone action through actual adapter; WAV at 16/44.1/48 kHz:
+    Real API is connected; correct rate/duration; editable result; no mic audio in plan.
+    """
+    import soundfile as sf
+    from phoneme_recognizer import PhonemeRecognizer, assert_no_mic_audio_in_plan
+    from contracts import EditPlan, PlanSegment, RationalTime
+
+    rec = PhonemeRecognizer()
+    # Mock transcribe_audio_to_text to avoid downloading/running ASR model in unit test
+    monkeypatch.setattr(rec, "transcribe_audio_to_text", lambda audio, sample_rate=16000: "hello")
+
+    # Test WAV files at 16 kHz, 44.1 kHz, and 48 kHz
+    for target_sr in [16000, 44100, 48000]:
+        dur = 0.5
+        sine_audio = (0.2 * np.sin(2 * np.pi * 440.0 * np.linspace(0, dur, int(dur * target_sr)))).astype(np.float32)
+        wav_path = tmp_path / f"test_{target_sr}.wav"
+        sf.write(str(wav_path), sine_audio, target_sr, subtype="PCM_16")
+
+        result = rec.recognize_phonetic_string(wav_path, interactive=False)
+        assert result.startswith("{") and result.endswith("}")
+        assert "HH" in result
+
+    # Test interactive edit capability
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "{HH AH0 L OW0}")
+    edited_res = rec.recognize_phonetic_string(wav_path, interactive=True)
+    assert edited_res == "{HH AH0 L OW0}"
+
+    # Verify assert_no_mic_audio_in_plan catches leaked microphone audio
+    leaked_plan = EditPlan(
+        target_text="test",
+        speaker_id="speaker_01",
+        project_sample_rate=48000,
+        video_fps=RationalTime(30, 1),
+        total_output_samples=4800,
+        total_video_frames=3,
+        segments=[
+            PlanSegment(
+                segment_index=0,
+                source_content_id="mic_audio_clip",
+                speaker_id="speaker_01",
+                source_start_sample=0,
+                source_end_sample=4800,
+                output_start_sample=0,
+                output_end_sample=4800,
+                target_text="test",
+                target_phones=["T"],
+                span_type="word",
+                source_video_path="recorded_mic_temp.wav",
+            )
+        ],
+    )
+    with pytest.raises(AssertionError, match="Safety violation: microphone analysis audio detected"):
+        assert_no_mic_audio_in_plan(leaked_plan)
+
+
+
+

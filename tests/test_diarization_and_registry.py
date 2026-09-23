@@ -310,3 +310,171 @@ def test_empirical_anakin_vs_obi_wan_separation(tmp_path: Path):
     unseen_anakin_emb = diarizer.extract_embedding(sf.read(str(anakin_wavs[-1]))[0], sf.read(str(anakin_wavs[-1]))[1])
     matched_spk_anakin, anakin_score = registry.match_cluster(unseen_anakin_emb)
     assert matched_spk_anakin == "anakin"
+
+
+# ---------------------------------------------------------------------------
+# T15  Singleton identity separation (A08 — singleton bypass fix)
+# ---------------------------------------------------------------------------
+
+
+def test_t15_singleton_voices_get_distinct_ids(tmp_path: Path):
+    """
+    T15: Two recordings, each with exactly one speech turn (singleton clusters),
+    must receive DISTINCT anonymous IDs.  The old code always assigned "speaker_01"
+    which caused all singletons to collide.
+
+    Each unique unrecognised singleton must produce a unique scoped ID instead
+    of sharing "speaker_01".
+    """
+    import soundfile as sf
+
+    sr = 16000
+
+    # Two signals with very different frequency content → distinct embeddings
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    signal_a = (0.5 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
+    signal_b = (0.5 * np.sin(2 * np.pi * 3000 * t)).astype(np.float32)
+
+    wav_a = tmp_path / "voice_a.wav"
+    wav_b = tmp_path / "voice_b.wav"
+    sf.write(str(wav_a), signal_a, sr)
+    sf.write(str(wav_b), signal_b, sr)
+
+    reg_path = tmp_path / "registry.json"
+    # Use a high threshold so neither matches the other
+    registry = SpeakerRegistry(config_path=reg_path, similarity_threshold=0.99)
+    diarizer = SpeakerDiarizer(registry=registry)
+
+    # Diarize voice A — single turn, no known speaker
+    ivs_a = diarizer.diarize(str(wav_a), interactive=False)
+    assert len(ivs_a) >= 1, "No diarized intervals from voice_a"
+    id_a = ivs_a[0].speaker_id
+
+    # Diarize voice B — single turn, no known speaker
+    ivs_b = diarizer.diarize(str(wav_b), interactive=False)
+    assert len(ivs_b) >= 1, "No diarized intervals from voice_b"
+    id_b = ivs_b[0].speaker_id
+
+    # Neither should be the old collision name
+    assert id_a != "speaker_01", "Singleton A must not be assigned legacy 'speaker_01'"
+    assert id_b != "speaker_01", "Singleton B must not be assigned legacy 'speaker_01'"
+
+    # Two distinct voices must produce distinct IDs
+    assert id_a != id_b, (
+        f"Two distinct singleton voices were incorrectly merged into the same ID '{id_a}'"
+    )
+
+
+def test_t15_known_speaker_singleton_matched_readonly(tmp_path: Path):
+    """
+    T15 (known match variant): When a singleton recording matches a pre-enrolled
+    profile, the match must be read-only — the stored centroid must NOT change.
+    """
+    import soundfile as sf
+
+    sr = 16000
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    signal = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    wav = tmp_path / "known_voice.wav"
+    sf.write(str(wav), signal, sr)
+
+    reg_path = tmp_path / "registry.json"
+    registry = SpeakerRegistry(config_path=reg_path, similarity_threshold=0.50)
+
+    # Pre-enroll a profile with a centroid equal to an all-positive unit vector
+    known_centroid = np.ones(192, dtype=np.float32)
+    known_centroid /= np.linalg.norm(known_centroid)
+    registry.register_or_update("known_speaker", centroid=known_centroid, sample_count=10)
+
+    # Force a match by injecting the same centroid into the diarizer's embedding extraction
+    diarizer = SpeakerDiarizer(registry=registry)
+
+    # Record the centroid BEFORE diarizing
+    centroid_before = registry.speakers["known_speaker"].centroid_array().copy()
+
+    # Override extract_embedding to always return the known_centroid so we
+    # guarantee a registry hit without needing a real model match.
+    diarizer.extract_embedding = lambda audio, sample_rate=None: known_centroid.copy()
+
+    ivs = diarizer.diarize(str(wav), interactive=False)
+
+    centroid_after = registry.speakers["known_speaker"].centroid_array()
+    assert np.allclose(centroid_before, centroid_after, atol=1e-6), (
+        "Registry centroid was mutated by a read-only singleton match (centroid contamination)"
+    )
+    if ivs:
+        assert ivs[0].speaker_id == "known_speaker"
+
+
+# ---------------------------------------------------------------------------
+# T16  Overlap / outside-word ineligibility (A08 — near-rescue removal)
+# ---------------------------------------------------------------------------
+
+
+def test_t16_overlap_words_ineligible():
+    """
+    T16: Words that intersect an OVERLAP-flagged interval must be marked
+    speaker_id='OVERLAP' and speaker_eligible=False.
+    """
+    diarized = [
+        DiarizationInterval(start_sec=0.0, end_sec=1.0, speaker_id="spk_a"),
+        DiarizationInterval(start_sec=0.5, end_sec=2.0, speaker_id="spk_b"),
+        DiarizationInterval(start_sec=1.0, end_sec=3.0, speaker_id="OVERLAP", is_overlap=True),
+    ]
+    words = [
+        {"start_sec": 0.1, "end_sec": 0.4, "word": "clean"},    # fully in spk_a → eligible
+        {"start_sec": 1.2, "end_sec": 1.8, "word": "crossed"},  # in OVERLAP region → ineligible
+    ]
+    reconciled = reconcile_word_intervals_with_speakers(diarized, words)
+
+    assert reconciled[0]["speaker_eligible"] is True
+    assert reconciled[0]["speaker_id"] == "spk_a"
+
+    assert reconciled[1]["speaker_eligible"] is False
+    assert reconciled[1]["speaker_id"] == "OVERLAP"
+
+
+def test_t16_outside_words_ineligible_no_rescue():
+    """
+    T16: Words that fall completely outside all diarized intervals must be
+    marked UNKNOWN/ineligible.  The old 0.15s nearest-interval rescue is gone —
+    even a word 0.01s from the nearest interval boundary must NOT be rescued.
+    """
+    diarized = [
+        DiarizationInterval(start_sec=1.0, end_sec=2.0, speaker_id="spk_a"),
+    ]
+    words = [
+        # 10 ms outside the interval boundary (would have been rescued before fix)
+        {"start_sec": 2.01, "end_sec": 2.50, "word": "near"},
+        # Completely out of range (silence)
+        {"start_sec": 5.0,  "end_sec": 6.0,  "word": "far"},
+    ]
+    reconciled = reconcile_word_intervals_with_speakers(diarized, words)
+
+    for w in reconciled:
+        assert w["speaker_eligible"] is False, (
+            f"Word '{w['word']}' at [{w['start_sec']},{w['end_sec']}] "
+            "must not be eligible — it is outside all diarized intervals"
+        )
+        assert w["speaker_id"] == "UNKNOWN", (
+            f"Word '{w['word']}' outside all intervals must be UNKNOWN, not '{w['speaker_id']}'"
+        )
+
+
+def test_t16_boundary_crossing_word_multi_speaker_ineligible():
+    """
+    T16: A word that spans two non-overlapping speaker intervals (boundary crossing)
+    must be marked ineligible with speaker_id='OVERLAP'.
+    """
+    diarized = [
+        DiarizationInterval(start_sec=0.0, end_sec=1.0, speaker_id="spk_a"),
+        DiarizationInterval(start_sec=1.0, end_sec=2.0, speaker_id="spk_b"),
+    ]
+    words = [
+        # Spans boundary between spk_a and spk_b
+        {"start_sec": 0.8, "end_sec": 1.2, "word": "boundary"},
+    ]
+    reconciled = reconcile_word_intervals_with_speakers(diarized, words)
+
+    assert reconciled[0]["speaker_eligible"] is False
+    assert reconciled[0]["speaker_id"] == "OVERLAP"

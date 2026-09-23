@@ -7,6 +7,7 @@ All intervals are half-open: [start_sample, end_sample).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
@@ -56,6 +57,12 @@ class RationalTime:
 
     def to_dict(self) -> Dict[str, int]:
         return {"numerator": self.numerator, "denominator": self.denominator}
+
+    def validate(self) -> None:
+        if self.denominator <= 0:
+            raise ValueError(f"RationalTime denominator must be positive: {self.denominator}")
+        if self.numerator <= 0:
+            raise ValueError(f"RationalTime numerator must be positive: {self.numerator}")
 
 
 @dataclass
@@ -243,6 +250,7 @@ class TargetPhoneNode:
     duration_prior_sec: Optional[float] = None
     target_pitch_semitones: Optional[float] = None
     prosodic_bias: Optional[str] = None  # e.g. "question", "exclamation"
+    branch_id: int = 0  # index into lexicon.get_pronunciations() alternatives for this token
 
 
 @dataclass
@@ -256,6 +264,7 @@ class TargetGraph:
     end_nodes: List[int]
     punctuation_pauses: Dict[int, float] = field(default_factory=dict)  # token index -> pause seconds
     terminal_punctuation: str = ""
+    explicit_gaps: Dict[int, float] = field(default_factory=dict)  # boundary index -> gap seconds
 
     def validate(self) -> None:
         if not self.nodes:
@@ -304,7 +313,7 @@ class PlanSegment:
     target_phones: List[str]
     span_type: str
     source_video_path: str
-    gain_db: float = 0.0
+    gain_db: Optional[float] = None
     fade_in_samples: int = 0
     fade_out_samples: int = 0
     is_silence: bool = False
@@ -316,6 +325,29 @@ class PlanSegment:
     @property
     def duration_samples(self) -> int:
         return self.output_end_sample - self.output_start_sample
+
+    def validate(self) -> None:
+        if not math.isfinite(self.output_start_sample) or not math.isfinite(self.output_end_sample):
+            raise ValueError(f"Segment {self.segment_index} output bounds must be finite")
+        if self.output_start_sample < 0 or self.output_end_sample <= self.output_start_sample:
+            raise ValueError(
+                f"Invalid segment output sample bounds: [{self.output_start_sample}, {self.output_end_sample})"
+            )
+        if self.gain_db is not None and not math.isfinite(self.gain_db):
+            raise ValueError(f"Segment {self.segment_index} gain_db must be finite: {self.gain_db}")
+        if not math.isfinite(self.video_source_pts_sec):
+            raise ValueError(f"Segment {self.segment_index} video_source_pts_sec must be finite: {self.video_source_pts_sec}")
+        if self.video_start_frame < 0 or self.video_frame_count < 0:
+            raise ValueError(f"Segment {self.segment_index} video frames must be non-negative")
+        if self.fade_in_samples < 0 or self.fade_out_samples < 0:
+            raise ValueError(f"Segment {self.segment_index} fades must be non-negative")
+        if not self.is_silence:
+            if not math.isfinite(self.source_start_sample) or not math.isfinite(self.source_end_sample):
+                raise ValueError(f"Segment {self.segment_index} source bounds must be finite")
+            if self.source_start_sample < 0 or self.source_end_sample <= self.source_start_sample:
+                raise ValueError(
+                    f"Invalid segment source sample bounds: [{self.source_start_sample}, {self.source_end_sample})"
+                )
 
 
 @dataclass
@@ -329,6 +361,20 @@ class PlanTransition:
     fade_samples: int = 0
     join_cost: float = 0.0
     notes: str = ""
+
+    def validate(self) -> None:
+        if self.from_segment_index < 0 or self.to_segment_index < 0:
+            raise ValueError(f"Transition indices must be non-negative: {self.from_segment_index} -> {self.to_segment_index}")
+        if self.from_segment_index >= self.to_segment_index:
+            raise ValueError(
+                f"Transition link must be strictly forward (no cycles): {self.from_segment_index} -> {self.to_segment_index}"
+            )
+        if self.overlap_samples < 0:
+            raise ValueError(f"Transition overlap_samples cannot be negative: {self.overlap_samples}")
+        if self.fade_samples < 0:
+            raise ValueError(f"Transition fade_samples cannot be negative: {self.fade_samples}")
+        if not math.isfinite(self.join_cost):
+            raise ValueError(f"Transition join_cost must be finite: {self.join_cost}")
 
 
 @dataclass
@@ -354,22 +400,101 @@ class EditPlan:
             raise ValueError(f"Incompatible plan schema version: {self.schema_version}")
         if self.project_sample_rate <= 0:
             raise ValueError(f"Invalid sample rate: {self.project_sample_rate}")
+        if not math.isfinite(self.total_output_samples) or self.total_output_samples < 0:
+            raise ValueError(f"Invalid total_output_samples: {self.total_output_samples}")
+        if not math.isfinite(self.total_video_frames) or self.total_video_frames < 0:
+            raise ValueError(f"Invalid total_video_frames: {self.total_video_frames}")
+
+        if isinstance(self.video_fps, RationalTime):
+            self.video_fps.validate()
+        else:
+            raise ValueError("video_fps must be an instance of RationalTime")
+
         if not self.segments:
             raise ValueError("EditPlan contains no segments")
+
+        # Validate each segment
+        for seg in self.segments:
+            seg.validate()
+            if self.sources and not seg.is_silence:
+                if seg.source_content_id not in self.sources:
+                    raise ValueError(
+                        f"Segment {seg.segment_index} references unknown source_content_id: '{seg.source_content_id}'"
+                    )
+
+        # Timeline monotonicity & start boundary
+        if self.segments[0].output_start_sample != 0:
+            raise ValueError(
+                f"EditPlan timeline must start at sample 0, got {self.segments[0].output_start_sample}"
+            )
+
+        for k in range(len(self.segments) - 1):
+            curr = self.segments[k]
+            nxt = self.segments[k + 1]
+            if nxt.output_start_sample < curr.output_start_sample:
+                raise ValueError(
+                    f"Timeline non-monotonic: segment {k+1} starts at {nxt.output_start_sample} "
+                    f"before segment {k} starts at {curr.output_start_sample}"
+                )
+            # Absence of undeclared holes: segment k+1 cannot start after segment k ends
+            if nxt.output_start_sample > curr.output_end_sample:
+                raise ValueError(
+                    f"Undeclared hole in timeline between segment {k} (ends at {curr.output_end_sample}) "
+                    f"and segment {k+1} (starts at {nxt.output_start_sample}). Any pause must be an explicit silence segment."
+                )
+
+        # Absence of triple overlaps: at any time point, at most 2 segments can overlap
+        for k in range(len(self.segments) - 2):
+            if self.segments[k + 2].output_start_sample < self.segments[k].output_end_sample:
+                raise ValueError(
+                    f"Triple overlap detected: segment {k+2} (starts at {self.segments[k+2].output_start_sample}) "
+                    f"overlaps with segment {k} (ends at {self.segments[k].output_end_sample})"
+                )
+
+        # Transition integrity
+        for t in self.transitions:
+            t.validate()
+            if t.from_segment_index >= len(self.segments) or t.to_segment_index >= len(self.segments):
+                raise ValueError(
+                    f"Transition {t.transition_index} references out-of-range segment indices: "
+                    f"{t.from_segment_index} -> {t.to_segment_index} (total segments: {len(self.segments)})"
+                )
+            from_seg = self.segments[t.from_segment_index]
+            to_seg = self.segments[t.to_segment_index]
+            expected_overlap = from_seg.output_end_sample - to_seg.output_start_sample
+            if t.transition_type == "overlap":
+                if t.overlap_samples <= 0:
+                    raise ValueError(f"Transition {t.transition_index} has type 'overlap' but overlap_samples={t.overlap_samples} <= 0")
+                if t.overlap_samples >= from_seg.duration_samples or t.overlap_samples >= to_seg.duration_samples:
+                    raise ValueError(
+                        f"Transition {t.transition_index} overlap {t.overlap_samples} exceeds segment duration "
+                        f"({from_seg.duration_samples} or {to_seg.duration_samples})"
+                    )
+                if t.overlap_samples != expected_overlap:
+                    raise ValueError(
+                        f"Transition {t.transition_index} declared overlap {t.overlap_samples} "
+                        f"does not match actual segment boundary overlap {expected_overlap}"
+                    )
+            else:
+                if expected_overlap != 0:
+                    raise ValueError(
+                        f"Transition {t.transition_index} is '{t.transition_type}' but segments overlap by {expected_overlap} samples"
+                    )
 
         # Validate non-accumulating output sample timing equation:
         # output_samples = sum(segment_samples) - sum(overlap_samples)
         # Note: explicit pauses are represented as silence segments with is_silence=True
-        computed_samples = 0
-        for seg in self.segments:
-            computed_samples += seg.duration_samples
-
+        computed_samples = sum(seg.duration_samples for seg in self.segments)
         total_overlap = sum(t.overlap_samples for t in self.transitions if t.transition_type == "overlap")
         expected_total = computed_samples - total_overlap
         if self.total_output_samples != expected_total:
             raise ValueError(
                 f"EditPlan sample count mismatch: declared total_output_samples={self.total_output_samples}, "
                 f"computed={expected_total} (sum_segments={computed_samples} - overlaps={total_overlap})"
+            )
+        if self.segments[-1].output_end_sample != self.total_output_samples:
+            raise ValueError(
+                f"EditPlan last segment end sample {self.segments[-1].output_end_sample} does not equal total_output_samples {self.total_output_samples}"
             )
 
     def to_dict(self) -> Dict[str, Any]:

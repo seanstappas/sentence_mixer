@@ -16,18 +16,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from contracts import TargetGraph, TargetPhoneNode
-from lexicon import Lexicon, get_phone_stress, strip_phone_stress
+from lexicon import Lexicon, get_phone_stress, strip_phone_stress, validate_phone
+import math
 
-# Standard 39 ARPAbet base phones
-VALID_BASE_PHONES = {
-    "AA", "AE", "AH", "AO", "AW", "AY", "B", "CH", "D", "DH", "EH", "ER", "EY",
-    "F", "G", "HH", "IH", "IY", "JH", "K", "L", "M", "N", "NG", "OW", "OY",
-    "P", "R", "S", "SH", "T", "TH", "UH", "UW", "V", "W", "Y", "Z", "ZH",
-}
-
-VOWEL_PHONES = {
-    "AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"
-}
 
 # Robust duration priors by phone manner category (in seconds)
 DEFAULT_DURATION_PRIORS: Dict[str, float] = {
@@ -96,13 +87,10 @@ def tokenize_hybrid_syntax(text: str) -> List[HybridToken]:
             valid_phones: List[str] = []
             for raw_p in raw_phones:
                 p_up = raw_p.upper()
-                base = strip_phone_stress(p_up)
-                if base not in VALID_BASE_PHONES:
-                    raise ValueError(f"Invalid ARPAbet phone '{p_up}' in phonetic group '{phonetic}'")
-                stress = get_phone_stress(p_up)
-                if stress is not None and base not in VOWEL_PHONES:
-                    # Consonants do not take stress digits in standard ARPAbet
-                    p_up = base
+                try:
+                    validate_phone(p_up)
+                except ValueError as e:
+                    raise ValueError(f"Invalid ARPAbet phone '{p_up}' in phonetic group '{phonetic}': {e}") from e
                 valid_phones.append(p_up)
 
             norm_group = "{" + " ".join(valid_phones) + "}"
@@ -116,12 +104,14 @@ def tokenize_hybrid_syntax(text: str) -> List[HybridToken]:
             )
 
         elif gap:
-            gm = re.match(r"^<gap:\s*(\d+(?:\.\d+)?)\s*(ms|s)?>$", gap.lower())
+            gm = re.match(r"^<gap:\s*(-?\d+(?:\.\d+)?)\s*(ms|s)?>$", gap.lower())
             if not gm:
                 raise ValueError(
                     f"Invalid gap format: '{gap}'. Expected format: <gap:250ms> or <gap:1.5s>"
                 )
             val = float(gm.group(1))
+            if not math.isfinite(val) or val < 0:
+                raise ValueError(f"Invalid gap duration in '{gap}': gap duration must be finite and non-negative.")
             unit = gm.group(2)
             if unit == "ms":
                 sec = val / 1000.0
@@ -130,6 +120,7 @@ def tokenize_hybrid_syntax(text: str) -> List[HybridToken]:
             else:
                 # Default to ms if >= 10, else seconds
                 sec = val / 1000.0 if val >= 10.0 else val
+
 
             tokens.append(
                 HybridToken(
@@ -179,6 +170,7 @@ class TargetGraphBuilder:
 
         normalized_words: List[str] = []
         punctuation_pauses: Dict[int, float] = {}
+        explicit_gaps: Dict[int, float] = {}
         token_prosodic_bias: Dict[int, str] = {}
 
         # Separate speech tokens (words and phonetic groups) from gap tags and punctuation
@@ -187,19 +179,21 @@ class TargetGraphBuilder:
 
         for tok in tokens:
             if tok.kind == "gap":
-                w_idx = max(0, len(speech_tokens) - 1)
-                punctuation_pauses[w_idx] = tok.gap_seconds or 0.25
+                b_idx = len(speech_tokens) - 1  # -1 for leading gap, 0..N-1 for internal/trailing
+                gap_val = tok.gap_seconds if tok.gap_seconds is not None else 0.25
+                explicit_gaps[b_idx] = explicit_gaps.get(b_idx, 0.0) + gap_val
+                punctuation_pauses[b_idx] = explicit_gaps[b_idx]
             elif tok.kind == "punctuation":
-                w_idx = max(0, len(speech_tokens) - 1)
+                b_idx = max(0, len(speech_tokens) - 1)
                 pause_sec = 0.45 if tok.norm_text in ".!?;:" else 0.25
                 # Do not overwrite an explicit gap if one was already set
-                if w_idx not in punctuation_pauses:
-                    punctuation_pauses[w_idx] = pause_sec
+                if b_idx not in explicit_gaps:
+                    punctuation_pauses[b_idx] = pause_sec
                 terminal_punctuation = tok.norm_text
                 if tok.norm_text == "?":
-                    token_prosodic_bias[w_idx] = "question"
+                    token_prosodic_bias[b_idx] = "question"
                 elif tok.norm_text == "!":
-                    token_prosodic_bias[w_idx] = "exclamation"
+                    token_prosodic_bias[b_idx] = "exclamation"
             else:
                 speech_tokens.append(tok)
                 normalized_words.append(tok.norm_text)
@@ -222,7 +216,7 @@ class TargetGraphBuilder:
                     raise ValueError(f"No pronunciation could be determined for target word: '{tok.norm_text}'")
 
             branches: List[Tuple[int, int]] = []
-            for p_list in prons:
+            for branch_idx, p_list in enumerate(prons):
                 branch_node_ids: List[int] = []
                 for p_pos, phone in enumerate(p_list):
                     node_id = len(nodes)
@@ -246,6 +240,7 @@ class TargetGraphBuilder:
                         is_phrase_final=is_phrase_fin,
                         duration_prior_sec=prior_dur,
                         prosodic_bias=token_prosodic_bias.get(w_idx),
+                        branch_id=branch_idx,
                     )
                     nodes.append(node)
                     branch_node_ids.append(node_id)
@@ -295,6 +290,8 @@ class TargetGraphBuilder:
             end_nodes=end_nodes,
             punctuation_pauses=punctuation_pauses,
             terminal_punctuation=terminal_punctuation or "",
+            explicit_gaps=explicit_gaps,
         )
+
         graph.validate()
         return graph

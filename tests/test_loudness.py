@@ -563,3 +563,121 @@ def test_normalize_audio_ebur128_stereo_channel_preservation(tmp_path: Path):
     assert read_data.ndim == 2
     assert read_data.shape[1] == 2
 
+
+def test_t22_zero_db_anti_phase_stereo_output_roles(tmp_path: Path):
+    """
+    T22: Zero dB, anti-phase stereo, source-run partitioning, all output roles.
+    Verifies:
+    1. Explicit gain_db=0.0 bypasses auto-leveling even when normalize_loudness=True.
+    2. Anti-phase stereo (+s, -s) is preserved without summing to silence.
+    3. Splitting a continuous source run into two adjacent segments preserves exact samples.
+    """
+    sr = 48000
+    dur_sec = 1.0
+    num_samples = int(sr * dur_sec)
+
+    # 1. Anti-phase stereo signal (+s on ch0, -s on ch1)
+    t = np.linspace(0, dur_sec, num_samples, endpoint=False)
+    mono_s = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    anti_phase_stereo = np.column_stack([mono_s, -mono_s])
+
+    src_wav = tmp_path / "antiphase_src.wav"
+    sf.write(str(src_wav), anti_phase_stereo, sr, subtype="PCM_16")
+
+    src_record = SourceRecord(
+        content_id="src_antiphase",
+        source_path=str(src_wav),
+        native_sample_rate=sr,
+        native_channels=2,
+    )
+
+    # Single segment plan with explicit gain_db = 0.0
+    plan_single = EditPlan(
+        target_text="single",
+        speaker_id="speaker_01",
+        rendering_mode="source-derived",
+        project_sample_rate=sr,
+        video_fps=RationalTime(30, 1),
+        total_output_samples=num_samples,
+        total_video_frames=30,
+        sources={"src_antiphase": src_record},
+        segments=[
+            PlanSegment(
+                segment_index=0,
+                source_content_id="src_antiphase",
+                speaker_id="speaker_01",
+                source_start_sample=0,
+                source_end_sample=num_samples,
+                output_start_sample=0,
+                output_end_sample=num_samples,
+                target_text="single",
+                target_phones=["S"],
+                span_type="word",
+                source_video_path=str(src_wav),
+                gain_db=0.0,  # Explicit 0 dB
+            )
+        ],
+    )
+
+    out_single = tmp_path / "single_rendered.wav"
+    render_master_pcm(plan_single, out_single, normalize_loudness=True)
+
+    read_single, _ = sf.read(str(out_single), dtype="float32")
+    assert read_single.ndim == 2 and read_single.shape[1] == 2
+    # Left channel is positive phase, Right is anti-phase (negative)
+    assert np.corrcoef(read_single[:, 0], read_single[:, 1])[0, 1] < -0.99
+    # Maximum amplitude should not be collapsed to silence
+    assert np.max(np.abs(read_single)) > 0.15
+
+    # 2. Partitioned into two consecutive halves with gain_db = 0.0
+    mid = num_samples // 2
+    plan_partitioned = EditPlan(
+        target_text="partitioned",
+        speaker_id="speaker_01",
+        rendering_mode="source-derived",
+        project_sample_rate=sr,
+        video_fps=RationalTime(30, 1),
+        total_output_samples=num_samples,
+        total_video_frames=30,
+        sources={"src_antiphase": src_record},
+        segments=[
+            PlanSegment(
+                segment_index=0,
+                source_content_id="src_antiphase",
+                speaker_id="speaker_01",
+                source_start_sample=0,
+                source_end_sample=mid,
+                output_start_sample=0,
+                output_end_sample=mid,
+                target_text="half1",
+                target_phones=["S"],
+                span_type="word",
+                source_video_path=str(src_wav),
+                gain_db=0.0,
+            ),
+            PlanSegment(
+                segment_index=1,
+                source_content_id="src_antiphase",
+                speaker_id="speaker_01",
+                source_start_sample=mid,
+                source_end_sample=num_samples,
+                output_start_sample=mid,
+                output_end_sample=num_samples,
+                target_text="half2",
+                target_phones=["S"],
+                span_type="word",
+                source_video_path=str(src_wav),
+                gain_db=0.0,
+            ),
+        ],
+    )
+
+    out_partitioned = tmp_path / "partitioned_rendered.wav"
+    render_master_pcm(plan_partitioned, out_partitioned, normalize_loudness=True)
+
+    read_part, _ = sf.read(str(out_partitioned), dtype="float32")
+    assert read_part.shape == read_single.shape
+    # Bit-exact or close match between single continuous run and partitioned run
+    assert np.allclose(read_single, read_part, atol=1e-5)
+
+

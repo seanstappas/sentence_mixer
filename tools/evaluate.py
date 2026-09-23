@@ -96,9 +96,11 @@ def evaluate_suite(
                 "--selector", selector,
                 "--features", "basic",
                 "--mode", "source-derived",
+                "--non-interactive",
                 "--render", str(render_mp4),
-                "--plan", str(render_plan),
             ]
+            if selector != "legacy":
+                cmd.extend(["--plan", str(render_plan)])
 
             res = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
             success = (res.returncode == 0 and render_mp4.exists())
@@ -242,9 +244,40 @@ if __name__ == "__main__":
     parser.add_argument("--asr-tolerance", type=float, default=0.20, help="ASR WER tolerance threshold (default: 0.20)")
     args = parser.parse_args()
 
-    evaluate_suite(
-        suite_path=args.suite,
-        output_dir=args.output_dir,
-        verify_asr=not args.skip_asr,
-        asr_tolerance=args.asr_tolerance,
-    )
+    try:
+        report = evaluate_suite(
+            suite_path=args.suite,
+            output_dir=args.output_dir,
+            verify_asr=not args.skip_asr,
+            asr_tolerance=args.asr_tolerance,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Operational failure during evaluation: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    summary = report.get("summary", {})
+    asr_pass_rate = summary.get("asr_pass_rate")
+    render_failures = [
+        c for c in report.get("cases", [])
+        if not c.get("render_success", True)
+    ]
+
+    # Exit 1 if any render failed or ASR acceptance is not 100 %
+    if render_failures:
+        print(
+            f"[FAIL] {len(render_failures)} render failure(s). Exit 1.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if asr_pass_rate is not None and asr_pass_rate < 1.0:
+        total_asr = summary.get("total_asr_evaluated", 0)
+        asr_passes = summary.get("asr_passes", 0)
+        print(
+            f"[FAIL] ASR acceptance gate: {asr_passes}/{total_asr} passed "
+            f"({asr_pass_rate * 100:.1f}%). Exit 1.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    sys.exit(0)

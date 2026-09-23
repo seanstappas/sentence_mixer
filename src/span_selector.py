@@ -66,6 +66,22 @@ class SpanSelector:
         for n in graph.nodes:
             token_to_nodes.setdefault(n.token_index, []).append(n.node_id)
 
+        # Group graph nodes by (token_index, branch_id) for branch-isolated candidates
+        token_to_branch_nodes: Dict[tuple, List[int]] = {}
+        for n in graph.nodes:
+            key = (n.token_index, n.branch_id)
+            token_to_branch_nodes.setdefault(key, []).append(n.node_id)
+
+        # Per-token ordered list of (branch_id, [node_ids]) for word candidates
+        token_branches: Dict[int, List[tuple]] = {}
+        for t_idx in set(n.token_index for n in graph.nodes):
+            branch_ids = sorted(set(
+                n.branch_id for n in graph.nodes if n.token_index == t_idx
+            ))
+            token_branches[t_idx] = [
+                (bid, token_to_branch_nodes[(t_idx, bid)]) for bid in branch_ids
+            ]
+
         n_tokens = len(graph.normalized_words)
 
         # 1. Multi-word phrase candidates (Level 1)
@@ -73,6 +89,10 @@ class SpanSelector:
             for start_tok in range(n_tokens - span_len + 1):
                 end_tok = start_tok + span_len - 1
                 phrase_tokens = graph.normalized_words[start_tok:end_tok + 1]
+
+                # Explicit gap boundaries cannot be swallowed by a multi-word phrase candidate
+                if any(t in getattr(graph, "explicit_gaps", {}) for t in range(start_tok, end_tok)):
+                    continue
 
                 # Find source words matching phrase_tokens[0]
                 first_w_candidates = eligible_words.get(phrase_tokens[0], [])
@@ -110,10 +130,12 @@ class SpanSelector:
                             break
 
                     if is_full_phrase and len(matched_wos) == span_len:
-                        # Collect all nodes across tokens start_tok..end_tok
+                        # Collect nodes for branch 0 of each token in span (branch-isolated)
                         covered = []
                         for t_idx in range(start_tok, end_tok + 1):
-                            covered.extend(token_to_nodes[t_idx])
+                            # Use branch 0 (first/most-common pronunciation) for phrase span coverage
+                            branch0_nodes = token_to_branch_nodes.get((t_idx, 0), token_to_nodes[t_idx])
+                            covered.extend(branch0_nodes)
 
                         all_events = []
                         for wo in matched_wos:
@@ -143,44 +165,49 @@ class SpanSelector:
         # 2. Whole word candidates (Level 2)
         for t_idx in range(n_tokens):
             w_norm = graph.normalized_words[t_idx]
-            target_nodes = token_to_nodes[t_idx]
-            target_phones = tuple(graph.nodes[nid].phone for nid in target_nodes)
-            target_base_phones = tuple(graph.nodes[nid].base_phone for nid in target_nodes)
+            word_candidates_base = list(eligible_words.get(w_norm, []))
 
-            word_candidates = list(eligible_words.get(w_norm, []))
-
-            # Reverse pronunciation lookup for intact recorded words matching this phone sequence
-            pron_matches = self.pron_to_words.get(target_phones, [])
-            if not pron_matches:
-                pron_matches = self.base_pron_to_words.get(target_base_phones, [])
-
-            for p_wo in pron_matches:
-                if speaker_id is not None and p_wo.speaker_id != speaker_id:
+            # Generate one set of candidates per pronunciation branch
+            for _bid, branch_nodes in token_branches.get(t_idx, [(0, token_to_nodes.get(t_idx, []))]):
+                if not branch_nodes:
                     continue
-                if p_wo not in word_candidates:
-                    word_candidates.append(p_wo)
+                branch_phones = tuple(graph.nodes[nid].phone for nid in branch_nodes)
+                branch_base_phones = tuple(graph.nodes[nid].base_phone for nid in branch_nodes)
 
-            for wo in word_candidates[:self.max_candidates_per_span]:
-                bias_adj = self._compute_prosodic_bias_adjustment(
-                    target_nodes, wo.source_content_id, wo.start_sample, wo.end_sample, graph
-                )
-                c = SpanCandidate(
-                    candidate_id=f"cand_word_{cand_id_counter:05d}",
-                    target_node_start=target_nodes[0],
-                    target_node_end=target_nodes[-1],
-                    covered_nodes=target_nodes,
-                    source_content_id=wo.source_content_id,
-                    speaker_id=wo.speaker_id,
-                    start_sample=wo.start_sample,
-                    end_sample=wo.end_sample,
-                    event_ids=wo.phone_event_ids,
-                    span_type="word",
-                    matched_word=wo.word_normalized,
-                    target_cost=0.05 + bias_adj,
-                    quality_cost=0.0,
-                )
-                candidates.append(c)
-                cand_id_counter += 1
+                word_candidates = list(word_candidates_base)
+
+                # Reverse pronunciation lookup for intact recorded words matching this branch's phone sequence
+                pron_matches = self.pron_to_words.get(branch_phones, [])
+                if not pron_matches:
+                    pron_matches = self.base_pron_to_words.get(branch_base_phones, [])
+
+                for p_wo in pron_matches:
+                    if speaker_id is not None and p_wo.speaker_id != speaker_id:
+                        continue
+                    if p_wo not in word_candidates:
+                        word_candidates.append(p_wo)
+
+                for wo in word_candidates[:self.max_candidates_per_span]:
+                    bias_adj = self._compute_prosodic_bias_adjustment(
+                        branch_nodes, wo.source_content_id, wo.start_sample, wo.end_sample, graph
+                    )
+                    c = SpanCandidate(
+                        candidate_id=f"cand_word_{cand_id_counter:05d}",
+                        target_node_start=branch_nodes[0],
+                        target_node_end=branch_nodes[-1],
+                        covered_nodes=branch_nodes,
+                        source_content_id=wo.source_content_id,
+                        speaker_id=wo.speaker_id,
+                        start_sample=wo.start_sample,
+                        end_sample=wo.end_sample,
+                        event_ids=wo.phone_event_ids,
+                        span_type="word",
+                        matched_word=wo.word_normalized,
+                        target_cost=0.05 + bias_adj,
+                        quality_cost=0.0,
+                    )
+                    candidates.append(c)
+                    cand_id_counter += 1
 
         # 3. Whole phone candidates (Level 3 - fallback)
         for node in graph.nodes:
@@ -423,6 +450,68 @@ class SpanSelector:
         self._wavlm_cache[cache_key] = emb
         return emb
 
+    def _get_candidate_boundary_feature(
+        self,
+        cand: SpanCandidate,
+        is_exit: bool,
+        feature_extractor: Optional[Any],
+    ) -> Optional[Any]:
+        """Returns boundary FeatureRecord for candidate exit or entry."""
+        if feature_extractor is None:
+            return None
+        if isinstance(feature_extractor, dict):
+            key = (cand.source_content_id, cand.end_sample if is_exit else cand.start_sample, is_exit)
+            if key in feature_extractor:
+                return feature_extractor[key]
+            key_cand = (cand.candidate_id, "exit" if is_exit else "entry")
+            if key_cand in feature_extractor:
+                return feature_extractor[key_cand]
+            return None
+        if hasattr(feature_extractor, "get_boundary_features"):
+            return feature_extractor.get_boundary_features(cand, is_exit=is_exit)
+        if hasattr(feature_extractor, "extract_tracks") and hasattr(feature_extractor, "get_window_features"):
+            src_rec = self.inv.sources.get(cand.source_content_id)
+            if not src_rec:
+                return None
+            pcm_path = src_rec.cached_analysis_pcm_path or src_rec.source_path
+            if not pcm_path or not Path(pcm_path).exists():
+                return None
+            if not hasattr(self, "_feature_tracks"):
+                self._feature_tracks: Dict[str, Any] = {}
+            if cand.source_content_id not in self._feature_tracks:
+                try:
+                    self._feature_tracks[cand.source_content_id] = feature_extractor.extract_tracks(pcm_path)
+                except Exception:
+                    return None
+            tracks = self._feature_tracks.get(cand.source_content_id)
+            if not tracks:
+                return None
+            window_samples = int(round(0.050 * src_rec.native_sample_rate))
+            if is_exit:
+                w_start = max(cand.start_sample, cand.end_sample - window_samples)
+                w_end = cand.end_sample
+            else:
+                w_start = cand.start_sample
+                w_end = min(cand.end_sample, cand.start_sample + window_samples)
+            return feature_extractor.get_window_features(
+                tracks, start_sample=w_start, end_sample=w_end, native_sr=src_rec.native_sample_rate, source_content_id=cand.source_content_id
+            )
+        return None
+
+    def _compute_guide_prosody_cost(
+        self,
+        cand: SpanCandidate,
+        graph: TargetGraph,
+        prosody_guide: Optional[Any],
+    ) -> float:
+        if prosody_guide is None:
+            return 0.0
+        if hasattr(prosody_guide, "get_candidate_cost"):
+            return float(prosody_guide.get_candidate_cost(cand))
+        if isinstance(prosody_guide, dict):
+            return float(prosody_guide.get(cand.candidate_id, 0.0))
+        return 0.0
+
     def select(
         self,
         graph: TargetGraph,
@@ -465,7 +554,8 @@ class SpanSelector:
         cand_map = {c.candidate_id: c for c in candidates}
 
         for c in initial_candidates:
-            init_cost = c.target_cost + c.quality_cost
+            guide_cost = self._compute_guide_prosody_cost(c, graph, prosody_guide)
+            init_cost = c.target_cost + c.quality_cost + guide_cost
             dp[c.candidate_id] = init_cost
             parent[c.candidate_id] = None
             heapq.heappush(pq, (init_cost, c.candidate_id))
@@ -496,7 +586,10 @@ class SpanSelector:
                     if is_cont:
                         trans_cost = 0.0
                     else:
-                        trans_cost = self.edit_penalty + compute_join_cost(None, None, is_natural_continuation=False)
+                        feat_exit = self._get_candidate_boundary_feature(curr, is_exit=True, feature_extractor=feature_extractor)
+                        feat_entry = self._get_candidate_boundary_feature(succ, is_exit=False, feature_extractor=feature_extractor)
+                        join_cost = compute_join_cost(feat_exit, feat_entry, is_natural_continuation=False)
+                        trans_cost = self.edit_penalty + join_cost
                         if wavlm_backend is not None:
                             tail_len = min(curr.end_sample - curr.start_sample, 4800)
                             head_len = min(succ.end_sample - succ.start_sample, 4800)
@@ -510,12 +603,14 @@ class SpanSelector:
                                 dist = wavlm_backend.compute_cosine_distance(tail_emb, head_emb)
                                 trans_cost += 0.5 * dist
 
-                    cand_cost = succ.target_cost + succ.quality_cost
+                    guide_cost = self._compute_guide_prosody_cost(succ, graph, prosody_guide)
+                    cand_cost = succ.target_cost + succ.quality_cost + guide_cost
                     new_cost = cost + trans_cost + cand_cost
 
                     if succ.candidate_id not in dp or new_cost < dp[succ.candidate_id]:
                         dp[succ.candidate_id] = new_cost
                         parent[succ.candidate_id] = curr
+
                         heapq.heappush(pq, (new_cost, succ.candidate_id))
 
         if best_terminal_cand is None:

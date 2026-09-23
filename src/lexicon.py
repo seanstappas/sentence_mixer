@@ -68,6 +68,18 @@ def is_numeric_prob(token: str) -> bool:
         return False
 
 
+# Standard 39 ARPAbet base phones
+VALID_BASE_PHONES = {
+    "AA", "AE", "AH", "AO", "AW", "AY", "B", "CH", "D", "DH", "EH", "ER", "EY",
+    "F", "G", "HH", "IH", "IY", "JH", "K", "L", "M", "N", "NG", "OW", "OY",
+    "P", "R", "S", "SH", "T", "TH", "UH", "UW", "V", "W", "Y", "Z", "ZH",
+}
+
+VOWEL_PHONES = {
+    "AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"
+}
+
+
 def strip_phone_stress(phone: str) -> str:
     """Strip trailing stress digits (e.g. OW1 -> OW, AH0 -> AH)."""
     return re.sub(r"\d+$", "", phone)
@@ -79,7 +91,26 @@ def get_phone_stress(phone: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def validate_phone(phone: str) -> None:
+    """Validate a single ARPAbet phone token.
+    Permits stress only as a single '0', '1', or '2' on a supported vowel.
+    Rejects consonant stress, extra digits, unknown phones.
+    """
+    p_up = phone.strip().upper()
+    base = strip_phone_stress(p_up)
+    if base not in VALID_BASE_PHONES:
+        raise ValueError(f"Invalid ARPAbet phone '{phone}': unknown base phone '{base}'")
+    m = re.search(r"(\d+)$", p_up)
+    if m:
+        digits = m.group(1)
+        if base not in VOWEL_PHONES:
+            raise ValueError(f"Invalid consonant stress in phone '{phone}': consonants cannot take stress")
+        if digits not in ("0", "1", "2"):
+            raise ValueError(f"Invalid stress '{digits}' in phone '{phone}': stress must be 0, 1, or 2")
+
+
 class Lexicon:
+
     """
     Unified dictionary and pronunciation manager.
     Loads custom pronunciations first, then base dictionaries, with G2P fallback.
@@ -136,15 +167,18 @@ class Lexicon:
 
         # Try without hyphens or split by hyphen if compound
         if "-" in w:
-            sub_words = w.split("-")
+            sub_words = [sw for sw in w.split("-") if sw]
             sub_prons = [self.get_pronunciations(sw) for sw in sub_words]
             if all(sub_prons):
-                combined = []
-                for p in sub_prons[0]:
-                    combined.extend(p)
-                for sp_list in sub_prons[1:]:
-                    combined.extend(sp_list[0])
-                return [combined]
+                import itertools
+                results: List[List[str]] = []
+                for prod in itertools.islice(itertools.product(*sub_prons), 16):
+                    combo = []
+                    for comp_phones in prod:
+                        combo.extend(comp_phones)
+                    results.append(combo)
+                return results
+
 
         # G2P fallback
         g2p = get_g2p()
@@ -172,15 +206,19 @@ class Lexicon:
         custom_path: Optional[Union[str, Path]] = None,
     ) -> None:
         """
-        Persists an approved pronunciation to custom_pronunciations.txt and updates in-memory dictionary.
+        Persists an approved pronunciation to custom_pronunciations.txt with phone validation,
+        deduplication, and atomic file replacement. Updates in-memory dictionary.
         """
         clean_word = word.strip().lower()
         clean_phones = [p.strip().upper() for p in phones if p.strip()]
         if not clean_phones:
             raise ValueError(f"Cannot save empty pronunciation for word '{word}'")
 
+        # Validate every phone before saving (A05 / A10)
+        for p in clean_phones:
+            validate_phone(p)
+
         if custom_path is None:
-            # Default to repo root dictionaries/custom_pronunciations.txt
             repo_root = Path(__file__).resolve().parent.parent
             custom_path = repo_root / "dictionaries" / "custom_pronunciations.txt"
         else:
@@ -188,16 +226,25 @@ class Lexicon:
 
         custom_path.parent.mkdir(parents=True, exist_ok=True)
         phones_str = " ".join(clean_phones)
+        entry_line = f"{clean_word}\t{phones_str}"
 
-        # Atomic append
-        with open(custom_path, "a", encoding="utf-8") as f:
-            f.write(f"\n{clean_word}\t{phones_str}\n")
+        # Atomic deduplicated read/merge/write
+        existing_lines: List[str] = []
+        if custom_path.exists():
+            existing_lines = [ln.strip() for ln in custom_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+        if entry_line not in existing_lines:
+            existing_lines.append(entry_line)
+            tmp_path = custom_path.with_suffix(f".tmp_{os.getpid()}")
+            tmp_path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+            tmp_path.replace(custom_path)
 
         # Update in-memory entry
         if clean_word not in self.word_to_pronunciations:
             self.word_to_pronunciations[clean_word] = []
         if clean_phones not in self.word_to_pronunciations[clean_word]:
             self.word_to_pronunciations[clean_word].insert(0, clean_phones)
+
 
 
 ARPABET_EXEMPLARS: Dict[str, str] = {

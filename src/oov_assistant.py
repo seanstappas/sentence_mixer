@@ -13,10 +13,10 @@ from typing import Any, Callable, List, Optional, Union
 from lexicon import (
     Lexicon,
     format_phoneme_breakdown,
-    get_phone_stress,
-    strip_phone_stress,
+    validate_phone,
 )
-from target_graph import VALID_BASE_PHONES, VOWEL_PHONES, tokenize_hybrid_syntax
+from target_graph import tokenize_hybrid_syntax
+
 
 
 class OOVAssistant:
@@ -96,14 +96,13 @@ class OOVAssistant:
             valid_phones: List[str] = []
             for rt in raw_tokens:
                 p_up = rt.upper()
-                base = strip_phone_stress(p_up)
-                if base not in VALID_BASE_PHONES:
-                    print(f"[!] Warning: Invalid ARPAbet phone '{p_up}'. Falling back to G2P suggestion.")
+                try:
+                    validate_phone(p_up)
+                except ValueError as e:
+                    print(f"[!] Warning: {e}. Falling back to G2P suggestion.")
                     return suggestion
-                stress = get_phone_stress(p_up)
-                if stress is not None and base not in VOWEL_PHONES:
-                    p_up = base
                 valid_phones.append(p_up)
+
 
             if valid_phones:
                 self.lexicon.save_custom_pronunciation(clean_word, valid_phones, self.custom_dict_path)

@@ -184,6 +184,8 @@ def isolate_vocals(
             if meta_file.exists():
                 try:
                     meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    if meta.get("role") and meta.get("role") != "vocals":
+                        return False
                     cached_hash = meta.get("source_sha256")
                     if cached_hash:
                         current_hash = compute_file_sha256(src_p)
@@ -194,10 +196,13 @@ def isolate_vocals(
                             )
                             return False
                 except Exception as e:
-                    print(f"[!] Warning reading stem metadata {meta_file}: {e}")
+                    print(f"[*] Corrupt stem metadata {meta_file} ({e}). Stale vocal stem invalidated.")
+                    return False
             return True
 
         if _is_cache_valid(stem_path, metadata_path):
+
+
             print(f"[+] Using cached vocal stem: {stem_path}")
             return stem_path
         direct_stem = out_base / "vocals.wav"

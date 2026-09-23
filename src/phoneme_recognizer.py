@@ -72,6 +72,39 @@ class PhonemeRecognizer:
 
         return result_phones
 
+    def record_audio_snippet(
+        self,
+        duration: float = 2.5,
+        sample_rate: int = 16000,
+    ) -> np.ndarray:
+        """
+        Records a short audio snippet from the microphone.
+        Returns a 1D float32 numpy array normalized to [-1.0, 1.0].
+        Raises RuntimeError if audio recording device or library is unavailable.
+        """
+        try:
+            import sounddevice as sd  # type: ignore[import-not-found]
+
+            num_frames = int(duration * sample_rate)
+            rec = sd.rec(num_frames, samplerate=sample_rate, channels=1, dtype="float32")
+            sd.wait()
+            return np.squeeze(rec).astype(np.float32)
+        except Exception as e:
+            raise RuntimeError(f"Microphone recording unavailable: {e}") from e
+
+    def audio_to_arpabet(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+    ) -> List[str]:
+        """
+        Transcribes speech audio array and converts recognized text to ARPAbet phone tokens.
+        """
+        text = self.transcribe_audio_to_text(audio_data, sample_rate=sample_rate)
+        if not text:
+            return []
+        return self.text_to_arpabet(text)
+
     def recognize_phonetic_string(
         self,
         audio_source: Union[str, Path, np.ndarray],
@@ -95,7 +128,9 @@ class PhonemeRecognizer:
         phones = self.text_to_arpabet(text)
 
         if not phones:
-            phones = ["AH0"]
+            raise RuntimeError(
+                "Empty audio recognition result: retry with clearer audio or supply explicit phonemes."
+            )
 
         candidate_str = "{" + " ".join(phones) + "}"
 

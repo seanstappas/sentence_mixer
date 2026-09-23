@@ -37,10 +37,20 @@ def generate_fcp_xml(
         r_fps = plan.video_fps
         fps_float = r_fps.as_float()
         segments: List[Any] = list(plan.segments)
-        # If not explicitly specified, derive master WAV from plan output stem
+        # If not explicitly specified, derive master WAV from plan output stem.
+        # This fallback is a last resort — callers should pass master_wav_path
+        # explicitly so the WAV is always resolved relative to the render output,
+        # not relative to the (possibly different) XML output directory.
         if not master_wav_path:
             candidate_wav = out_p.with_suffix(".wav")
             if candidate_wav.exists():
+                import warnings
+                warnings.warn(
+                    f"[fcp_xml_generator] master_wav_path not supplied; "
+                    f"falling back to '{candidate_wav}' (inferred from XML basename). "
+                    "Pass master_wav_path explicitly to avoid path mismatches.",
+                    stacklevel=3,
+                )
                 master_wav_path = str(candidate_wav)
     else:
         # Legacy units list

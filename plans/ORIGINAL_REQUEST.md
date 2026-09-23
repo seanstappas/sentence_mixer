@@ -168,5 +168,93 @@ User Update & New Inputs for Milestone 2 (Acoustic Speaker Diarization & Registr
    - We are currently generating `input/anakin_ep3_1.en.vtt` via Whisper so it has subtitles and can be aligned cleanly.
 
 Incorporate these requirements into Milestone 2 execution and verification.
+## Follow-up — 2026-09-22T20:50:45Z
 
+Implement the complete remediation handoff in `plans/9_22_antigravity_remediation_plan.md` end to end in `D:\Code\sentence_mixer`.
 
+Working directory: D:\Code\sentence_mixer
+Integrity mode: development
+
+## Requirements
+
+### R1. Cumulative Video Scheduling & Timeline Alignment (A12, T01-T03)
+Schedule video frames strictly from the cumulative audio timeline rather than per-segment flooring or independent duration rounding:
+- Use one unified integer quantizer: $Q(n) = (n \cdot p + S \cdot q - 1) // (S \cdot q)$ for sample rate $S$ and rational frame rate $p/q$.
+- Calculate segment video frames as $Q(n_{\text{end}}) - Q(n_{\text{start}})$, permitting sub-frame audio cuts to have 0 separately displayed frames without truncating the video timeline.
+- When an audio cut exceeds available source video PTS, hold/clone the final eligible source video frame (e.g. using `tpad=stop_mode=clone`) rather than advancing into unselected neighboring dialogue or truncating video.
+- Eliminate audio/video timing drift so $N$ cuts match cumulative duration exactly (e.g., 6 x 50-ms cuts at 48 kHz / 30 fps render exactly 14,400 audio samples and 9 video frames; 1,000 cuts render exactly 2,400,000 audio samples and 1,500 video frames).
+
+### R2. Hard Gap Constraints, Phonetic Validation & Branch Isolation (A05, A07, T04-T07)
+Enforce strict syntax parsing, graph branching, and timeline gap preservation:
+- Treat explicit `<gap:Xms>` as hard timeline constraints that phrase candidate retrieval cannot cross. `<gap:0ms>` strictly compiles to 0.0s (not defaulting to 250ms).
+- Support leading, trailing, zero, and consecutive gaps in both standard and cuts-only modes, holding the appropriate source frame for video pause intervals.
+- Tag target graph nodes with explicit pronunciation branch IDs so multi-word or whole-word candidates cannot span incompatible pronunciation variants (e.g. `READ = R IY1 D` vs `R EH1 D`).
+- In `lexicon.py`, construct compound word alternatives via bounded Cartesian products choosing exactly one pronunciation per component.
+- Strictly validate phonemes and stress (stress 0, 1, or 2 permitted only on vowels; reject consonant stress like `T1` or invalid stress like `AE9`).
+
+### R3. Connected Measured Acoustic Join Scoring & Prosody Guidance (A06, A07, A11, T08-T10)
+Connect actual measured acoustic features and prosody guide inputs to candidate selection:
+- Extract and supply continuous boundary feature records (energy, spectral flux, voicing, F0) into `compute_join_cost(tail_feat, head_feat)` in `SpanSelector` instead of passing `(None, None)`.
+- Connect `ProsodyGuide` relative pitch contour to target candidate scoring.
+- Protect natural continuous source runs from pruning before DP selection, and charge new-edit penalties only for introduced joins.
+- Swapping compatible/incompatible boundary features or guide preferences must measurably change the selected path and cost trace.
+
+### R4. Overlap-Aware Diarization & Word Eligibility Safety (A08, T15-T16)
+Implement safe speaker reconciliation and identity mapping:
+- Eliminate the singleton auto-assignment shortcut (`speaker_01`). Require calibrated cosine threshold verification (> 0.75) and margin checks before assigning speech turns to enrolled registry profiles.
+- Flag ambiguous matches as unresolved requiring review rather than silently contaminating persistent profiles.
+- Exclude words with >30% overlap or out-of-interval speech from single-speaker candidate eligibility (`is_eligible = False`). Eliminate `speaker_id="OVERLAP"` with `is_eligible=True`.
+- Noninteractive unknown clusters receive recording-scoped IDs, not global shared profiles.
+
+### R5. Real Microphone / WAV Adapter & Unified Interactive Review (A09, A10, T17-T19)
+Provide a concrete capture/audio file adapter and unified target preparation:
+- Connect a concrete audio ingestion interface with explicit 16 kHz mono resampling.
+- Implement acoustic phoneme recognition with error and uncertainty handling, eliminating invented `{AH0}` fallbacks on empty/unrecognized audio.
+- Align `oov_assistant.py` method calls with actual `PhonemeRecognizer` signatures.
+- Unify target preparation and pronunciation review before selector dispatch across both legacy and span modes.
+- Implement atomic, concurrency-safe persistence for `custom_pronunciations.txt` with deduplication and phone validation.
+
+### R6. Cache Invalidation, MFA Staging & Faithful Delivery (A02, A04, A13, A14, T11-T14, T21-T23)
+Harden outer caching, batch staging, and output generation:
+- Fingerprint media content bytes, selected stream, transcript bytes, speaker intervals, lexicon version, alignment model, and isolation options before accepting outer inventory cache hits in `run_mixer.py`.
+- Preserve relative directory hierarchy during MFA batch chunk staging to prevent chunk filename collisions across multi-speaker inputs.
+- Pass the finalized master WAV path explicitly to FCP XML generation (do not guess from XML basename). Export canonical picture schedules with holds/freezes and accurate channel mappings.
+- Freeze all DSP decisions (gains, fades, normalization) in `EditPlan` before rendering, and stage deliverables in a unique attempt directory before atomic publication.
+
+### R7. Truthful Acceptance Gates & CLI Unification (A15, A16, T20, T24-T25)
+Unify CLI flags and enforce rigorous acceptance criteria:
+- Wire `--text`, `--target-audio`, `--record-target`, `--diarize auto|off|force`, `--speaker-registry`, `--guide-transcript`, and `--cache-dir` with mutual exclusion and actionable error handling. Reject unsupported legacy option combinations.
+- In `listen_verify.py` and `evaluate.py`, enforce strict token matching that catches missing negations (e.g., "we are not going home" vs "we are going home"), missing words, and unexpected dialogue bleed.
+- Return exit code 0 for passing, 1 for acceptance failure, and 2 for operational/configuration error.
+- All donor speech remains strictly source-derived; analysis tools (ASR, WavLM, diarization, guide) must never donate audio to rendered speech.
+- Preserve the dirty working tree; do NOT run `git commit`.
+
+---
+
+## Acceptance Criteria
+
+### Audio/Video Timeline & Exact Gaps (T01-T05)
+- [ ] 6 x 50-ms cuts at 48 kHz / 30 fps in cuts-only mode produce exactly 14,400 master audio samples and exactly 9 video frames.
+- [ ] 1,000 cuts produce exactly 2,400,000 master audio samples and exactly 1,500 video frames without cumulative drift.
+- [ ] Ultra-short subframe audio cuts are preserved with 0-frame picture spans allowed.
+- [ ] `hello <gap:250ms> there` produces exactly 12,000 silence samples at 48 kHz without phrase retrieval bridging across the gap.
+- [ ] Zero, leading, trailing, and consecutive gaps compile and render faithfully with corresponding picture holds.
+
+### Phonetic Correctness & Acoustic Scoring (T06-T10)
+- [ ] Heteronym `read` (`R IY1 D` vs `R EH1 D`) is resolved to a single connected pronunciation branch per occurrence; compound words like `read-off` generate one pronunciation per component.
+- [ ] Invalid phone/stress syntax (`{AE9}`, `{AH10}`, `{T1}`) is rejected with location-aware errors and not silently repaired or saved.
+- [ ] Swapping measured basic boundary features changes the chosen DP path and transition cost trace.
+- [ ] Prosody guide pitch preferences feed candidate costs in `SpanSelector`.
+- [ ] Protected suitable natural source runs survive pruning and are preferred over over-fragmented phone splices.
+
+### Provenance, Diarization & Word Safety (T11-T16)
+- [ ] Modifying media bytes, speaker intervals, or lexicon invalidates outer inventory cache and triggers re-alignment.
+- [ ] MFA batch staging preserves directory structure, preventing chunk collisions across multi-speaker inputs.
+- [ ] Two distinct singleton speakers are not automatically merged into `speaker_01`.
+- [ ] Speech intervals with >30% overlap or outside valid speech intervals are marked `is_eligible = False`.
+
+### Microphone, XML & Acceptance Gates (T17-T25)
+- [ ] Microphone/WAV adapter ingests audio at 16/44.1/48 kHz, resamples to 16 kHz mono, and handles empty/uncertain input without fake `{AH0}`.
+- [ ] XML exporter receives explicit master WAV path and correctly renders freeze frames as hold clips regardless of XML basename.
+- [ ] `listen_verify.py` rejects dropped negations ("we are not going home" vs "we are going home") with exit code 1.
+- [ ] Full offline test suite (`pytest -m "not model and not real_corpus"`), `ruff`, and `mypy` pass with 100% success and 0 errors.

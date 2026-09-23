@@ -187,9 +187,15 @@ def build_units_inventory(
     tg_files = sorted(tg_files)
 
     for tg_file in tg_files:
-        chunk_id = Path(tg_file).stem
-        if chunk_id not in chunks_meta:
+        rel_key = str(Path(tg_file).relative_to(aligned_dir).with_suffix("")).replace("\\", "/")
+        stem_key = Path(tg_file).stem
+        if rel_key in chunks_meta:
+            chunk_id = rel_key
+        elif stem_key in chunks_meta:
+            chunk_id = stem_key
+        else:
             continue
+
 
         chunk_info = chunks_meta[chunk_id]
         chunk_start_sec = float(chunk_info.get("start_sec", 0.0))

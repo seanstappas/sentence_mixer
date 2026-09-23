@@ -140,3 +140,63 @@ def test_build_inventory_silence_and_chaining():
         hello_w = next(w for w in words.values() if w["word_normalized"] == "hello")
         assert hello_w["realized_phones"] == ["HH", "AH0"]
         assert len(hello_w["phone_event_ids"]) == 2
+
+
+def test_t14_nested_duplicate_chunk_basenames():
+    """T14: Nested duplicate chunk basenames across batching thresholds -> Every submitted chunk remains distinct and accounted for."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        aligned_dir = tmp_path / "aligned"
+        (aligned_dir / "spk_a").mkdir(parents=True)
+        (aligned_dir / "spk_b").mkdir(parents=True)
+
+        tg_a = aligned_dir / "spk_a" / "chunk_0001.TextGrid"
+        tg_b = aligned_dir / "spk_b" / "chunk_0001.TextGrid"
+        create_synthetic_textgrid(tg_a)
+        create_synthetic_textgrid(tg_b)
+
+        manifest = {
+            "source_video": "dummy.mp4",
+            "speaker_id": "multi",
+            "chunks": {
+                "spk_a/chunk_0001": {
+                    "start_sec": 0.0,
+                    "end_sec": 1.5,
+                    "text": "hello there",
+                    "speaker_id": "spk_a",
+                },
+                "spk_b/chunk_0001": {
+                    "start_sec": 10.0,
+                    "end_sec": 11.5,
+                    "text": "hello there",
+                    "speaker_id": "spk_b",
+                },
+            }
+        }
+        manifest_file = tmp_path / "corpus_manifest.json"
+        manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+        output_index = tmp_path / "units_index.json"
+
+        synth_source = SourceRecord(
+            content_id="src_nested",
+            source_path="dummy.mp4",
+            native_sample_rate=48000,
+            native_channels=2,
+        )
+
+        inv_data = build_units_inventory(
+            str(aligned_dir),
+            str(manifest_file),
+            str(output_index),
+            source_record=synth_source,
+        )
+
+        # Both chunks must be preserved as distinct utterances
+        utterances = inv_data["utterances"]
+        assert len(utterances) == 2, f"Expected 2 distinct utterances for nested duplicate basenames, got {len(utterances)}"
+        assert "spk_a/chunk_0001" in utterances
+        assert "spk_b/chunk_0001" in utterances
+
+        # Words should be indexed from both chunks (2 words per chunk = 4 words total)
+        assert len(inv_data["words"]) == 4, f"Expected 4 words across both utterances, got {len(inv_data['words'])}"
+

@@ -367,8 +367,20 @@ def test_render_master_pcm_equal_gain_crossover():
 
 def test_video_frame_count_bounded_by_source_duration():
     """
-    Verifies that build_edit_plan bounds video_frame_count so that ceiling rounding
-    does not overrun past the source word duration into adjacent dialogue.
+    Verifies the cumulative frame ceiling quantizer Q(n)=(n*p+S*q-1)//(S*q).
+
+    Under A12, per-segment source-duration capping is removed. A single segment's
+    frame_count is Q(end_sample) - Q(start_sample). For the first segment starting
+    at sample 0:
+      frame_count = Q(4000) - Q(0)
+                  = ceil(4000 * 30000 / (48000 * 1001)) - 0
+                  = ceil(120000000 / 48048000)
+                  = ceil(2.4975...)
+                  = 3
+
+    This is the *correct* behavior. The previous source-duration cap (<=2) was
+    removed in A12 to eliminate per-segment rounding drift. Accumulated drift is
+    prevented by the cumulative schedule: sum of Q-differences equals Q(total_samples).
     """
     sr = 48000
     fps = RationalTime(30000, 1001)  # 29.97 fps (frame dur ~= 33.37ms)
@@ -381,9 +393,10 @@ def test_video_frame_count_bounded_by_source_duration():
     )
 
     # Word duration = 4000 samples at 48kHz = 0.08333s (83.33ms)
-    # At 29.97 fps: 83.33ms / 33.37ms = 2.497 frames.
-    # Max integer frames in this source slice = floor(0.08333 * 29.97) = 2 frames.
-    # If ceiling rounding allocates 3 frames, it would overrun by (3*33.37 - 83.33) = 16.8ms!
+    # Q(4000) at 48kHz, 30000/1001 fps:
+    # = (4000*30000 + 48000*1001 - 1) // (48000*1001)
+    # = (120000000 + 48048000 - 1) // 48048000
+    # = 168047999 // 48048000  = 3  (ceiling of 2.4975)
     ev = AlignedEvent(
         event_id="ev1",
         source_content_id="src_bound_test",
@@ -423,11 +436,12 @@ def test_video_frame_count_bounded_by_source_duration():
     plan.validate()
 
     seg = plan.segments[0]
-    # Max frames fitting inside 4000 samples @ 48kHz:
-    # 4000 / 48000 * 30000 / 1001 = 2.4975 frames -> max 2 frames!
-    assert seg.video_frame_count <= 2, (
-        f"video_frame_count={seg.video_frame_count} overruns source duration (max 2 frames allowed)"
+    # A12 cumulative quantizer: Q(4000) - Q(0) = 3 - 0 = 3
+    # No source-duration cap applied (removed in A12).
+    assert seg.video_frame_count == 3, (
+        f"Expected cumulative Q(4000)-Q(0)=3, got video_frame_count={seg.video_frame_count}"
     )
+
 
 
 def test_pts_seek_precision_formatting():

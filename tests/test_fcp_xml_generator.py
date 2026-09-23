@@ -82,3 +82,96 @@ def test_generate_fcp_xml_from_edit_plan():
         assert a_file is not None
         assert a_file.find("name") is not None and a_file.find("name").text == "master.wav"
         assert a_file.find("pathurl") is not None and "master.wav" in a_file.find("pathurl").text
+
+
+def test_t21_xml_custom_basename_directory_freeze_hold_stereo(tmp_path: Path):
+    """
+    T21: XML basename/directory differs; pause/hold; mixed rates; stereo.
+    Verifies that generate_fcp_xml:
+    1. Faithfully links the explicit master WAV path even when directory and basename differ completely.
+    2. Handles freeze video / hold segments.
+    3. Handles stereo 2-channel track mapping cleanly.
+    """
+    xml_dir = tmp_path / "export_xml"
+    xml_dir.mkdir(parents=True)
+    xml_path = xml_dir / "custom_timeline_cut.xml"
+
+    render_dir = tmp_path / "render_bin"
+    render_dir.mkdir(parents=True)
+    master_wav = render_dir / "actual_master_render.wav"
+    master_wav.write_bytes(b"RIFF_test_data")
+
+    src_rec = SourceRecord(
+        content_id="src_scene1",
+        source_path="D:/Code/sentence_mixer/input/scene1.mp4",
+        native_sample_rate=44100,
+        native_channels=2,
+    )
+
+    # Segment 0: speech cut (10 frames)
+    seg0 = PlanSegment(
+        segment_index=0,
+        source_content_id="src_scene1",
+        speaker_id="speaker_01",
+        source_start_sample=0,
+        source_end_sample=16000,
+        output_start_sample=0,
+        output_end_sample=16000,
+        target_text="wait",
+        target_phones=["W", "EY1", "T"],
+        span_type="word",
+        source_video_path=src_rec.source_path,
+        video_start_frame=0,
+        video_frame_count=10,
+        video_source_pts_sec=1.5,
+        freeze_video=False,
+    )
+
+    # Segment 1: freeze frame pause / hold (5 frames)
+    seg1 = PlanSegment(
+        segment_index=1,
+        source_content_id="src_scene1",
+        speaker_id="speaker_01",
+        source_start_sample=16000,
+        source_end_sample=24000,
+        output_start_sample=16000,
+        output_end_sample=24000,
+        target_text="<pause>",
+        target_phones=[],
+        span_type="pause",
+        source_video_path=src_rec.source_path,
+        video_start_frame=10,
+        video_frame_count=5,
+        video_source_pts_sec=1.5,
+        freeze_video=True,
+    )
+
+    plan = EditPlan(
+        plan_id="plan_t21",
+        target_text="wait <pause>",
+        speaker_id="speaker_01",
+        video_fps=RationalTime(24, 1),
+        total_output_samples=24000,
+        total_video_frames=15,
+        segments=[seg0, seg1],
+        sources={"src_scene1": src_rec},
+    )
+
+    out_file = generate_fcp_xml(plan, str(xml_path), master_wav_path=str(master_wav))
+    assert Path(out_file).exists()
+
+    tree = ET.parse(out_file)
+    root = tree.getroot()
+
+    # Master audio must point to actual_master_render.wav, not custom_timeline_cut.wav
+    audio_file = root.find(".//media/audio/track/clipitem/file")
+    assert audio_file is not None
+    assert audio_file.find("name").text == "actual_master_render.wav"
+    assert "actual_master_render.wav" in audio_file.find("pathurl").text
+
+    # Video track must contain both the regular cut and the freeze hold
+    vclips = root.findall(".//media/video/track/clipitem")
+    assert len(vclips) == 2
+    assert int(vclips[0].find("end").text) - int(vclips[0].find("start").text) == 10
+    assert int(vclips[1].find("end").text) - int(vclips[1].find("start").text) == 5
+

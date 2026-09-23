@@ -145,10 +145,12 @@ def extract_source_record(
 
     # Decode original rate PCM if not already present
     if not original_pcm.exists() or original_pcm.stat().st_size == 0:
+        audio_stream_idx = int(audio_stream.get("index", 0))
         cmd_orig = [
             "ffmpeg",
             "-y",
             "-i", str(v_path),
+            "-map", f"0:{audio_stream_idx}",
             "-vn",
             "-c:a", "pcm_s16le",
             "-ar", str(native_sample_rate),
@@ -163,13 +165,18 @@ def extract_source_record(
             "ffmpeg",
             "-y",
             "-i", analysis_input,
+        ]
+        if not vocal_stem:
+            cmd_analysis.extend(["-map", f"0:{int(audio_stream.get('index', 0))}"])
+        cmd_analysis.extend([
             "-vn",
             "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
             str(analysis_pcm),
-        ]
+        ])
         subprocess.run(cmd_analysis, capture_output=True, check=True)
+
 
     rec = SourceRecord(
         content_id=content_id,
@@ -224,3 +231,29 @@ def frame_index_to_samples(frame_index: int, fps: RationalTime, sample_rate: int
     num = frame_index * fps.denominator * sample_rate
     den = fps.numerator
     return (num + den // 2) // den
+
+
+def cumulative_frame_ceiling(n_samples: int, sample_rate: int, fps: RationalTime) -> int:
+    """Ceiling quantizer Q(n) = (n*p + S*q - 1) // (S*q).
+
+    Maps a cumulative sample offset to a cumulative frame index using ceiling
+    division, giving drift-free frame counts when differences are taken:
+        frame_count = Q(end_sample) - Q(start_sample)
+
+    Allows 0-frame clips (e.g. for very short pauses) — callers must NOT apply
+    max(1, ...) on the result.
+
+    Args:
+        n_samples:   Cumulative sample offset from the start of the timeline.
+        sample_rate: Project sample rate (S).
+        fps:         Output video frame rate (p/q as RationalTime).
+
+    Returns:
+        Cumulative frame index (ceiling).
+    """
+    if n_samples <= 0:
+        return 0
+    p = fps.numerator
+    q = fps.denominator
+    S = sample_rate
+    return (n_samples * p + S * q - 1) // (S * q)

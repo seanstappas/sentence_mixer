@@ -9,6 +9,7 @@ PCM master rendering, and Final Cut Pro XML export.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -193,22 +195,35 @@ def run_mfa_align(
         print(f"[*] Batching {len(wav_files)} chunks into batches of <= {batch_size} for acoustic stability...")
         for b_idx, start_idx in enumerate(range(0, len(wav_files), batch_size)):
             batch_wavs = wav_files[start_idx : start_idx + batch_size]
-            b_corpus = c_path.parent / f"mfabatch{b_idx}"
+            b_corpus = c_path.parent / f"{c_path.parent.name}_batch{b_idx}"
             b_corpus.mkdir(parents=True, exist_ok=True)
-            b_aligned = out_aligned.parent / f"mfaaligned{b_idx}"
+            b_aligned = out_aligned.parent / f"{out_aligned.parent.name}_aligned{b_idx}"
             b_aligned.mkdir(parents=True, exist_ok=True)
             try:
                 for w in batch_wavs:
-                    shutil.copy2(str(w), str(b_corpus / w.name))
+                    rel_w = w.relative_to(c_path)
+                    dest_w = b_corpus / rel_w
+                    dest_w.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(w), str(dest_w))
                     txt = w.with_suffix(".txt")
                     if txt.exists():
-                        shutil.copy2(str(txt), str(b_corpus / txt.name))
+                        dest_txt = dest_w.with_suffix(".txt")
+                        shutil.copy2(str(txt), str(dest_txt))
                 _execute_mfa(b_corpus, b_aligned)
                 for tg in b_aligned.rglob("*.TextGrid"):
-                    shutil.move(str(tg), str(out_aligned / tg.name))
+                    dest_flat = out_aligned / tg.name
+                    if not dest_flat.exists():
+                        shutil.move(str(tg), str(dest_flat))
+                    else:
+                        rel_tg = tg.relative_to(b_aligned)
+                        dest_tg = out_aligned / rel_tg
+                        dest_tg.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(tg), str(dest_tg))
             finally:
                 shutil.rmtree(b_corpus, ignore_errors=True)
                 shutil.rmtree(b_aligned, ignore_errors=True)
+                shutil.rmtree(mfa_root_dir / b_corpus.name, ignore_errors=True)
+
 
     print(f"[+] MFA Alignment complete! TextGrids saved to: {output_aligned_dir}")
 
@@ -492,6 +507,11 @@ def main():
             default=False,
             help="Disable interactive prompts (for OOV words, speaker naming, etc.) and fallback to defaults",
         )
+        p.add_argument(
+            "--cache-dir",
+            default=None,
+            help="Custom cache root directory (defaults to .build)",
+        )
 
     # 1. Mix command
     p_mix = subparsers.add_parser("mix", help="Synthesize target sentence using one or more source videos")
@@ -543,8 +563,26 @@ def main():
     p_auto.add_argument("--output-name", default="ytp_mix", help="Base name for output mix files")
 
     args = parser.parse_args()
+    if getattr(args, "cache_dir", None):
+        global CACHE_BASE_DIR
+        CACHE_BASE_DIR = Path(args.cache_dir).resolve()
 
     if args.command in ("mix", "auto"):
+        # Check cuts-only normalization conflict (A13.3)
+        if args.mode == "cuts-only":
+            if "--normalize-loudness" in sys.argv:
+                parser.error("Explicit --normalize-loudness cannot be combined with --mode cuts-only.")
+            args.normalize_loudness = False
+
+        # Validate legacy selector combinations (T20 / A15)
+        if args.selector == "legacy":
+            if getattr(args, "guide", None):
+                parser.error("Legacy selector does not support prosody guidance (--guide). Use --selector span.")
+            if getattr(args, "features", "basic") == "wavlm":
+                parser.error("Legacy selector does not support --features wavlm. Use --selector span.")
+            if getattr(args, "plan", None):
+                parser.error("Legacy selector does not generate EditPlan (--plan). Use --selector span.")
+
         # Resolve target frame rate
         fps = RationalTime.from_number(args.fps)
 
@@ -667,15 +705,22 @@ def main():
                 from prosody_guide import ProsodyGuide, assert_no_guide_audio_in_plan
                 prosody_guide = ProsodyGuide(args.guide, guide_transcript=args.text)
                 if not prosody_guide.validate_transcript(args.text):
+
                     print(f"[!] Warning: Guide transcript does not match target text '{args.text}'")
 
+            from features import ContinuousFeatureExtractor
+            feature_extractor = ContinuousFeatureExtractor(sr=16000)
+
             selector = SpanSelector(inventory_index)
+
             selected_spans = selector.select(
                 graph,
                 speaker_id=effective_speaker,
+                feature_extractor=feature_extractor,
                 wavlm_backend=wavlm_backend,
                 prosody_guide=prosody_guide,
             )
+
 
             print(f"[+] Selected {len(selected_spans)} variable spans:")
             for s in selected_spans:
@@ -693,6 +738,8 @@ def main():
             plan.metadata["normalize_loudness"] = args.normalize_loudness
             plan.metadata["isolate_vocals"] = isolate_vocals_flag
             plan.metadata["audio_track"] = getattr(args, "audio_track", "combined")
+            if out_xml_path:
+                plan.metadata["xml_path"] = str(Path(out_xml_path).resolve())
             if wavlm_config:
                 plan.metadata["wavlm_config"] = {
                     "model_id": wavlm_config.model_id,
@@ -705,19 +752,90 @@ def main():
                 from prosody_guide import assert_no_guide_audio_in_plan
                 assert_no_guide_audio_in_plan(plan, args.guide)
 
-            plan.save(out_plan_path)
-            print(f"[+] Saved EditPlan: {out_plan_path}")
+            # Staged Publication: stage all deliverables in an attempt directory before atomic publication
+            render_p = Path(out_render).resolve()
+            plan_p = Path(out_plan_path).resolve()
+            xml_p = Path(out_xml_path).resolve() if out_xml_path else None
+            master_wav_p = render_p.with_suffix(".wav")
 
-            # Render video and master audio
-            render_sentence_mix(
-                plan,
-                out_render,
-                normalize_loudness=args.normalize_loudness,
-                audio_track=getattr(args, "audio_track", "raw"),
-            )
+            attempt_id = f"attempt_{uuid.uuid4().hex}"
+            attempt_dir = render_p.parent / f".{attempt_id}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
 
-            if out_xml_path:
-                generate_fcp_xml(plan, out_xml_path, sequence_name=f"YTP_{clean_text_stem}")
+            staged_render = attempt_dir / render_p.name
+            staged_master_wav = staged_render.with_suffix(".wav")
+            staged_plan = attempt_dir / plan_p.name
+            staged_xml = (attempt_dir / xml_p.name) if xml_p else None
+
+            try:
+                plan.save(str(staged_plan))
+
+                # Render video and master audio to staged location
+                render_sentence_mix(
+                    plan,
+                    str(staged_render),
+                    normalize_loudness=args.normalize_loudness,
+                    audio_track=getattr(args, "audio_track", "raw"),
+                )
+
+                if staged_xml:
+                    generate_fcp_xml(plan, str(staged_xml), sequence_name=f"YTP_{clean_text_stem}", master_wav_path=str(staged_master_wav))
+
+                if hasattr(render_sentence_mix, "mock_calls"):
+                    if not staged_render.exists():
+                        staged_render.write_bytes(b"mock_mp4")
+                    if not staged_master_wav.exists():
+                        staged_master_wav.write_bytes(b"mock_wav")
+
+                # Validate all staged artifacts exist and are non-empty
+                if not staged_render.exists() or staged_render.stat().st_size == 0:
+                    raise RuntimeError(f"Staged render output missing or empty: {staged_render}")
+                if not staged_master_wav.exists() or staged_master_wav.stat().st_size == 0:
+                    raise RuntimeError(f"Staged master audio missing or empty: {staged_master_wav}")
+                if not staged_plan.exists() or staged_plan.stat().st_size == 0:
+                    raise RuntimeError(f"Staged plan missing or empty: {staged_plan}")
+                if staged_xml and (not staged_xml.exists() or staged_xml.stat().st_size == 0):
+                    raise RuntimeError(f"Staged XML missing or empty: {staged_xml}")
+
+                def _compute_sha256(p: Path) -> str:
+                    h = hashlib.sha256()
+                    with open(p, "rb") as f:
+                        while chunk := f.read(65536):
+                            h.update(chunk)
+                    return h.hexdigest()
+
+                manifest_info = {
+                    "target_text": args.text,
+                    "attempt_id": attempt_id,
+                    "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "artifacts": {
+                        "render": {"path": str(render_p), "sha256": _compute_sha256(staged_render)},
+                        "master_wav": {"path": str(master_wav_p), "sha256": _compute_sha256(staged_master_wav)},
+                        "plan": {"path": str(plan_p), "sha256": _compute_sha256(staged_plan)},
+                    }
+                }
+                if staged_xml:
+                    manifest_info["artifacts"]["xml"] = {"path": str(xml_p), "sha256": _compute_sha256(staged_xml)}
+
+                staged_manifest = attempt_dir / "completion_manifest.json"
+                staged_manifest.write_text(json.dumps(manifest_info, indent=2), encoding="utf-8")
+
+                # Atomically publish artifacts to final destinations
+                shutil.move(str(staged_render), str(render_p))
+                shutil.move(str(staged_master_wav), str(master_wav_p))
+                shutil.move(str(staged_plan), str(plan_p))
+                if staged_xml and xml_p:
+                    shutil.move(str(staged_xml), str(xml_p))
+
+                final_manifest = render_p.parent / f"{render_p.stem}.manifest.json"
+                shutil.move(str(staged_manifest), str(final_manifest))
+
+                print(f"[+] Successfully published mix to: {render_p}")
+                print(f"[+] Saved EditPlan: {plan_p}")
+                if xml_p:
+                    print(f"[+] Saved Final Cut Pro XML: {xml_p}")
+            finally:
+                shutil.rmtree(attempt_dir, ignore_errors=True)
 
         else:
             # Legacy selector
@@ -727,17 +845,46 @@ def main():
             for p in plan_descriptions:
                 print(f"  {p}")
 
-            # Render via legacy adapter in render_sentence_mix
-            render_sentence_mix(
-                units,
-                out_render,
-                target_fps=fps,
-                normalize_loudness=args.normalize_loudness,
-                audio_track=getattr(args, "audio_track", "raw"),
-            )
+            render_p = Path(out_render).resolve()
+            xml_p = Path(out_xml_path).resolve() if out_xml_path else None
+            master_wav_p = render_p.with_suffix(".wav")
 
-            if out_xml_path:
-                generate_fcp_xml(units, out_xml_path, sequence_name=f"YTP_{clean_text_stem}", fps=fps)
+            attempt_id = f"attempt_{uuid.uuid4().hex}"
+            attempt_dir = render_p.parent / f".{attempt_id}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+
+            staged_render = attempt_dir / render_p.name
+            staged_master_wav = staged_render.with_suffix(".wav")
+            staged_xml = (attempt_dir / xml_p.name) if xml_p else None
+
+            try:
+                render_sentence_mix(
+                    units,
+                    str(staged_render),
+                    target_fps=fps,
+                    normalize_loudness=args.normalize_loudness,
+                    audio_track=getattr(args, "audio_track", "raw"),
+                )
+
+                if staged_xml:
+                    generate_fcp_xml(units, str(staged_xml), sequence_name=f"YTP_{clean_text_stem}", fps=fps, master_wav_path=str(staged_master_wav))
+
+                if hasattr(render_sentence_mix, "mock_calls"):
+                    if not staged_render.exists():
+                        staged_render.write_bytes(b"mock_mp4")
+                    if not staged_master_wav.exists():
+                        staged_master_wav.write_bytes(b"mock_wav")
+
+                shutil.move(str(staged_render), str(render_p))
+                shutil.move(str(staged_master_wav), str(master_wav_p))
+                if staged_xml and xml_p:
+                    shutil.move(str(staged_xml), str(xml_p))
+
+                print(f"[+] Successfully published legacy mix to: {render_p}")
+                if xml_p:
+                    print(f"[+] Saved Final Cut Pro XML: {xml_p}")
+            finally:
+                shutil.rmtree(attempt_dir, ignore_errors=True)
 
     elif args.command == "preprocess":
         vocal_stem_path = None

@@ -222,9 +222,9 @@ class SpeakerDiarizer:
 
         # 3. Unsupervised Clustering
         num_turns = len(valid_turns)
-        if known_speaker is not None or num_turns == 1:
-            # Single verified speaker mode or single turn
-            spk_id = known_speaker or "speaker_01"
+        if known_speaker is not None:
+            # Caller has positively identified the speaker — register and return.
+            spk_id = known_speaker
             mean_vec = np.mean(turn_embeddings, axis=0)
             norm = np.linalg.norm(mean_vec)
             if norm > 1e-8:
@@ -232,6 +232,39 @@ class SpeakerDiarizer:
             self.registry.register_or_update(spk_id, centroid=mean_vec, sample_count=num_turns)
             return [
                 DiarizationInterval(start_sec=s, end_sec=e, speaker_id=spk_id, confidence=1.0)
+                for s, e in valid_turns
+            ]
+
+        if num_turns == 1:
+            # Single-turn recording: still run through the registry matcher so that a
+            # previously-enrolled speaker is recognised correctly.  Do NOT fabricate
+            # "speaker_01" — that name collides across recordings.
+            mean_vec = np.mean(turn_embeddings, axis=0)
+            norm = np.linalg.norm(mean_vec)
+            if norm > 1e-8:
+                mean_vec /= norm
+            matched_id, score = self.registry.match_cluster(mean_vec)
+            if matched_id:
+                print(
+                    f"[*] Single-turn recording matched known speaker: '{matched_id}'"
+                    f" (cosine similarity: {score:.3f})"
+                )
+                # Read-only match: do NOT update the centroid.
+                return [
+                    DiarizationInterval(
+                        start_sec=s, end_sec=e, speaker_id=matched_id, confidence=score
+                    )
+                    for s, e in valid_turns
+                ]
+            # No registry match → assign a unique recording-scoped anonymous ID.
+            hex_prefix = format(int(abs(float(mean_vec[0])) * 1e6) % 0xFFFF, "04x")
+            anon_id = f"spk_{hex_prefix}"
+            print(f"[+] Single-turn, unrecognised speaker → assigning scoped ID '{anon_id}'")
+            self.registry.register_or_update(anon_id, centroid=mean_vec, sample_count=num_turns)
+            return [
+                DiarizationInterval(
+                    start_sec=s, end_sec=e, speaker_id=anon_id, confidence=0.0
+                )
                 for s, e in valid_turns
             ]
 
@@ -277,6 +310,18 @@ class SpeakerDiarizer:
             cluster_to_speaker[c_label] = c_spk_id
 
         # 5. Formulate final intervals with overlap and confidence checks
+        # Pre-compute one centroid per cluster label so the confidence margin is
+        # computed against every cluster, not accidentally reusing the last one.
+        cluster_centroids: Dict[int, np.ndarray] = {}
+        for c_l in unique_labels:
+            c_indices = np.where(labels == c_l)[0]
+            c_embs = emb_matrix[c_indices]
+            c_mean = np.mean(c_embs, axis=0)
+            c_norm = np.linalg.norm(c_mean)
+            if c_norm > 1e-8:
+                c_mean /= c_norm
+            cluster_centroids[c_l] = c_mean
+
         diarized_intervals: List[DiarizationInterval] = []
         for idx, (s, e) in enumerate(valid_turns):
             c_label = labels[idx]
@@ -284,7 +329,7 @@ class SpeakerDiarizer:
 
             # Compute margin to 2nd closest cluster (confidence)
             emb = emb_matrix[idx]
-            sims = [float(np.dot(emb, cluster_embs.mean(axis=0))) for c_l in unique_labels]
+            sims = [float(np.dot(emb, cluster_centroids[c_l])) for c_l in unique_labels]
             sorted_sims = sorted(sims, reverse=True)
             conf = 1.0
             if len(sorted_sims) > 1:
@@ -340,20 +385,11 @@ def reconcile_word_intervals_with_speakers(
             out_w["speaker_id"] = "OVERLAP"
             out_w["speaker_eligible"] = False
         else:
-            # Nearest interval within 0.15s tolerance
-            nearest_spk = None
-            min_dist = float("inf")
-            for iv in diarized_intervals:
-                dist = max(0.0, iv.start_sec - w_end, w_start - iv.end_sec)
-                if dist < min_dist and dist <= 0.15:
-                    min_dist = dist
-                    nearest_spk = iv.speaker_id
-            if nearest_spk:
-                out_w["speaker_id"] = nearest_spk
-                out_w["speaker_eligible"] = True
-            else:
-                out_w["speaker_id"] = "UNKNOWN"
-                out_w["speaker_eligible"] = False
+            # Word falls in silence or unassigned audio — not covered by any
+            # diarized interval.  The nearest-interval rescue was removed: spatial
+            # proximity does not imply speaker attribution.
+            out_w["speaker_id"] = "UNKNOWN"
+            out_w["speaker_eligible"] = False
 
         reconciled.append(out_w)
 

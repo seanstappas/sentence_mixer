@@ -195,7 +195,9 @@ class SpeakerRegistry:
         matched_id, score = self.match_cluster(centroid)
         if matched_id:
             print(f"[*] Cluster {cluster_id} matched known speaker: '{matched_id}' (cosine similarity: {score:.3f})")
-            self.register_or_update(matched_id, centroid=centroid, sample_count=turn_count)
+            # Read-only match: do NOT update the centroid.  The stored profile
+            # must not drift just because this cluster happened to be the nearest
+            # match; that would contaminate long-term identity across recordings.
             return matched_id
 
         # Determine default ID

@@ -98,6 +98,8 @@ def are_homophones(word1: str, word2: str) -> bool:
 def normalize_text(text: str) -> str:
     """
     Normalize text for speech recognition comparison:
+    - Strips explicit <gap:...> cadence instructions
+    - Strips explicit phonetic markup {...}
     - Lowercases text
     - Replaces typographic quotes and hyphens with spaces
     - Removes punctuation
@@ -106,8 +108,13 @@ def normalize_text(text: str) -> str:
     if not text:
         return ""
 
+    # Strip explicit gaps
+    t = re.sub(r"<gap:[^>]+>", " ", text)
+    # Strip explicit phone groups { ... }
+    t = re.sub(r"\{[^}]*\}", " ", t)
+
     # Replace typographical quotes, dashes, hyphens
-    t = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    t = t.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
     t = t.replace("-", " ").replace("—", " ").replace("_", " ")
 
     # Extract alphanumeric word tokens
@@ -401,7 +408,7 @@ def verify_listening(
     tolerance: Optional[float] = None,
     audio_array: Optional[np.ndarray] = None,
     asr_backend: Optional[ASRBackend] = None,
-    require_all_words: bool = False,
+    require_all_words: bool = True,
 ) -> Dict[str, Any]:
     """
     Transcribes audio/video media and verifies transcription against expected text.
@@ -446,6 +453,11 @@ def verify_listening(
 
     ref_tokens = norm_expected.split() if norm_expected else []
     hyp_tokens = norm_transcribed.split() if norm_transcribed else []
+
+    if not ref_tokens:
+        raise ValueError(
+            f"Expected text '{expected_text}' contains no recognizable lexical words for ASR verification. Explicit transcript is required for phonetic-only targets."
+        )
 
     # 4. Levenshtein token alignment
     dist, ops = compute_levenshtein_tokens(ref_tokens, hyp_tokens, allow_homophones=allow_homophones)

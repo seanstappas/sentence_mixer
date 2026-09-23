@@ -360,7 +360,7 @@ def render_master_pcm(
             # Level / gain vocal slice ONLY (purity in cuts-only mode: no leveling)
             is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
             v_gain_db = seg.gain_db
-            if not is_cuts_only and v_gain_db == 0.0 and normalize_loudness and len(vocal_slice) > 0:
+            if not is_cuts_only and v_gain_db is None and normalize_loudness and len(vocal_slice) > 0:
                 active_mask = np.abs(vocal_slice) > 1e-4
                 if np.sum(active_mask) > 50:
                     rms = float(np.sqrt(np.mean(vocal_slice[active_mask] ** 2)))
@@ -371,7 +371,7 @@ def render_master_pcm(
                     auto_gain_db = -20.0 - rms_db
                     v_gain_db = max(-9.0, min(9.0, auto_gain_db))
 
-            if v_gain_db != 0.0:
+            if v_gain_db is not None and v_gain_db != 0.0:
                 vocal_slice = vocal_slice * float(10.0 ** (v_gain_db / 20.0))
 
             # Channel alignment between vocal and instrumental
@@ -476,7 +476,7 @@ def render_master_pcm(
         # In cuts-only mode, purity is preserved: NO leveling applied!
         is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
         gain_to_apply_db = seg.gain_db
-        if not is_cuts_only and gain_to_apply_db == 0.0 and normalize_loudness and len(slice_audio) > 0:
+        if not is_cuts_only and gain_to_apply_db is None and normalize_loudness and len(slice_audio) > 0:
             active_mask = np.abs(slice_audio) > 1e-4
             if np.sum(active_mask) > 50:
                 rms = float(np.sqrt(np.mean(slice_audio[active_mask] ** 2)))
@@ -488,7 +488,7 @@ def render_master_pcm(
                 auto_gain_db = -20.0 - rms_db
                 gain_to_apply_db = max(-9.0, min(9.0, auto_gain_db))
 
-        if gain_to_apply_db != 0.0:
+        if gain_to_apply_db is not None and gain_to_apply_db != 0.0:
             scale = float(10.0 ** (gain_to_apply_db / 20.0))
             slice_audio = slice_audio * scale
 
@@ -771,7 +771,11 @@ def render_sentence_mix(
     try:
         for idx, seg in enumerate(plan.segments):
             slice_mp4 = temp_dir / f"slice_{idx:04d}.mp4"
-            frame_count = max(1, seg.video_frame_count)
+            frame_count = seg.video_frame_count
+
+            # Skip zero-frame segments (e.g. <gap:0ms> pauses shorter than one video frame)
+            if frame_count <= 0:
+                continue
 
             # Check if this segment is a pause/freeze-frame cut
             is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"

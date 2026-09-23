@@ -17,7 +17,7 @@ SMOKE_SOURCES = REPO_ROOT / "evaluation" / "smoke_sources.json"
 
 
 @pytest.mark.real_corpus
-def test_real_corpus_smoke_manifest():
+def test_real_corpus_smoke_manifest(tmp_path: Path):
     if not SMOKE_SOURCES.exists():
         pytest.fail(f"Prerequisite missing: {SMOKE_SOURCES} does not exist.")
 
@@ -33,12 +33,10 @@ def test_real_corpus_smoke_manifest():
         if not v_path.exists():
             pytest.fail(f"Prerequisite missing: Source video file not found at {v_path}")
 
-    # Run smoke mix
-    out_dir = REPO_ROOT / "output"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    smoke_mp4 = out_dir / "smoke_basic.mp4"
-    smoke_plan = out_dir / "smoke_basic.plan.json"
-    smoke_xml = out_dir / "smoke_basic.xml"
+    # Run smoke mix in isolated tmp_path
+    smoke_mp4 = tmp_path / "smoke_basic.mp4"
+    smoke_plan = tmp_path / "smoke_basic.plan.json"
+    smoke_xml = tmp_path / "smoke_basic.xml"
 
     cmd = [
         PYTHON, str(RUN_MIXER), "mix",
