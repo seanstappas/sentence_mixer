@@ -218,7 +218,8 @@ def test_source_audio_modification_invalidates_stem_cache(tmp_path: Path, monkey
     assert stem_2.read_bytes() == b"RIFF_VOCALS_V2_FRESH"
 
     # Verify metadata.json was updated with the new hash
-    updated_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    new_meta_file = vocals_base / get_source_id(src_file) / "metadata.json"
+    updated_meta = json.loads(new_meta_file.read_text(encoding="utf-8"))
     assert updated_meta["source_sha256"] == new_hash
 
 
@@ -492,6 +493,6 @@ def test_mfa_batching_rglob_moves_nested_textgrids(tmp_path: Path, monkeypatch: 
     )
 
     # Verify that all 50 TextGrids were moved to output_aligned_dir
-    final_tgs = list(aligned_dir.glob("*.TextGrid"))
+    final_tgs = list(aligned_dir.rglob("*.TextGrid"))
     assert len(final_tgs) == 50
 

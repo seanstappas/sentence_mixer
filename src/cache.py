@@ -11,7 +11,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 
 def hash_string(data: str) -> str:
@@ -35,6 +35,127 @@ def hash_file_content(file_path: Union[str, Path], chunk_size: int = 65536) -> s
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def compute_media_hash(file_path: Union[str, Path], cache_dir: Optional[Union[str, Path]] = None) -> str:
+    """
+    Streams a full SHA-256 of the media file.
+    Memoizes results by resolved path, file size, and st_mtime_ns in an index under cache root
+    so unchanged large files are not re-hashed on every run.
+    Raises FileNotFoundError / IOError on read failures loudly (no path-hash fallback).
+    """
+    p = Path(file_path).resolve()
+    if not p.exists():
+        raise FileNotFoundError(f"Media file not found for hashing: {p}")
+
+    stat = p.stat()
+    size = stat.st_size
+    mtime_ns = stat.st_mtime_ns
+
+    index_dir = Path(cache_dir).resolve() if cache_dir else Path(".build").resolve()
+    index_file = index_dir / ".media_hash_index.json"
+
+    index: Dict[str, Any] = {}
+    if index_file.exists():
+        try:
+            with open(index_file, "r", encoding="utf-8") as f:
+                index = json.load(f)
+        except Exception:
+            index = {}
+
+    posix_path = p.as_posix()
+    cached_entry = index.get(posix_path)
+    if (
+        isinstance(cached_entry, dict)
+        and cached_entry.get("size") == size
+        and cached_entry.get("mtime_ns") == mtime_ns
+        and isinstance(cached_entry.get("sha256"), str)
+    ):
+        return cached_entry["sha256"]
+
+    # Full SHA-256 computation
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    full_sha = h.hexdigest()
+
+    # Update index
+    index[posix_path] = {
+        "size": size,
+        "mtime_ns": mtime_ns,
+        "sha256": full_sha,
+    }
+    try:
+        index_dir.mkdir(parents=True, exist_ok=True)
+        tmp_idx = index_file.with_suffix(".tmp")
+        with open(tmp_idx, "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=2)
+        os.replace(tmp_idx, index_file)
+    except Exception:
+        pass
+
+    return full_sha
+
+
+def compute_alignment_cache_key(
+    media_hash: str,
+    selected_audio_stream: int,
+    selected_video_stream: int,
+    transcript_hash: str,
+    dict_hash: str,
+    acoustic_model: str = "english_us_arpa",
+    mfa_options: Optional[Dict[str, Any]] = None,
+    preprocessor_version: str = "2.0",
+) -> str:
+    key_dict = {
+        "media_hash": media_hash,
+        "selected_audio_stream": selected_audio_stream,
+        "selected_video_stream": selected_video_stream,
+        "transcript_hash": transcript_hash,
+        "dict_hash": dict_hash,
+        "acoustic_model": acoustic_model,
+        "mfa_options": mfa_options or {},
+        "preprocessor_version": preprocessor_version,
+    }
+    return hash_dict(key_dict)
+
+
+def compute_labeled_inventory_cache_key(
+    alignment_key: str,
+    speaker_id: Optional[str] = None,
+    single_speaker_verified: bool = False,
+    assume_single_speaker: bool = False,
+    speaker_intervals_hash: Optional[str] = None,
+    diarization_config: Optional[Dict[str, Any]] = None,
+    registry_version: Optional[str] = None,
+) -> str:
+    key_dict = {
+        "alignment_key": alignment_key,
+        "speaker_id": speaker_id or "",
+        "single_speaker_verified": bool(single_speaker_verified),
+        "assume_single_speaker": bool(assume_single_speaker),
+        "speaker_intervals_hash": speaker_intervals_hash or "",
+        "diarization_config": diarization_config or {},
+        "registry_version": registry_version or "",
+    }
+    return hash_dict(key_dict)
+
+
+def compute_stem_cache_key(
+    media_hash: str,
+    separator_model: str = "UVR-MDX-NET-Inst_HQ_3",
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    key_dict = {
+        "media_hash": media_hash,
+        "separator_model": separator_model,
+        "options": options or {},
+    }
+    return hash_dict(key_dict)
 
 
 class CacheManager:

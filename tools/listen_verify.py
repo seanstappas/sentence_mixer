@@ -95,11 +95,51 @@ def are_homophones(word1: str, word2: str) -> bool:
         return False
 
 
+def resolve_phonetic_groups_to_words(text: str) -> str:
+    """
+    Resolves explicit phonetic markup { ... } to recognized lexical words using the Lexicon.
+    If a phonetic group cannot be resolved to any known word, raises RuntimeError.
+    """
+    if "{" not in text:
+        return text
+
+    lex = get_lexicon()
+
+    def _replace_group(match: re.Match) -> str:
+        group_str = match.group(0)
+        content = match.group(1).strip()
+        if not content:
+            raise ValueError(f"Empty phonetic group '{group_str}' contains no recognizable lexical words for ASR verification.")
+
+        raw_phones = content.split()
+        if lex is not None:
+            from lexicon import strip_phone_stress
+            target_phones = tuple(p.upper() for p in raw_phones)
+            target_base = tuple(strip_phone_stress(p) for p in target_phones)
+
+            for word, prons in lex.word_to_pronunciations.items():
+                for pr in prons:
+                    if tuple(pr) == target_phones:
+                        return word
+
+            for word, prons in lex.word_to_pronunciations.items():
+                for pr in prons:
+                    if tuple(strip_phone_stress(p) for p in pr) == target_base:
+                        return word
+
+        raise ValueError(
+            f"Unmapped phonetic group {group_str}: contains no recognizable lexical words for ASR verification. "
+            "Please add the pronunciation to dictionaries/custom_pronunciations.txt."
+        )
+
+    return re.sub(r"\{([^}]*)\}", _replace_group, text)
+
+
 def normalize_text(text: str) -> str:
     """
     Normalize text for speech recognition comparison:
     - Strips explicit <gap:...> cadence instructions
-    - Strips explicit phonetic markup {...}
+    - Resolves explicit phonetic markup {...} to dictionary words
     - Lowercases text
     - Replaces typographic quotes and hyphens with spaces
     - Removes punctuation
@@ -110,8 +150,8 @@ def normalize_text(text: str) -> str:
 
     # Strip explicit gaps
     t = re.sub(r"<gap:[^>]+>", " ", text)
-    # Strip explicit phone groups { ... }
-    t = re.sub(r"\{[^}]*\}", " ", t)
+    # Resolve explicit phone groups { ... } to dictionary words (raises RuntimeError if unmapped)
+    t = resolve_phonetic_groups_to_words(t)
 
     # Replace typographical quotes, dashes, hyphens
     t = t.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
@@ -439,13 +479,19 @@ def verify_listening(
     else:
         audio = extract_audio_16k(input_path)
 
-    # 2. Transcribe with initial_prompt conditioning
+    # 2. Resolve ASR engine and transcribe unprimed (independent ASR gate, D10/B11/U25)
     if asr_backend is not None:
         engine = asr_backend
     else:
         engine = get_backend(backend=backend, model_name=model_name, device=device)
 
-    transcribed_text = engine.transcribe(audio, initial_prompt=expected_text)
+    transcribed_text = engine.transcribe(audio, initial_prompt=None)
+
+    # Compute primed assisted metric separately
+    try:
+        assisted_transcribed_text = engine.transcribe(audio, initial_prompt=expected_text)
+    except Exception:
+        assisted_transcribed_text = transcribed_text
 
     # 3. Normalize text
     norm_expected = normalize_text(expected_text)
@@ -490,6 +536,20 @@ def verify_listening(
     wer = float(num_errs) / float(max(1, ref_len)) if ref_len > 0 else (0.0 if not hyp_tokens else 1.0)
     cer = compute_cer(norm_expected, norm_transcribed)
 
+    # 4b. Compute assisted metrics
+    norm_assisted = normalize_text(assisted_transcribed_text)
+    assisted_hyp_tokens = norm_assisted.split() if norm_assisted else []
+    dist_a, ops_a = compute_levenshtein_tokens(ref_tokens, assisted_hyp_tokens, allow_homophones=allow_homophones)
+    num_errs_a = sum(1 for op, _, _ in ops_a if op in ("S", "D", "I"))
+    assisted_wer = float(num_errs_a) / float(max(1, ref_len)) if ref_len > 0 else (0.0 if not assisted_hyp_tokens else 1.0)
+    assisted_cer = compute_cer(norm_expected, norm_assisted)
+    assisted_metrics = {
+        "transcription": assisted_transcribed_text,
+        "normalized_transcription": norm_assisted,
+        "wer": round(assisted_wer, 4),
+        "cer": round(assisted_cer, 4),
+    }
+
     # 5. Word presence
     word_presence = {w: (w in word_matches) for w in ref_tokens}
     all_expected_words_present = (len(missing_words) == 0 and ref_len > 0) if ref_len > 0 else True
@@ -521,6 +581,8 @@ def verify_listening(
         "normalized_transcribed": norm_transcribed,
         "wer": round(wer, 4),
         "cer": round(cer, 4),
+        "assisted_metrics": assisted_metrics,
+        "assisted_wer": round(assisted_wer, 4),
         "word_matches": word_matches,
         "missing_words": missing_words,
         "bleeding_words": bleeding_words,
@@ -543,6 +605,9 @@ def verify_listening(
             "insertions": insertions,
         },
     }
+
+
+verify_synthesis = verify_listening
 
 
 def main(argv: Optional[List[str]] = None) -> int:

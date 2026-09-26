@@ -224,6 +224,7 @@ def test_render_master_pcm_linear_crossfade_ramps():
             target_phones=[],
             span_type="word",
             source_video_path=str(src1_wav),
+            gain_db=0.0,
         )
         seg2 = PlanSegment(
             segment_index=1,
@@ -237,6 +238,7 @@ def test_render_master_pcm_linear_crossfade_ramps():
             target_phones=[],
             span_type="word",
             source_video_path=str(src2_wav),
+            gain_db=0.0,
         )
         trans = PlanTransition(
             transition_index=0,
@@ -317,6 +319,7 @@ def test_render_master_pcm_equal_gain_crossover():
             target_phones=[],
             span_type="word",
             source_video_path=str(src_wav),
+            gain_db=0.0,
         )
         seg2 = PlanSegment(
             segment_index=1,
@@ -330,6 +333,7 @@ def test_render_master_pcm_equal_gain_crossover():
             target_phones=[],
             span_type="word",
             source_video_path=str(src_wav),
+            gain_db=0.0,
         )
         trans = PlanTransition(
             transition_index=0,

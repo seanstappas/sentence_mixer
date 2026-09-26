@@ -332,6 +332,7 @@ def test_adversarial_stereo_preservation_uncorrelated_channels(tmp_path: Path):
                 target_phones=["S", "T", "EH1", "R", "IY0", "OW0"],
                 span_type="phrase",
                 source_video_path=str(stereo_wav),
+                gain_db=0.0,
             )
         ],
     )
@@ -443,6 +444,7 @@ def test_adversarial_stereo_crossfade_transitions(tmp_path: Path):
                 target_phones=["W", "AH1", "N"],
                 span_type="word",
                 source_video_path=str(wav1),
+                gain_db=0.0,
             ),
             PlanSegment(
                 segment_index=1,
@@ -456,6 +458,7 @@ def test_adversarial_stereo_crossfade_transitions(tmp_path: Path):
                 target_phones=["T", "UW1"],
                 span_type="word",
                 source_video_path=str(wav2),
+                gain_db=0.0,
             ),
         ],
         transitions=[
@@ -510,6 +513,7 @@ def test_adversarial_stereo_channel_preservation_in_full_mp4_render(tmp_path: Pa
         video_fps=RationalTime(24, 1),
         total_output_samples=dur_samples,
         total_video_frames=24,
+        metadata={"visual_policy": "audio-only"},
         sources={"src_mp4_stereo": source_rec},
         segments=[
             PlanSegment(
@@ -527,6 +531,7 @@ def test_adversarial_stereo_channel_preservation_in_full_mp4_render(tmp_path: Pa
                 video_start_frame=0,
                 video_frame_count=24,
                 video_source_pts_sec=0.0,
+                gain_db=0.0,
             )
         ],
     )
@@ -770,6 +775,7 @@ def test_adversarial_stereo_mixed_mono_and_stereo_inputs(tmp_path: Path):
                 target_phones=["M", "AA1", "N", "OW0"],
                 span_type="word",
                 source_video_path=str(mono_wav),
+                gain_db=0.0,
             ),
             PlanSegment(
                 segment_index=1,
@@ -783,6 +789,7 @@ def test_adversarial_stereo_mixed_mono_and_stereo_inputs(tmp_path: Path):
                 target_phones=["S", "T", "EH1", "R", "IY0", "OW0"],
                 span_type="word",
                 source_video_path=str(stereo_wav),
+                gain_db=0.0,
             ),
         ],
     )
@@ -848,6 +855,7 @@ def test_adversarial_stereo_dynamic_runtime_expansion(tmp_path: Path):
                 target_phones=["D", "AY0", "N", "AE1", "M", "IH0", "K"],
                 span_type="word",
                 source_video_path=str(raw_pcm),
+                gain_db=0.0,
             )
         ],
     )

@@ -132,6 +132,9 @@ class AlignedEvent:
     successor_id: Optional[str] = None
     confidence: Optional[float] = None
     quality_flags: List[str] = field(default_factory=list)
+    is_eligible: bool = True
+    eligibility_reason: str = ""
+    identity_status: str = "verified"
 
     def validate(self) -> None:
         if self.start_sample < 0 or self.end_sample < self.start_sample:
@@ -155,6 +158,9 @@ class WordOccurrence:
     pronunciation_id: str = ""
     preceding_silence_sample_duration: int = 0
     following_silence_sample_duration: int = 0
+    is_eligible: bool = True
+    eligibility_reason: str = ""
+    identity_status: str = "verified"
 
     def validate(self) -> None:
         if self.start_sample < 0 or self.end_sample <= self.start_sample:
@@ -251,6 +257,7 @@ class TargetPhoneNode:
     target_pitch_semitones: Optional[float] = None
     prosodic_bias: Optional[str] = None  # e.g. "question", "exclamation"
     branch_id: int = 0  # index into lexicon.get_pronunciations() alternatives for this token
+    is_constrained: bool = False
 
 
 @dataclass
@@ -291,6 +298,7 @@ class SpanCandidate:
     exit_variant_samples: int = 0
     target_cost: float = 0.0
     quality_cost: float = 0.0
+    realized_phones: List[str] = field(default_factory=list)
 
     def validate(self) -> None:
         if self.start_sample < 0 or self.end_sample <= self.start_sample:
@@ -321,6 +329,7 @@ class PlanSegment:
     video_frame_count: int = 0
     video_source_pts_sec: float = 0.0
     freeze_video: bool = False
+    realized_phones: List[str] = field(default_factory=list)
 
     @property
     def duration_samples(self) -> int:

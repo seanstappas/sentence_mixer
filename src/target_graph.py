@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from contracts import TargetGraph, TargetPhoneNode
-from lexicon import Lexicon, get_phone_stress, strip_phone_stress, validate_phone
+from lexicon import Lexicon, get_phone_stress, strip_phone_stress, validate_phone, normalize_numerals
 import math
 
 
@@ -58,6 +58,8 @@ def tokenize_hybrid_syntax(text: str) -> List[HybridToken]:
     """
     # Normalize typographical quotation marks
     text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    # Normalize unbracketed numerals to spoken words
+    text = normalize_numerals(text)
 
     # Syntax boundary checks
     if text.count("{") != text.count("}"):
@@ -163,7 +165,7 @@ class TargetGraphBuilder:
     def __init__(self, lexicon: Lexicon):
         self.lexicon = lexicon
 
-    def build(self, target_text: str) -> TargetGraph:
+    def build(self, target_text: str, overrides: Optional[Dict[Any, Any]] = None) -> TargetGraph:
         tokens = tokenize_hybrid_syntax(target_text)
         if not tokens:
             raise ValueError(f"No valid tokens found in target text: {target_text}")
@@ -206,14 +208,28 @@ class TargetGraphBuilder:
         word_branches: List[List[Tuple[int, int]]] = []
 
         for w_idx, tok in enumerate(speech_tokens):
-            if tok.kind == "phonetic" and tok.phones:
+            is_constrained = False
+            if overrides and (w_idx in overrides or tok.norm_text in overrides):
+                ov_val = overrides[w_idx] if w_idx in overrides else overrides[tok.norm_text]
+                if hasattr(ov_val, "phones"):
+                    prons = [ov_val.phones]
+                elif isinstance(ov_val, (list, tuple)) and ov_val and isinstance(ov_val[0], str):
+                    prons = [list(ov_val)]
+                elif isinstance(ov_val, (list, tuple)) and ov_val and isinstance(ov_val[0], (list, tuple)):
+                    prons = [list(p) for p in ov_val]
+                else:
+                    prons = [list(ov_val)]
+                is_constrained = True
+            elif tok.kind == "phonetic" and tok.phones:
                 # Explicit phonetic group: deterministic pronunciation
                 prons = [tok.phones]
+                is_constrained = True
             else:
                 # Ordinary lexical word: lookup in lexicon
                 prons = self.lexicon.get_pronunciations(tok.norm_text)
                 if not prons:
                     raise ValueError(f"No pronunciation could be determined for target word: '{tok.norm_text}'")
+                is_constrained = False
 
             branches: List[Tuple[int, int]] = []
             for branch_idx, p_list in enumerate(prons):
@@ -241,6 +257,7 @@ class TargetGraphBuilder:
                         duration_prior_sec=prior_dur,
                         prosodic_bias=token_prosodic_bias.get(w_idx),
                         branch_id=branch_idx,
+                        is_constrained=is_constrained,
                     )
                     nodes.append(node)
                     branch_node_ids.append(node_id)

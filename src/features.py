@@ -40,6 +40,33 @@ class ContinuousFeatureExtractor:
         if not p.exists():
             raise FileNotFoundError(f"Audio file not found: {p}")
 
+        cache_path = p.with_suffix(".features.npz")
+        if cache_path.exists():
+            try:
+                data = np.load(str(cache_path), allow_pickle=True)
+                return {
+                    "sr": int(data["sr"]),
+                    "hop_length": int(data["hop_length"]),
+                    "frame_length": int(data["frame_length"]),
+                    "n_frames": int(data["n_frames"]),
+                    "times": data["times"],
+                    "rms": data["rms"],
+                    "centroid": data["centroid"],
+                    "mfcc": data["mfcc"],
+                    "f0": data["f0"],
+                    "voiced_flag": data["voiced_flag"],
+                    "voiced_probs": data["voiced_probs"],
+                }
+            except Exception:
+                pass
+
+        try:
+            info = sf.info(str(p))
+            dur_str = f" ({info.duration:.1f}s audio)"
+        except Exception:
+            dur_str = ""
+
+        print(f"[*] Extracting continuous acoustic tracks for '{p.name}'{dur_str}...")
         y, sr = sf.read(str(p))
         if y.ndim > 1:
             y = np.mean(y, axis=1)
@@ -60,7 +87,7 @@ class ContinuousFeatureExtractor:
         )  # shape (13, n_frames)
 
         # 4. F0 and Voicing using pyin
-        # pyin returns f0, voiced_flag, voiced_probs
+        print("    Estimating continuous F0 pitch & voicing via pYIN...")
         f0, voiced_flag, voiced_probs = librosa.pyin(
             y,
             fmin=self.fmin,
@@ -74,7 +101,7 @@ class ContinuousFeatureExtractor:
         n_frames = min(len(rms), len(centroid), mfcc.shape[1], len(f0))
         times = librosa.frames_to_time(np.arange(n_frames), sr=self.sr, hop_length=self.hop_length)
 
-        return {
+        tracks = {
             "sr": self.sr,
             "hop_length": self.hop_length,
             "frame_length": self.frame_length,
@@ -87,6 +114,27 @@ class ContinuousFeatureExtractor:
             "voiced_flag": voiced_flag[:n_frames],
             "voiced_probs": voiced_probs[:n_frames],
         }
+
+        try:
+            np.savez_compressed(
+                str(cache_path),
+                sr=tracks["sr"],
+                hop_length=tracks["hop_length"],
+                frame_length=tracks["frame_length"],
+                n_frames=tracks["n_frames"],
+                times=tracks["times"],
+                rms=tracks["rms"],
+                centroid=tracks["centroid"],
+                mfcc=tracks["mfcc"],
+                f0=tracks["f0"],
+                voiced_flag=tracks["voiced_flag"],
+                voiced_probs=tracks["voiced_probs"],
+            )
+            print(f"[+] Cached acoustic feature tracks to {cache_path.name}")
+        except Exception:
+            pass
+
+        return tracks
 
     def sample_to_frame_index(self, sample_idx: int, native_sr: int) -> int:
         """Map native sample index to analysis frame index."""

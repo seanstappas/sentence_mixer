@@ -238,8 +238,8 @@ def preprocess_source(
     chunks = parse_vtt_cues(str(vtt_p))
 
     # Resolve speaker eligibility
-    effective_speaker = speaker_id or "default_speaker"
-    is_verified = single_speaker_verified or assume_single_speaker
+    is_verified = bool(single_speaker_verified or assume_single_speaker)
+    effective_speaker = speaker_id if is_verified else None
 
     resolved_audio_src = str(Path(audio_source_path).resolve()) if audio_source_path and Path(audio_source_path).exists() else None
 

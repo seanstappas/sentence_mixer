@@ -173,11 +173,16 @@ class SpeakerDiarizer:
             if dur >= self.min_turn_duration:
                 intervals.append((start_frame * frame_len_sec, end_frame * frame_len_sec))
 
-        # Fallback: If energy threshold didn't capture segments, partition whole duration
+        # Guard against pure silence
+        if len(audio) == 0 or float(np.max(np.abs(audio))) < 1e-4:
+            return []
+
+        # Fallback: If energy threshold didn't capture segments, only partition if audio has substantial energy
         if not intervals:
-            total_dur = len(audio) / sample_rate
-            if total_dur >= self.min_turn_duration:
-                intervals.append((0.0, total_dur))
+            if float(np.max(np.abs(audio))) >= 0.01:
+                total_dur = len(audio) / sample_rate
+                if total_dur >= self.min_turn_duration:
+                    intervals.append((0.0, total_dur))
 
         return intervals
 
@@ -187,6 +192,7 @@ class SpeakerDiarizer:
         known_speaker: Optional[str] = None,
         candidate_turns: Optional[List[Tuple[float, float]]] = None,
         interactive: bool = True,
+        content_id: Optional[str] = None,
     ) -> List[DiarizationInterval]:
         """
         Diarizes an audio file (typically clean vocals.wav).
@@ -197,6 +203,14 @@ class SpeakerDiarizer:
         data, sr = sf.read(str(a_path))
         if data.ndim > 1:
             data = np.mean(data, axis=1)
+
+        if content_id is None:
+            try:
+                from cache import compute_media_hash
+                content_id = compute_media_hash(a_path)[:12]
+            except Exception:
+                import hashlib
+                content_id = hashlib.sha256(a_path.as_posix().encode("utf-8")).hexdigest()[:12]
 
         # 1. Obtain turn boundaries
         turns = candidate_turns or self.detect_speech_turns(data, sr)
@@ -236,9 +250,7 @@ class SpeakerDiarizer:
             ]
 
         if num_turns == 1:
-            # Single-turn recording: still run through the registry matcher so that a
-            # previously-enrolled speaker is recognised correctly.  Do NOT fabricate
-            # "speaker_01" — that name collides across recordings.
+            # Single-turn recording: run through registry matcher and prompt if unrecognized
             mean_vec = np.mean(turn_embeddings, axis=0)
             norm = np.linalg.norm(mean_vec)
             if norm > 1e-8:
@@ -249,21 +261,27 @@ class SpeakerDiarizer:
                     f"[*] Single-turn recording matched known speaker: '{matched_id}'"
                     f" (cosine similarity: {score:.3f})"
                 )
-                # Read-only match: do NOT update the centroid.
                 return [
                     DiarizationInterval(
                         start_sec=s, end_sec=e, speaker_id=matched_id, confidence=score
                     )
                     for s, e in valid_turns
                 ]
-            # No registry match → assign a unique recording-scoped anonymous ID.
-            hex_prefix = format(int(abs(float(mean_vec[0])) * 1e6) % 0xFFFF, "04x")
-            anon_id = f"spk_{hex_prefix}"
-            print(f"[+] Single-turn, unrecognised speaker → assigning scoped ID '{anon_id}'")
-            self.registry.register_or_update(anon_id, centroid=mean_vec, sample_count=num_turns)
+            # No registry match -> prompt in TTY or assign anonymous ID D4
+            s, e = valid_turns[0]
+            cluster_id = f"anon:{content_id}:0"
+            assigned_id = self.registry.prompt_or_register_cluster(
+                cluster_id=cluster_id,
+                centroid=mean_vec,
+                turn_count=1,
+                duration_sec=e - s,
+                interactive=interactive,
+            )
+            conf = 1.0 if not assigned_id.startswith("anon:") else 0.0
+            print(f"[+] Single-turn, unrecognized speaker -> assigned ID '{assigned_id}' (confidence: {conf})")
             return [
                 DiarizationInterval(
-                    start_sec=s, end_sec=e, speaker_id=anon_id, confidence=0.0
+                    start_sec=s, end_sec=e, speaker_id=assigned_id, confidence=conf
                 )
                 for s, e in valid_turns
             ]
@@ -300,8 +318,9 @@ class SpeakerDiarizer:
             c_turns = len(indices)
             c_dur = sum(valid_turns[idx][1] - valid_turns[idx][0] for idx in indices)
 
+            cluster_id = f"anon:{content_id}:{c_label}"
             c_spk_id = self.registry.prompt_or_register_cluster(
-                cluster_id=f"cluster_{c_label:02d}",
+                cluster_id=cluster_id,
                 centroid=centroid,
                 turn_count=c_turns,
                 duration_sec=c_dur,
@@ -310,8 +329,6 @@ class SpeakerDiarizer:
             cluster_to_speaker[c_label] = c_spk_id
 
         # 5. Formulate final intervals with overlap and confidence checks
-        # Pre-compute one centroid per cluster label so the confidence margin is
-        # computed against every cluster, not accidentally reusing the last one.
         cluster_centroids: Dict[int, np.ndarray] = {}
         for c_l in unique_labels:
             c_indices = np.where(labels == c_l)[0]
@@ -335,6 +352,15 @@ class SpeakerDiarizer:
             if len(sorted_sims) > 1:
                 margin = sorted_sims[0] - sorted_sims[1]
                 conf = max(0.5, min(1.0, 0.5 + margin * 2.0))
+            if spk_id.startswith("anon:"):
+                conf = 0.0
+
+            # Check if this turn overlaps with any other turn in time
+            is_ov = False
+            for j, (os_sec, oe_sec) in enumerate(valid_turns):
+                if j != idx and max(s, os_sec) < min(e, oe_sec):
+                    is_ov = True
+                    break
 
             diarized_intervals.append(
                 DiarizationInterval(
@@ -342,7 +368,7 @@ class SpeakerDiarizer:
                     end_sec=e,
                     speaker_id=spk_id,
                     confidence=conf,
-                    is_overlap=False,
+                    is_overlap=is_ov,
                 )
             )
 
@@ -352,44 +378,121 @@ class SpeakerDiarizer:
 def reconcile_word_intervals_with_speakers(
     diarized_intervals: List[DiarizationInterval],
     word_intervals: List[Dict[str, Any]],
+    silence_intervals: Optional[List[Tuple[float, float]]] = None,
+    collar_sec: float = 0.040,
 ) -> List[Dict[str, Any]]:
     """
-    Strictly aligns word/phone boundaries against diarized speaker intervals (R03).
-    - If a word falls cleanly inside a single speaker turn, tags speaker_id.
-    - If a word intersects multiple conflicting speakers or an overlap region,
-      marks speaker_id='OVERLAP' and eligible=False.
-    - If a word falls in silence/unassigned audio, marks eligible=False.
+    Strictly aligns word/phone boundaries against diarized speaker intervals (D5).
+    - Word is eligible only if a trusted, non-overlap interval covers the whole word,
+      except for an explicit boundary collar (default 40 ms) whose uncovered part
+      lies in aligned silence and intersects no other speaker or overlap interval.
+    - Reason codes: 'partial_coverage', 'overlap', 'unassigned', 'unreviewed_identity'.
     """
     reconciled = []
     for w in word_intervals:
         w_start = float(w["start_sec"])
         w_end = float(w["end_sec"])
 
-        # Find all intersecting speaker intervals
+        out_w = dict(w)
+
+        # Find intersecting intervals
+        matching_ivs = []
         matching_spks = set()
         has_overlap = False
 
         for iv in diarized_intervals:
-            # Overlap check
-            if max(w_start, iv.start_sec) < min(w_end, iv.end_sec):
+            intersect_start = max(w_start, iv.start_sec)
+            intersect_end = min(w_end, iv.end_sec)
+            if intersect_start < intersect_end:
+                matching_ivs.append(iv)
                 matching_spks.add(iv.speaker_id)
-                if iv.is_overlap:
+                if iv.is_overlap or iv.speaker_id == "OVERLAP":
                     has_overlap = True
 
-        out_w = dict(w)
-        if len(matching_spks) == 1 and not has_overlap:
-            spk = next(iter(matching_spks))
-            out_w["speaker_id"] = spk
-            out_w["speaker_eligible"] = True
-        elif len(matching_spks) > 1 or has_overlap:
-            out_w["speaker_id"] = "OVERLAP"
-            out_w["speaker_eligible"] = False
-        else:
-            # Word falls in silence or unassigned audio — not covered by any
-            # diarized interval.  The nearest-interval rescue was removed: spatial
-            # proximity does not imply speaker attribution.
+        if not matching_ivs:
             out_w["speaker_id"] = "UNKNOWN"
+            out_w["is_eligible"] = False
             out_w["speaker_eligible"] = False
+            out_w["eligibility_reason"] = "unassigned"
+            reconciled.append(out_w)
+            continue
+
+        if has_overlap or len(matching_spks) > 1:
+            out_w["speaker_id"] = "OVERLAP"
+            out_w["is_eligible"] = False
+            out_w["speaker_eligible"] = False
+            out_w["eligibility_reason"] = "overlap"
+            reconciled.append(out_w)
+            continue
+
+        # Single speaker candidate
+        spk = next(iter(matching_spks))
+        iv_start = min(iv.start_sec for iv in matching_ivs)
+        iv_end = max(iv.end_sec for iv in matching_ivs)
+        is_anon_or_unreviewed = any(
+            iv.confidence == 0.0 or iv.speaker_id.startswith("anon:") for iv in matching_ivs
+        )
+
+        left_uncovered = max(0.0, iv_start - w_start)
+        right_uncovered = max(0.0, w_end - iv_end)
+
+        if left_uncovered == 0.0 and right_uncovered == 0.0:
+            out_w["speaker_id"] = spk
+            if is_anon_or_unreviewed:
+                out_w["is_eligible"] = False
+                out_w["speaker_eligible"] = False
+                out_w["eligibility_reason"] = "unreviewed_identity"
+            else:
+                out_w["is_eligible"] = True
+                out_w["speaker_eligible"] = True
+                out_w["eligibility_reason"] = ""
+            reconciled.append(out_w)
+            continue
+
+        # Check collar threshold
+        if left_uncovered > collar_sec or right_uncovered > collar_sec:
+            out_w["speaker_id"] = spk
+            out_w["is_eligible"] = False
+            out_w["speaker_eligible"] = False
+            out_w["eligibility_reason"] = "partial_coverage"
+            reconciled.append(out_w)
+            continue
+
+        # Uncovered edge within collar -> check if uncovered part lies in aligned silence
+        def span_in_silence(s_start: float, s_end: float) -> bool:
+            if s_end <= s_start:
+                return True
+            if w.get("uncovered_in_silence") or w.get("aligned_silence_collar"):
+                return True
+            if not silence_intervals:
+                return False
+            dur = s_end - s_start
+            cov = 0.0
+            for sil_s, sil_e in silence_intervals:
+                c_s = max(s_start, sil_s)
+                c_e = min(s_end, sil_e)
+                if c_s < c_e:
+                    cov += (c_e - c_s)
+            return cov >= (dur - 1e-4)
+
+        left_ok = span_in_silence(w_start, iv_start)
+        right_ok = span_in_silence(iv_end, w_end)
+
+        if left_ok and right_ok:
+            out_w["speaker_id"] = spk
+            if is_anon_or_unreviewed:
+                out_w["is_eligible"] = False
+                out_w["speaker_eligible"] = False
+                out_w["eligibility_reason"] = "unreviewed_identity"
+            else:
+                out_w["is_eligible"] = True
+                out_w["speaker_eligible"] = True
+                out_w["eligibility_reason"] = ""
+        else:
+            out_w["speaker_id"] = spk
+            out_w["is_eligible"] = False
+            out_w["speaker_eligible"] = False
+            out_w["eligibility_reason"] = "partial_coverage"
 
         reconciled.append(out_w)
 

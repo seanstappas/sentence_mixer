@@ -13,7 +13,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -110,6 +110,7 @@ def build_units_inventory(
     speaker_id: Optional[str] = None,
     single_speaker_verified: bool = False,
     source_record: Optional[SourceRecord] = None,
+    speaker_intervals: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
     Builds a JSON unit inventory of all words and phonemes from aligned TextGrids.
@@ -125,16 +126,17 @@ def build_units_inventory(
     source_video_path = (manifest_p.parent / rel_video).resolve() if rel_video else manifest_p.parent
 
     # Determine speaker identity & verification
-    effective_speaker = (
-        speaker_id
-        or manifest.get("speaker_id")
-        or "default_speaker"
-    )
-    is_verified = (
+    is_verified = bool(
         single_speaker_verified
         or manifest.get("single_speaker_verified", False)
         or manifest.get("assume_single_speaker", False)
     )
+    if is_verified:
+        effective_speaker = speaker_id or manifest.get("speaker_id")
+    else:
+        effective_speaker = manifest.get("speaker_id")
+
+    active_speaker_intervals = speaker_intervals or manifest.get("speaker_intervals")
 
     # Source Record & native sample rate
     audio_src = manifest.get("audio_source_path")
@@ -297,7 +299,44 @@ def build_units_inventory(
                     "duration": glob_end_sec - glob_start_sec,
                     "sample_start": start_sample,
                     "sample_end": end_sample,
+                    "speaker_id": chunk_speaker,
+                    "source_content_id": content_id,
                 })
+
+        # Collect silence intervals for this chunk
+        chunk_silences: List[Tuple[float, float]] = []
+        for p_entry in phones_tier:
+            p_lbl = p_entry["text"].strip().upper()
+            if not p_lbl or p_lbl in {"SIL", "SP", "<EPS>", ""}:
+                chunk_silences.append((chunk_start_sec + float(p_entry["xmin"]), chunk_start_sec + float(p_entry["xmax"])))
+
+        # Pre-collect words to reconcile against speaker intervals
+        words_to_reconcile = []
+        for w_idx, w_entry in enumerate(words_tier):
+            raw_w = w_entry["text"].strip()
+            clean_word = re.sub(r"[^\w\'-]", "", raw_w).lower()
+            if not clean_word or clean_word in {"sil", "sp", "spn", "eps", "<eps>"}:
+                continue
+            w_loc_xmin = float(w_entry["xmin"])
+            w_loc_xmax = float(w_entry["xmax"])
+            if w_loc_xmax <= w_loc_xmin:
+                continue
+            words_to_reconcile.append({
+                "w_idx": w_idx,
+                "start_sec": chunk_start_sec + w_loc_xmin,
+                "end_sec": chunk_start_sec + w_loc_xmax,
+            })
+
+        reconciled_by_idx: Dict[int, Dict[str, Any]] = {}
+        if active_speaker_intervals:
+            from diarization import reconcile_word_intervals_with_speakers
+            reconciled_list = reconcile_word_intervals_with_speakers(
+                active_speaker_intervals,
+                words_to_reconcile,
+                silence_intervals=chunk_silences,
+                collar_sec=0.040,
+            )
+            reconciled_by_idx = {rw["w_idx"]: rw for rw in reconciled_list}
 
         # 2. Process words tier and associate with constituent phone events
         for w_idx, w_entry in enumerate(words_tier):
@@ -331,20 +370,48 @@ def build_units_inventory(
             if not constituent_ids:
                 continue
 
+            if active_speaker_intervals:
+                rw = reconciled_by_idx.get(w_idx, {})
+                w_spk = rw.get("speaker_id", "UNKNOWN")
+                w_eligible = rw.get("is_eligible", False)
+                w_reason = rw.get("eligibility_reason", "unassigned")
+                w_status = "diarized" if w_eligible else ("unreviewed" if w_reason == "unreviewed_identity" else "ineligible")
+            else:
+                if is_verified and effective_speaker:
+                    w_spk = effective_speaker
+                    w_eligible = True
+                    w_reason = ""
+                    w_status = "asserted" if manifest.get("assume_single_speaker") else "verified"
+                else:
+                    w_spk = effective_speaker or ""
+                    w_eligible = bool(is_verified and effective_speaker)
+                    w_reason = "" if w_eligible else "unassigned"
+                    w_status = "verified" if w_eligible else "unassigned"
+
             word_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
             wo = WordOccurrence(
                 word_id=word_id,
                 source_content_id=content_id,
-                speaker_id=chunk_speaker,
+                speaker_id=w_spk,
                 word_normalized=clean_word,
                 word_original=raw_w,
                 start_sample=w_start_sample,
                 end_sample=w_end_sample,
                 phone_event_ids=constituent_ids,
                 realized_phones=realized_phones,
+                is_eligible=w_eligible,
+                eligibility_reason=w_reason,
+                identity_status=w_status,
             )
             words_dict[word_id] = wo
             total_words_indexed += 1
+
+            for ev_id in constituent_ids:
+                ev = events_dict[ev_id]
+                ev.speaker_id = w_spk
+                ev.is_eligible = w_eligible
+                ev.eligibility_reason = w_reason
+                ev.identity_status = w_status
 
             if clean_word not in word_to_word_ids:
                 word_to_word_ids[clean_word] = []
@@ -363,6 +430,10 @@ def build_units_inventory(
                 "sample_start": w_start_sample,
                 "sample_end": w_end_sample,
                 "phones": realized_phones,
+                "speaker_id": w_spk,
+                "source_content_id": content_id,
+                "is_eligible": w_eligible,
+                "eligibility_reason": w_reason,
             })
 
     inv = InventoryIndex(

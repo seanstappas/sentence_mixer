@@ -281,7 +281,13 @@ def test_bug3_isolate_vocals_synchronized_in_plan_metadata(tmp_path: Path, monke
         json.dump(inv.to_dict(), f)
 
     # Mock render_sentence_mix so no FFmpeg subprocess is executed
-    monkeypatch.setattr(run_mixer, "render_sentence_mix", MagicMock())
+    def mock_render(plan_or_units, out_mp4, *args, **kwargs):
+        p = Path(out_mp4)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"dummy_mp4")
+        p.with_suffix(".wav").write_bytes(b"dummy_wav")
+
+    monkeypatch.setattr(run_mixer, "render_sentence_mix", mock_render)
 
     # Case A: User specifies --audio-track isolated without --isolate-vocals
     plan_isolated = tmp_path / "plan_isolated.json"
@@ -374,7 +380,8 @@ def test_bug4_speaker_flag_preserved_in_single_speaker_inventory(tmp_path: Path,
     mock_select = MagicMock(return_value=[])
     monkeypatch.setattr(run_mixer.SpanSelector, "select", mock_select)
 
-    # Case A: User explicitly provides --speaker="custom_speaker" on single-speaker inventory
+    # Case A: User explicitly provides --speaker="custom_speaker" absent from single-speaker inventory
+    # Under Round 3 B02 / U03 identity governance, requesting an absent speaker exits with code 2
     monkeypatch.setattr(sys, "argv", [
         "run_mixer.py", "mix",
         "--text", "hello",
@@ -384,6 +391,21 @@ def test_bug4_speaker_flag_preserved_in_single_speaker_inventory(tmp_path: Path,
         "--plan", str(tmp_path / "plan1.json"),
         "--render", str(tmp_path / "render1.mp4"),
     ])
+    with pytest.raises(SystemExit) as exc_info:
+        run_mixer.main()
+    assert exc_info.value.code == 2
+
+    # Case A2: User explicitly provides valid --speaker="single_inventory_spk"
+    mock_select.reset_mock()
+    monkeypatch.setattr(sys, "argv", [
+        "run_mixer.py", "mix",
+        "--text", "hello",
+        "--inventory", str(inv_file),
+        "--speaker", "single_inventory_spk",
+        "--selector", "span",
+        "--plan", str(tmp_path / "plan1_valid.json"),
+        "--render", str(tmp_path / "render1_valid.mp4"),
+    ])
     try:
         run_mixer.main()
     except Exception:
@@ -391,7 +413,7 @@ def test_bug4_speaker_flag_preserved_in_single_speaker_inventory(tmp_path: Path,
 
     assert mock_select.call_count >= 1
     passed_speaker = mock_select.call_args[1].get("speaker_id")
-    assert passed_speaker == "custom_speaker", f"Expected custom_speaker to be preserved, got {passed_speaker}"
+    assert passed_speaker == "single_inventory_spk", f"Expected single_inventory_spk to be preserved, got {passed_speaker}"
 
     # Case B: User does NOT provide --speaker (should fallback to single_inventory_spk)
     mock_select.reset_mock()

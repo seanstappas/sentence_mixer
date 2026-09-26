@@ -17,6 +17,23 @@ from features import compute_join_cost
 from lexicon import strip_phone_stress
 
 
+def phone_edit_distance(seq1: Tuple[str, ...], seq2: Tuple[str, ...]) -> int:
+    """Computes Levenshtein edit distance between two phone tuples."""
+    m, n = len(seq1), len(seq2)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if seq1[i - 1] == seq2[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+    return dp[m][n]
+
+
 class SpanSelector:
     """
     Selects optimal variable-length units (Phrases, Words, Phones) to cover a TargetGraph.
@@ -57,7 +74,9 @@ class SpanSelector:
             word_ids = self.inv.word_to_word_ids.get(w_norm, [])
             matches = [self.inv.words[wid] for wid in word_ids if wid in self.inv.words]
             if speaker_id is not None:
-                matches = [wo for wo in matches if wo.speaker_id == speaker_id]
+                matches = [wo for wo in matches if wo.speaker_id == speaker_id and getattr(wo, "is_eligible", True)]
+            else:
+                matches = [wo for wo in matches if getattr(wo, "is_eligible", True)]
             if matches:
                 eligible_words[w_norm] = matches
 
@@ -122,7 +141,7 @@ class SpanSelector:
                             break
 
                         next_wo = self.inv.words.get(succ_ev.word_occurrence_id)
-                        if next_wo and next_wo.word_normalized == next_tok and (speaker_id is None or next_wo.speaker_id == speaker_id):
+                        if next_wo and getattr(next_wo, "is_eligible", True) and next_wo.word_normalized == next_tok and (speaker_id is None or next_wo.speaker_id == speaker_id):
                             matched_wos.append(next_wo)
                             curr_wo = next_wo
                         else:
@@ -130,12 +149,62 @@ class SpanSelector:
                             break
 
                     if is_full_phrase and len(matched_wos) == span_len:
-                        # Collect nodes for branch 0 of each token in span (branch-isolated)
-                        covered = []
-                        for t_idx in range(start_tok, end_tok + 1):
-                            # Use branch 0 (first/most-common pronunciation) for phrase span coverage
-                            branch0_nodes = token_to_branch_nodes.get((t_idx, 0), token_to_nodes[t_idx])
-                            covered.extend(branch0_nodes)
+                        # Attach each word in phrase to its matching pronunciation branch (B09)
+                        phrase_compatible = True
+                        covered: List[int] = []
+                        total_realized_phones: List[str] = []
+                        phrase_realization_cost = 0.0
+
+                        for tok_offset, wo in enumerate(matched_wos):
+                            t_idx = start_tok + tok_offset
+                            branches = token_branches.get(t_idx, [(0, token_to_nodes.get(t_idx, []))])
+                            wo_p = tuple(wo.realized_phones) if wo.realized_phones else ()
+                            if not wo_p:
+                                wo_p = tuple(self.inv.events[eid].label for eid in wo.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone")
+                            wo_base = tuple(strip_phone_stress(p) for p in wo_p)
+                            total_realized_phones.extend(wo_p)
+
+                            # Find best matching branch for this word occurrence
+                            best_b_nodes = branches[0][1] if branches else []
+                            best_match_quality = 999
+                            found_match = False
+
+                            for _bid, b_nodes in branches:
+                                if not b_nodes:
+                                    continue
+                                b_p = tuple(graph.nodes[nid].phone for nid in b_nodes)
+                                b_base = tuple(graph.nodes[nid].base_phone for nid in b_nodes)
+
+                                if wo_p == b_p:
+                                    best_b_nodes = b_nodes
+                                    best_match_quality = 0
+                                    found_match = True
+                                    break
+                                elif wo_base == b_base and best_match_quality > 1:
+                                    best_b_nodes = b_nodes
+                                    best_match_quality = 1
+                                    found_match = True
+
+                            if not found_match:
+                                # Check if token is constrained
+                                is_tok_constrained = any(graph.nodes[nid].is_constrained for nid in (branches[0][1] if branches else []))
+                                if is_tok_constrained:
+                                    phrase_compatible = False
+                                    break
+                                else:
+                                    # Unconstrained token: attach to branch 0 with penalty
+                                    best_b_nodes = branches[0][1] if branches else []
+                                    b0_base = tuple(graph.nodes[nid].base_phone for nid in best_b_nodes)
+                                    dist = phone_edit_distance(wo_base, b0_base)
+                                    phrase_realization_cost += 0.25 + 0.5 * (dist / max(len(b0_base), 1))
+                            else:
+                                if best_match_quality == 1:
+                                    phrase_realization_cost += 0.05
+
+                            covered.extend(best_b_nodes)
+
+                        if not phrase_compatible or not covered:
+                            continue
 
                         all_events = []
                         for wo in matched_wos:
@@ -156,8 +225,9 @@ class SpanSelector:
                             event_ids=all_events,
                             span_type="phrase",
                             matched_word=" ".join(phrase_tokens),
-                            target_cost=0.0 + bias_adj,
+                            target_cost=0.0 + bias_adj + phrase_realization_cost,
                             quality_cost=0.0,
+                            realized_phones=total_realized_phones,
                         )
                         candidates.append(c)
                         cand_id_counter += 1
@@ -173,6 +243,7 @@ class SpanSelector:
                     continue
                 branch_phones = tuple(graph.nodes[nid].phone for nid in branch_nodes)
                 branch_base_phones = tuple(graph.nodes[nid].base_phone for nid in branch_nodes)
+                is_constrained = any(graph.nodes[nid].is_constrained for nid in branch_nodes)
 
                 word_candidates = list(word_candidates_base)
 
@@ -187,7 +258,65 @@ class SpanSelector:
                     if p_wo not in word_candidates:
                         word_candidates.append(p_wo)
 
-                for wo in word_candidates[:self.max_candidates_per_span]:
+                # Filter word_candidates by realized_phones and apply D6 constraints
+                valid_branch_candidates_and_costs: List[Tuple[WordOccurrence, float, List[str]]] = []
+                for wo in word_candidates:
+                    wo_phones = tuple(wo.realized_phones) if wo.realized_phones else ()
+                    if not wo_phones:
+                        wo_phones = tuple(self.inv.events[eid].label for eid in wo.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone")
+                    wo_base_phones = tuple(strip_phone_stress(p) for p in wo_phones)
+
+                    realization_cost = 0.0
+                    if wo_phones:
+                        if wo_phones == branch_phones:
+                            realization_cost = 0.0
+                        elif wo_base_phones == branch_base_phones:
+                            realization_cost = 0.05  # stress-only difference
+                        else:
+                            # Check if this realization matches another branch of the token
+                            matches_other_branch = False
+                            for other_bid, other_nodes in token_branches.get(t_idx, []):
+                                if other_bid != _bid and other_nodes:
+                                    other_phones = tuple(graph.nodes[nid].phone for nid in other_nodes)
+                                    other_base = tuple(graph.nodes[nid].base_phone for nid in other_nodes)
+                                    if wo_phones == other_phones or wo_base_phones == other_base:
+                                        matches_other_branch = True
+                                        break
+                            if matches_other_branch:
+                                continue
+
+                            # Mismatched realization
+                            if is_constrained:
+                                # D6: Constrained tokens reject mismatched realization
+                                continue
+                            else:
+                                dist = phone_edit_distance(wo_base_phones, branch_base_phones)
+                                realization_cost = 0.25 + 0.5 * (dist / max(len(branch_base_phones), 1))
+
+                    valid_branch_candidates_and_costs.append((wo, realization_cost, list(wo_phones)))
+
+                # Compute expected word duration from duration priors of constituent phone nodes
+                expected_dur = sum(
+                    graph.nodes[nid].duration_prior_sec or 0.10
+                    for nid in branch_nodes if nid < len(graph.nodes)
+                )
+
+                def _word_candidate_sort_key(item: Tuple[WordOccurrence, float, List[str]]) -> float:
+                    wo_it, r_c, _ = item
+                    srec = self.inv.sources.get(wo_it.source_content_id)
+                    srate = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+                    w_dur = (wo_it.end_sample - wo_it.start_sample) / float(srate)
+                    d_ratio = abs(w_dur - expected_dur) / max(expected_dur, 0.05)
+                    return r_c + 0.35 * min(d_ratio, 2.0)
+
+                valid_branch_candidates_and_costs.sort(key=_word_candidate_sort_key)
+
+                for wo, r_cost, r_phones in valid_branch_candidates_and_costs[:self.max_candidates_per_span]:
+                    src_rec = self.inv.sources.get(wo.source_content_id)
+                    s_rate = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 44100
+                    actual_dur = (wo.end_sample - wo.start_sample) / float(s_rate)
+                    dur_cost = 0.35 * min(abs(actual_dur - expected_dur) / max(expected_dur, 0.05), 2.0)
+
                     bias_adj = self._compute_prosodic_bias_adjustment(
                         branch_nodes, wo.source_content_id, wo.start_sample, wo.end_sample, graph
                     )
@@ -203,8 +332,9 @@ class SpanSelector:
                         event_ids=wo.phone_event_ids,
                         span_type="word",
                         matched_word=wo.word_normalized,
-                        target_cost=0.05 + bias_adj,
+                        target_cost=0.05 + bias_adj + r_cost + dur_cost,
                         quality_cost=0.0,
+                        realized_phones=r_phones,
                     )
                     candidates.append(c)
                     cand_id_counter += 1
@@ -219,7 +349,7 @@ class SpanSelector:
             valid_events = []
             for eid in matching_event_ids:
                 ev = self.inv.events.get(eid)
-                if ev and (speaker_id is None or ev.speaker_id == speaker_id):
+                if ev and getattr(ev, "is_eligible", True) and (speaker_id is None or ev.speaker_id == speaker_id):
                     valid_events.append(ev)
 
             # Rank by duration closeness to prior and take top candidates
@@ -237,6 +367,17 @@ class SpanSelector:
                     [node.node_id], ev.source_content_id, ev.start_sample, ev.end_sample, graph
                 )
 
+                # Check phone audibility floor for voiced sounds and fricatives
+                _, p_rms = self._get_candidate_acoustic_features(ev.source_content_id, ev.start_sample, ev.end_sample)
+                p_energy_penalty = 0.0
+                base_p = node.base_phone
+                min_rms = 0.016
+                if base_p in ("Z", "S", "SH", "ZH", "V", "F", "TH", "DH", "CH", "JH") or base_p in (
+                    "IY", "IH", "EY", "EH", "AE", "AA", "AO", "OW", "UH", "UW", "ER", "AY", "AW", "OY"
+                ):
+                    if 0.0 < p_rms < min_rms:
+                        p_energy_penalty = 0.6 * (min_rms - p_rms) / min_rms
+
                 c = SpanCandidate(
                     candidate_id=f"cand_phone_{cand_id_counter:05d}",
                     target_node_start=node.node_id,
@@ -249,8 +390,9 @@ class SpanSelector:
                     event_ids=[ev.event_id],
                     span_type="phone",
                     matched_word=node.word_text,
-                    target_cost=0.15 + dur_cost + bias_adj,
+                    target_cost=0.15 + dur_cost + bias_adj + p_energy_penalty,
                     quality_cost=0.0,
+                    realized_phones=[ev.label],
                 )
                 candidates.append(c)
                 cand_id_counter += 1
@@ -507,7 +649,13 @@ class SpanSelector:
         if prosody_guide is None:
             return 0.0
         if hasattr(prosody_guide, "get_candidate_cost"):
-            return float(prosody_guide.get_candidate_cost(cand))
+            try:
+                return float(prosody_guide.get_candidate_cost(cand, graph, selector=self))
+            except TypeError:
+                try:
+                    return float(prosody_guide.get_candidate_cost(cand, graph))
+                except TypeError:
+                    return float(prosody_guide.get_candidate_cost(cand))
         if isinstance(prosody_guide, dict):
             return float(prosody_guide.get(cand.candidate_id, 0.0))
         return 0.0
@@ -527,6 +675,12 @@ class SpanSelector:
         candidates = self.retrieve_candidates(graph, speaker_id=speaker_id)
         if not candidates:
             raise ValueError(f"No unit candidates found to synthesize target sentence: '{graph.raw_text}'")
+
+        phrase_cands = sum(1 for c in candidates if c.span_type == "phrase")
+        word_cands = sum(1 for c in candidates if c.span_type == "word")
+        phone_cands = sum(1 for c in candidates if c.span_type == "phone")
+        print(f"[+] Retrieved {len(candidates)} candidate units (phrases: {phrase_cands}, words: {word_cands}, phones: {phone_cands})")
+        print(f"[*] Optimizing path through {len(graph.nodes)} target phoneme nodes via Viterbi DP...")
 
         # Organize candidates by start node
         cands_by_start: Dict[int, List[SpanCandidate]] = {}
@@ -564,8 +718,16 @@ class SpanSelector:
         best_terminal_cost = float("inf")
         end_set = set(graph.end_nodes)
 
+        try:
+            from tqdm import tqdm
+            pbar = tqdm(total=len(candidates), desc="Searching candidate path", unit="cands", leave=False)
+        except Exception:
+            pbar = None
+
         while pq:
             cost, cid = heapq.heappop(pq)
+            if pbar is not None:
+                pbar.update(1)
             if cost > dp[cid]:
                 continue
 
@@ -612,6 +774,9 @@ class SpanSelector:
                         parent[succ.candidate_id] = curr
 
                         heapq.heappush(pq, (new_cost, succ.candidate_id))
+
+        if pbar is not None:
+            pbar.close()
 
         if best_terminal_cand is None:
             raise ValueError(f"Could not find a continuous phonetic path covering target sentence: '{graph.raw_text}'")

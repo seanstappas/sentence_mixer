@@ -9,7 +9,7 @@ import argparse
 import json
 import re
 import sys
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -76,12 +76,19 @@ def select_best_unit(candidates: List[Dict[str, Any]], target_type: str = "word"
 def synthesize_sentence(
     target_text: str,
     inventory: Dict[str, Any],
-    prefer_words: bool = True
+    prefer_words: bool = True,
+    lexicon: Optional[Any] = None,
+    overrides: Optional[Dict[Any, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Given a target phrase and a unit inventory, resolves the phrase into a sequence
     of video/audio slices prioritizing words and falling back to phonemes.
     """
+    if re.search(r"<[^>]+>", target_text) or re.search(r"\{[^}]*\}", target_text):
+        raise ValueError(
+            "Legacy selector does not support markup (<gap:...>) or phonetic syntax ({...}). Use --selector span."
+        )
+
     words_db = inventory.get("words", {})
     phones_db = inventory.get("phones", {})
 
@@ -108,7 +115,17 @@ def synthesize_sentence(
 
         # Step 2: Fall back to phonemes
         print(f"[>] Word '{token}' not found in word corpus. Falling back to phonemes...")
-        phone_tokens = get_word_phonemes(token)
+        phone_tokens: List[str] = []
+        if overrides and (token in overrides or clean_token in overrides):
+            cand = overrides.get(token) or overrides.get(clean_token)
+            if cand:
+                phone_tokens = cand[0] if isinstance(cand[0], list) else cand
+        if not phone_tokens and lexicon is not None:
+            lex_prons = lexicon.get_pronunciations(clean_token)
+            if lex_prons:
+                phone_tokens = lex_prons[0]
+        if not phone_tokens:
+            phone_tokens = get_word_phonemes(token)
         print(f"    Phonetic breakdown for '{token}': {phone_tokens}")
 
         if not phone_tokens:

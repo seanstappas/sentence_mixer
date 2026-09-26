@@ -1,0 +1,23 @@
+[
+  {
+    "video": "..\\input\\anakin_ep2_1.mp4",
+    "vtt": "..\\input\\anakin_ep2_1.en.vtt",
+    "speaker_id": "anakin",
+    "recording_id": "star_wars_ep2",
+    "single_speaker_verified": true
+  },
+  {
+    "video": "..\\input\\anakin_ep2_2.mp4",
+    "vtt": "..\\input\\anakin_ep2_2.en.vtt",
+    "speaker_id": "anakin",
+    "recording_id": "star_wars_ep2",
+    "single_speaker_verified": true
+  },
+  {
+    "video": "..\\input\\anakin_ep3_2.mp4",
+    "vtt": "..\\input\\anakin_ep3_2.en.vtt",
+    "speaker_id": "anakin",
+    "recording_id": "star_wars_ep3",
+    "single_speaker_verified": true
+  }
+]

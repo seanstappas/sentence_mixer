@@ -28,6 +28,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from contracts import EditPlan, PlanSegment, PlanTransition, SourceRecord
+from edit_plan import finalize_edit_plan
 from listen_verify import verify_listening
 from validate_mix import measure_audio_loudness
 from video_assembler import normalize_audio_ebur128, render_master_pcm
@@ -444,6 +445,7 @@ class TestLoudnessNormalization:
 
         # 1. Unnormalized render: quiet vs loud has massive RMS disparity
         unnorm_wav = tmp_path / "render_unnorm.wav"
+        finalize_edit_plan(plan, normalize_loudness=False)
         render_master_pcm(plan, unnorm_wav, normalize_loudness=False)
         data_unnorm, _ = sf.read(str(unnorm_wav))
         rms_quiet_unnorm = np.sqrt(np.mean(data_unnorm[10000:30000] ** 2))
@@ -453,6 +455,7 @@ class TestLoudnessNormalization:
 
         # 2. Normalized render: leveling applies gain to quiet cut and cuts loud cut
         norm_wav = tmp_path / "render_norm.wav"
+        finalize_edit_plan(plan, normalize_loudness=True)
         render_master_pcm(plan, norm_wav, normalize_loudness=True)
         data_norm, _ = sf.read(str(norm_wav))
         rms_quiet_norm = np.sqrt(np.mean(data_norm[10000:30000] ** 2))

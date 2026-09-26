@@ -201,8 +201,7 @@ def validate_mix(
                 i_lufs, tp_dbtp = measure_audio_loudness(wav_path)
                 min_lufs = target_loudness - loudness_tolerance
                 max_lufs = target_loudness + loudness_tolerance
-                is_peak_limited = (abs(tp_dbtp - max_true_peak) <= 0.2 and i_lufs < min_lufs)
-                if (i_lufs < min_lufs or i_lufs > max_lufs) and not is_peak_limited:
+                if i_lufs < min_lufs or i_lufs > max_lufs:
                     errors.append(
                         f"Master WAV integrated loudness {i_lufs:.2f} LUFS is outside acceptance bounds "
                         f"[{min_lufs:.1f}, {max_lufs:.1f}] LUFS (target: {target_loudness:.1f} ± {loudness_tolerance:.1f} LUFS)"
@@ -246,6 +245,33 @@ def validate_mix(
             if abs(float(actual_fps - expected_fps_frac)) > 0.05:
                 errors.append(f"Video frame rate mismatch: expected {expected_fps_frac}, got {actual_fps}")
 
+            # Exact video frame count check via ffprobe -count_frames
+            cmd_frames = [
+                "ffprobe", "-v", "error",
+                "-count_frames",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=nb_read_frames",
+                "-of", "json",
+                str(mp4_path),
+            ]
+            res_frames = subprocess.run(cmd_frames, capture_output=True, text=True)
+            if res_frames.returncode == 0:
+                try:
+                    f_data = json.loads(res_frames.stdout)
+                    v_streams = f_data.get("streams", [])
+                    if v_streams and "nb_read_frames" in v_streams[0]:
+                        read_frames = int(v_streams[0]["nb_read_frames"])
+                        if plan.total_video_frames is not None and plan.total_video_frames > 0:
+                            if read_frames != plan.total_video_frames:
+                                errors.append(
+                                    f"Video frame count mismatch: expected {plan.total_video_frames} frames, "
+                                    f"got {read_frames} (deficit/surplus: {read_frames - plan.total_video_frames})"
+                                )
+                            else:
+                                print(f"[+] Exact video frame count verified: {read_frames} frames")
+                except Exception:
+                    pass
+
             # Check bounded audio/video duration discrepancy (< 1 frame)
             one_frame_sec = float(plan.video_fps.denominator) / float(plan.video_fps.numerator)
             v_dur = float(video_stream.get("duration", probe_data.get("format", {}).get("duration", 0.0)))
@@ -281,9 +307,99 @@ def validate_mix(
             expected_tb = str(int(round(plan.video_fps.as_float())))
             if timebase_elem is not None and timebase_elem.text != expected_tb:
                 errors.append(f"XML timebase mismatch: expected {expected_tb}, got {timebase_elem.text}")
-            print(f"[+] FCP7 XML sequence verified: timebase={expected_tb}")
+
+            seq_dur_elem = root.find(".//sequence/duration")
+            if seq_dur_elem is not None and seq_dur_elem.text:
+                try:
+                    xml_dur = int(seq_dur_elem.text)
+                    if xml_dur != plan.total_video_frames:
+                        errors.append(
+                            f"XML sequence duration {xml_dur} frames does not match plan total_video_frames {plan.total_video_frames}"
+                        )
+                except ValueError:
+                    pass
+
+            audio_clips = root.findall(".//media/audio/track/clipitem")
+            if not audio_clips:
+                errors.append("XML sequence contains no audio clip items.")
+            else:
+                file_urls: dict[str, str] = {}
+                for f_node in root.findall(".//file"):
+                    fid = f_node.get("id")
+                    purl = f_node.find("pathurl")
+                    if fid and purl is not None and purl.text:
+                        file_urls[fid] = purl.text.strip()
+
+                for aclip in audio_clips:
+                    pathurl_elem = aclip.find("file/pathurl")
+                    url = pathurl_elem.text.strip() if (pathurl_elem is not None and pathurl_elem.text) else None
+                    if not url:
+                        f_ref = aclip.find("file")
+                        if f_ref is not None:
+                            ref_id = f_ref.get("id")
+                            if ref_id and ref_id in file_urls:
+                                url = file_urls[ref_id]
+                    if not url:
+                        errors.append("XML audio clip item missing file pathurl")
+                        continue
+                    prefix = "file://localhost/"
+                    if url.startswith(prefix):
+                        local_path_str = url[len(prefix):]
+                    elif url.startswith("file:///"):
+                        local_path_str = url[8:]
+                    elif url.startswith("file://"):
+                        local_path_str = url[7:]
+                    else:
+                        local_path_str = url
+                    import urllib.parse
+                    unescaped_path = urllib.parse.unquote(local_path_str)
+                    target_audio_file = Path(unescaped_path)
+                    if not target_audio_file.exists():
+                        errors.append(f"XML audio pathurl does not exist on disk: {target_audio_file}")
+                    elif wav_path.exists() and target_audio_file.resolve() != wav_path.resolve():
+                        errors.append(f"XML audio pathurl {target_audio_file} does not match master WAV {wav_path}")
+
+            # Check freeze/pause segments represented in XML
+            vclips = root.findall(".//media/video/track/clipitem")
+            for seg in plan.segments:
+                if (seg.is_silence or getattr(seg, "freeze_video", False) or seg.span_type == "pause") and seg.video_frame_count > 0:
+                    hold_id = f"hold_{seg.segment_index:04d}"
+                    found_hold = any(
+                        (c.find("name") is not None and hold_id in (c.find("name").text or ""))
+                        or (c.find("file/name") is not None and hold_id in (c.find("file/name").text or ""))
+                        for c in vclips
+                    )
+                    if not found_hold:
+                        errors.append(f"XML missing hold clip for freeze segment {seg.segment_index}")
+
+            print(f"[+] FCP7 XML sequence verified: timebase={expected_tb}, audio clips={len(audio_clips)}")
         except Exception as e:
             errors.append(f"XML validation failed: {e}")
+
+    # Validate Completion Manifest if present
+    manifest_p = mp4_path.parent / f"{mp4_path.stem}.manifest.json"
+    if manifest_p.exists():
+        try:
+            m_info = json.loads(manifest_p.read_text(encoding="utf-8"))
+            artifacts = m_info.get("artifacts", {})
+            for art_key, art_data in artifacts.items():
+                art_file = Path(art_data.get("path", ""))
+                if not art_file.exists():
+                    errors.append(f"Manifest artifact '{art_key}' missing on disk: {art_file}")
+                    continue
+                expected_sha = art_data.get("sha256")
+                if expected_sha:
+                    import hashlib
+                    h = hashlib.sha256()
+                    with open(art_file, "rb") as f:
+                        while chunk := f.read(65536):
+                            h.update(chunk)
+                    computed_sha = h.hexdigest()
+                    if computed_sha != expected_sha:
+                        errors.append(f"Manifest artifact '{art_key}' SHA-256 mismatch: expected {expected_sha}, got {computed_sha}")
+            print(f"[+] Completion manifest verified: {len(artifacts)} artifacts")
+        except Exception as e:
+            errors.append(f"Manifest validation failed: {e}")
 
     # 7. Validate ASR Listening Verification
     should_run_asr = require_asr or (bool(getattr(plan, "target_text", None)) and not skip_asr)

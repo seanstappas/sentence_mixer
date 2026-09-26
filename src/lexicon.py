@@ -199,6 +199,11 @@ class Lexicon:
         w = word.strip().lower()
         return w in self.word_to_pronunciations
 
+    def is_heteronym(self, word: str) -> bool:
+        """Returns True if word has multiple distinct pronunciations in the lexicon."""
+        prons = self.get_pronunciations(word)
+        return len(prons) > 1
+
     def save_custom_pronunciation(
         self,
         word: str,
@@ -207,7 +212,8 @@ class Lexicon:
     ) -> None:
         """
         Persists an approved pronunciation to custom_pronunciations.txt with phone validation,
-        deduplication, and atomic file replacement. Updates in-memory dictionary.
+        deduplication on normalized (lowercase word, phone tuple), and atomic file replacement.
+        Updates in-memory dictionary.
         """
         clean_word = word.strip().lower()
         clean_phones = [p.strip().upper() for p in phones if p.strip()]
@@ -227,23 +233,64 @@ class Lexicon:
         custom_path.parent.mkdir(parents=True, exist_ok=True)
         phones_str = " ".join(clean_phones)
         entry_line = f"{clean_word}\t{phones_str}"
+        target_norm = (clean_word, tuple(clean_phones))
 
-        # Atomic deduplicated read/merge/write
-        existing_lines: List[str] = []
-        if custom_path.exists():
-            existing_lines = [ln.strip() for ln in custom_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        # Process-safe atomic deduplicated read/merge/write with FileLock
+        lock_path = custom_path.with_suffix(".lock")
+        from filelock import FileLock
+        with FileLock(str(lock_path), timeout=10):
+            existing_lines: List[str] = []
+            existing_tuples = set()
+            if custom_path.exists():
+                for ln in custom_path.read_text(encoding="utf-8").splitlines():
+                    ln_stripped = ln.strip()
+                    if not ln_stripped:
+                        continue
+                    existing_lines.append(ln_stripped)
+                    if not ln_stripped.startswith("#"):
+                        parts = ln_stripped.split()
+                        if parts:
+                            w = parts[0].strip().lower()
+                            phs = tuple(p.strip().upper() for p in parts[1:] if not is_numeric_prob(p))
+                            existing_tuples.add((w, phs))
 
-        if entry_line not in existing_lines:
-            existing_lines.append(entry_line)
-            tmp_path = custom_path.with_suffix(f".tmp_{os.getpid()}")
-            tmp_path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
-            tmp_path.replace(custom_path)
+            if target_norm not in existing_tuples:
+                existing_lines.append(entry_line)
+                tmp_path = custom_path.with_suffix(f".tmp_{os.getpid()}")
+                tmp_path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+                tmp_path.replace(custom_path)
 
         # Update in-memory entry
         if clean_word not in self.word_to_pronunciations:
             self.word_to_pronunciations[clean_word] = []
         if clean_phones not in self.word_to_pronunciations[clean_word]:
             self.word_to_pronunciations[clean_word].insert(0, clean_phones)
+
+
+def normalize_numerals(text: str) -> str:
+    """
+    Normalizes numeric digits outside phonetic {...} or tag <...> blocks to word equivalents using inflect.
+    e.g. 'hello 1 world' -> 'hello one world'
+    """
+    import inflect
+    engine = inflect.engine()
+
+    def _repl(m: re.Match) -> str:
+        if m.group(1):  # {...} block
+            return m.group(1)
+        if m.group(2):  # <...> block
+            return m.group(2)
+        if m.group(3):  # digits
+            num_str = m.group(3)
+            try:
+                words = engine.number_to_words(num_str)
+                return words.replace(",", "").replace("-", " ")
+            except Exception:
+                return num_str
+        return m.group(0)
+
+    pattern = re.compile(r"(\{[^}]*\})|(<[^>]+>)|(\b\d+(?:\.\d+)?\b)")
+    return pattern.sub(_repl, text)
 
 
 

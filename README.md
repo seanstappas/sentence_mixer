@@ -1,18 +1,21 @@
 # Montreal Forced Aligner (MFA) Sentence Mixing Toolkit
 
-An automated, unit-selection sentence mixing engine for video and audio remixing. Uses Montreal Forced Aligner (MFA) to derive sub-millisecond acoustic boundaries for words and phonemes from any source video and WebVTT subtitle track. Prioritizes whole-word unit selection with automatic grapheme-to-phoneme (G2P) phonetic fallback for missing words.
+An automated, unit-selection sentence mixing engine for video and audio remixing. Uses Montreal Forced Aligner (MFA) to derive acoustic boundaries for words and phonemes from source video and WebVTT subtitle tracks. Prioritizes whole-word and phrase unit selection with automatic phonetic fallback for missing words.
 
-Outputs synchronized **rendered MP4 video / master WAV audio** (and optional Premiere Pro FCP7 XML timelines).
+Outputs synchronized **rendered MP4 video / master WAV audio** (and optional Premiere Pro / Final Cut Pro 7 XML timelines).
+
+> [!IMPORTANT]
+> **Source-Preserving Invariant**: Analysis inputs (Diarization, ASR, WavLM, phone recognizers, microphone capture, and prosody guides) NEVER donate audio or video to output renders. Output speech is derived strictly from user source recordings.
 
 ---
 
-## Overview & Capabilities
+## Overview & Principles
 
-The pipeline is completely source-agnostic and works with any video, speaker, or speech domain:
+The pipeline selects and edits recorded speech and video so a speaker appears to say target text as naturally as the available recordings allow. No TTS, voice cloning, generated mouth movement, or generative inpainting:
 - **Any video format**: MP4, WebM, MKV, MOV, etc.
 - **Any English speech content**: Talks, lectures, interviews, gaming streams, movies, or commentary.
-- **Any WebVTT subtitles**: Automatically parses standard WebVTT or YouTube auto-generated rolling captions, de-duplicates rolling lines, discards non-speech bracketed markers (`[Music]`, `[Applause]`), and extracts 16kHz mono audio chunks.
-- **Automatic Caching**: Generates a unique hash from the source video path. Once a video is aligned, its inventory is permanently cached under `tools/sentence_mixer/cache/<source_id>/` and reloaded in `~0.05s`.
+- **Any WebVTT subtitles**: Automatically parses standard WebVTT or YouTube auto-generated captions, de-duplicates rolling lines, discards non-speech bracketed markers (`[Music]`, `[Applause]`), and extracts 16kHz mono audio chunks.
+- **Content-Aware Caching**: Three-layer content hashing (audio content bytes, MFA alignment, and speaker-labeled inventory) eliminates redundant computation while ensuring immediate cache invalidation on edits.
 - **Phonetic Fallback for Any Vocabulary**: If a word in your target sentence was never spoken in the source video, the engine automatically breaks the word down into ARPAbet phonemes using CMU/G2P (`g2p_en`) and splices together matching phonetic intervals from the speaker's vocal track.
 
 ---
@@ -170,15 +173,45 @@ python tools/evaluate.py --suite evaluation/suite.json --output-dir output/evalu
 | Option | Description | Default |
 | --- | --- | --- |
 | `--selector legacy\|span` | Unit selection backend (`legacy` word-first or `span` variable-span) | `legacy` |
-| `--speaker <id>` | Filter inventory to verified speaker identity | `None` (or auto-resolved if single verified speaker) |
-| `--assume-single-speaker` | Explicit assertion of single-speaker status | `False` |
+| `--speaker <id>` | Filter inventory to verified speaker identity (strictly a filter, never relabels) | `None` |
+| `--assume-single-speaker` | Explicit assertion of single-speaker status for a single-source input | `False` |
+| `--diarize auto\|off\|force` | Speaker diarization mode (`auto`: cache/backend, `off`: manifest/asserted only, `force`: re-diarize) | `auto` |
+| `--speaker-registry <path>` | Path to persistent speaker registry JSON | `.build/speaker_registry.json` |
 | `--mode source-derived\|cuts-only` | Join smoothing mode | `source-derived` |
 | `--features basic\|wavlm` | Acoustic feature backend (`basic` continuous acoustics or `wavlm` neural) | `basic` |
 | `--fps <rate>` | Rational framerate (e.g. `30000/1001`, `24`, `25`, `29.97`) | `30000/1001` |
 | `--plan <path>` | Path to output canonical `EditPlan` JSON | `<render_stem>.plan.json` |
 | `--xml <path>` | Optional Final Cut Pro 7 / Premiere Pro XML timeline | `None` |
-| `--guide <audio>` | Optional human prosody guide audio (analysis-only) | `None` |
+| `--guide <audio>` | Human prosody guide audio (analysis-only, pitch contour & relative duration) | `None` |
+| `--guide-transcript <path>` | Explicit transcript file matching guide target words (required with `--guide`) | `None` |
+| `--target-audio <path>` | Spoken target audio recording for acoustic pronunciation review | `None` |
+| `--record-target` | Record spoken target audio interactively via microphone | `False` |
+| `--normalize-loudness` / `--no-normalize-loudness` | Enable/disable EBU R128 (-16 LUFS, -1.0 dBTP) loudness post-processing | Enabled |
+| `--audio-track combined\|raw\|vocals\|recombined\|all` | Output audio track variant | `combined` |
 | `--force-realign` | Invalidate cache and force fresh MFA alignment | `False` |
+
+---
+
+## Governance Rules & Architecture
+
+### 1. Speaker Identity Governance (D1, D4, D5)
+- `--speaker <id>` is strictly a filter. It never creates, overwrites, or relabels cached sources.
+- Identities originate strictly from: (a) manifest entries with `single_speaker_verified: true` or `speaker_intervals`; (b) `--video` + `--speaker S` + `--assume-single-speaker`; or (c) diarization with a verified registry cosine threshold match (> 0.75).
+- Unmatched diarization clusters receive anonymous IDs (`anon:<content_id>:<cluster_index>`).
+- Single-speaker word eligibility strictly excludes words overlapping other speakers or outside valid speech intervals (with a 40ms silence collar).
+
+### 2. Legacy Selector Limits (D2)
+- The legacy selector is strictly restricted to plain text targets.
+- It rejects span markup (`{...}` phone groups, `<gap:...>` cadence tags), `--target-audio`, `--record-target`, prosody guides, and WavLM with an actionable error directing the user to `--selector span`.
+
+### 3. Spoken Target Recognition Tiers (D8)
+- **Tier 1 (Default)**: Unprimed Whisper word transcription followed by MFA forced alignment of the recording against candidate dictionary variants.
+- **Tier 2 (Optional)**: CTC acoustic phone recognizer for non-lexical sounds or nonce words.
+- **Spelling Fallback**: Pure G2P dictionary resolution with interactive review.
+
+### 4. Prosody Guide Requirements (D7, B10)
+- Providing `--guide <audio>` requires an accompanying `--guide-transcript <path>` matching the target words.
+- The guide extracts voiced F0 pitch contour and relative duration from source speech to bias candidate join costs, but never contributes audio to renders.
 
 ### 4. Force Re-alignment
 If you modified subtitles or added custom dictionary entries:

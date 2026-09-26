@@ -17,6 +17,8 @@ dependencies = [
     "webvtt-py",
     "g2p_en",
     "matplotlib",
+    "filelock",
+    "inflect",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,16 @@ wavlm = [
     "torch",
     "transformers",
     "huggingface-hub",
+]
+mic = [
+    "sounddevice",
+    "faster-whisper",
+]
+asr = [
+    "faster-whisper",
+]
+diarization = [
+    "pyannote.audio",
 ]
 
 [tool.setuptools]

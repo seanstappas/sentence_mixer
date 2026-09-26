@@ -29,6 +29,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from contracts import EditPlan, PlanSegment, PlanTransition, RationalTime, SourceRecord
+from edit_plan import finalize_edit_plan
 from video_assembler import normalize_audio_ebur128, render_master_pcm, render_sentence_mix
 from validate_mix import measure_audio_loudness, validate_mix
 
@@ -235,6 +236,7 @@ def test_multi_clip_segment_balancing_without_distortion(tmp_path: Path):
     )
 
     # 1. Unnormalized render: quiet vs loud has ~30 dB disparity
+    finalize_edit_plan(plan, normalize_loudness=False)
     out_unnorm = tmp_path / "out_unnorm.wav"
     render_master_pcm(plan, out_unnorm, normalize_loudness=False)
     data_unnorm, _ = sf.read(str(out_unnorm))
@@ -244,6 +246,7 @@ def test_multi_clip_segment_balancing_without_distortion(tmp_path: Path):
     assert ratio_unnorm > 20.0, f"Expected huge disparity in unnormalized audio, got ratio {ratio_unnorm}"
 
     # 2. Normalized render with Tier 1 speech leveling + Tier 2 master EBU R128
+    finalize_edit_plan(plan, normalize_loudness=True)
     out_norm = tmp_path / "out_norm.wav"
     render_master_pcm(plan, out_norm, normalize_loudness=True)
     assert out_norm.exists()
@@ -500,12 +503,13 @@ def test_render_sentence_mix_muxed_mp4_audio_normalized(tmp_path: Path):
         video_fps=RationalTime(30, 1),
         segments=[seg],
         sources={"speech_src": src_rec},
-        metadata={"normalize_loudness": True},
+        metadata={"normalize_loudness": True, "visual_policy": "audio-only"},
     )
 
     out_mp4 = tmp_path / "render_delivery.mp4"
     out_wav = out_mp4.with_suffix(".wav")
 
+    finalize_edit_plan(plan, normalize_loudness=True)
     render_sentence_mix(plan, str(out_mp4), normalize_loudness=True)
 
     assert out_wav.exists(), "Master WAV must exist"

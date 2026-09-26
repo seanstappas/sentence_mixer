@@ -75,11 +75,16 @@ def test_speaker_registry_matching_and_persistence(tmp_path: Path):
     )
     assert new_spk.startswith("speaker_")
 
-    # Reload from disk and confirm persistence
+    # In non-interactive mode, registry is NOT polluted (D4)
     reloaded = SpeakerRegistry(config_path=reg_path)
     assert "obi-wan" in reloaded.speakers
     assert "anakin" in reloaded.speakers
-    assert new_spk in reloaded.speakers
+    assert new_spk not in reloaded.speakers
+
+    # Explicit registration persists
+    registry.register_or_update("yoda", display_name="Yoda", centroid=q_unknown)
+    reloaded2 = SpeakerRegistry(config_path=reg_path)
+    assert "yoda" in reloaded2.speakers
 
 
 def test_detect_speech_turns_energy_segmentation(tmp_path: Path):

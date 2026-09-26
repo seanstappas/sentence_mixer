@@ -270,6 +270,8 @@ def test_video_freeze_frame_assembly(temp_workspace):
         segments=[seg0, seg_pause, seg2],
         sources={"src_blue": src_rec},
     )
+    from edit_plan import finalize_edit_plan
+    finalize_edit_plan(plan, normalize_loudness=False)
     plan.validate()
 
     out_mp4 = temp_workspace / "render_freeze.mp4"

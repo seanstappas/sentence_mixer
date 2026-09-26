@@ -81,8 +81,36 @@ def evaluate_suite(
             "configurations": {},
         }
 
-        # Evaluate across configurations: span_basic and legacy
-        for config_name, selector in [("span_basic", "span"), ("legacy", "legacy")]:
+        # Evaluate across configurations defined in suite (or default to span_basic and legacy)
+        raw_configs = suite.get("configurations")
+        config_list: List[Dict[str, Any]] = []
+        if not raw_configs:
+            config_list = [
+                {"name": "span_basic", "selector": "span", "features": "basic"},
+                {"name": "legacy", "selector": "legacy", "features": "basic"},
+            ]
+        else:
+            for c in raw_configs:
+                if isinstance(c, str):
+                    if c == "legacy":
+                        config_list.append({"name": "legacy", "selector": "legacy", "features": "basic"})
+                    elif c == "span_basic":
+                        config_list.append({"name": "span_basic", "selector": "span", "features": "basic"})
+                    elif c == "span_wavlm":
+                        config_list.append({"name": "span_wavlm", "selector": "span", "features": "wavlm"})
+                    elif c == "span_guide":
+                        config_list.append({"name": "span_guide", "selector": "span", "features": "basic", "use_guide": True})
+                    else:
+                        config_list.append({"name": c, "selector": "span", "features": "basic"})
+                elif isinstance(c, dict):
+                    config_list.append(c)
+
+        for c_entry in config_list:
+            config_name = c_entry["name"]
+            selector = c_entry.get("selector", "span")
+            features = c_entry.get("features", "basic")
+            use_guide = c_entry.get("use_guide", False)
+
             render_stem = out_dir / f"{case_id}_{config_name}"
             render_mp4 = render_stem.with_suffix(".mp4")
             render_wav = render_stem.with_suffix(".wav")
@@ -94,13 +122,16 @@ def evaluate_suite(
                 "--speaker", speaker_id,
                 "--text", target_text,
                 "--selector", selector,
-                "--features", "basic",
+                "--features", features,
                 "--mode", "source-derived",
                 "--non-interactive",
                 "--render", str(render_mp4),
             ]
             if selector != "legacy":
                 cmd.extend(["--plan", str(render_plan)])
+            if use_guide or config_name == "span_guide":
+                if case.get("guide_audio") and case.get("guide_transcript"):
+                    cmd.extend(["--guide", str(case["guide_audio"]), "--guide-transcript", str(case["guide_transcript"])])
 
             res = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
             success = (res.returncode == 0 and render_mp4.exists())
@@ -108,7 +139,7 @@ def evaluate_suite(
             config_metrics: Dict[str, Any] = {
                 "success": success,
                 "selector": selector,
-                "features": "basic",
+                "features": features,
                 "render_mp4": str(render_mp4) if success else None,
                 "render_wav": str(render_wav) if render_wav.exists() else None,
             }
@@ -150,6 +181,7 @@ def evaluate_suite(
                         wer_threshold=asr_tolerance,
                     )
                     config_metrics["asr"] = {
+                        "status": "passed" if asr_res.get("passed") else "failed",
                         "transcribed_text": asr_res.get("transcribed_text", ""),
                         "normalized_transcribed": asr_res.get("normalized_transcribed", ""),
                         "wer": asr_res.get("wer", 1.0),
@@ -162,18 +194,23 @@ def evaluate_suite(
                     }
                 except Exception as asr_err:
                     config_metrics["asr"] = {
+                        "status": "blocked",
                         "error": str(asr_err),
                         "passed": False,
-                        "wer": 1.0,
+                        "wer": None,
+                        "cer": None,
                     }
 
             case_results["configurations"][config_name] = config_metrics
             asr_info = ""
             if "asr" in config_metrics and isinstance(config_metrics["asr"], dict):
                 asr_data: Dict[str, Any] = config_metrics["asr"]
-                asr_tag = "PASS" if asr_data.get("passed") else "FAIL"
-                asr_wer = float(asr_data.get("wer", 0.0))
-                asr_info = f" (ASR: {asr_tag}, WER={asr_wer:.2f})"
+                if asr_data.get("status") == "blocked":
+                    asr_info = " (ASR: BLOCKED)"
+                else:
+                    asr_tag = "PASS" if asr_data.get("passed") else "FAIL"
+                    asr_wer = float(asr_data.get("wer", 0.0))
+                    asr_info = f" (ASR: {asr_tag}, WER={asr_wer:.2f})"
             print(f"    - {config_name}: {'PASS' if success else 'FAIL'}{asr_info}")
 
         results.append(case_results)
@@ -183,16 +220,21 @@ def evaluate_suite(
     all_cers = []
     asr_passes = 0
     total_asr_evaluated = 0
+    any_asr_blocked = False
 
     for r in results:
         for cname, cdata in r.get("configurations", {}).items():
-            if "asr" in cdata and "wer" in cdata["asr"]:
-                total_asr_evaluated += 1
-                all_wers.append(cdata["asr"]["wer"])
-                if "cer" in cdata["asr"]:
-                    all_cers.append(cdata["asr"]["cer"])
-                if cdata["asr"].get("passed"):
-                    asr_passes += 1
+            if "asr" in cdata:
+                asr_data = cdata["asr"]
+                if asr_data.get("status") == "blocked":
+                    any_asr_blocked = True
+                elif asr_data.get("wer") is not None:
+                    total_asr_evaluated += 1
+                    all_wers.append(asr_data["wer"])
+                    if asr_data.get("cer") is not None:
+                        all_cers.append(asr_data["cer"])
+                    if asr_data.get("passed"):
+                        asr_passes += 1
 
     mean_wer = round(float(sum(all_wers) / len(all_wers)), 4) if all_wers else None
     mean_cer = round(float(sum(all_cers) / len(all_cers)), 4) if all_cers else None
@@ -210,6 +252,7 @@ def evaluate_suite(
             "mean_wer": mean_wer,
             "mean_cer": mean_cer,
             "asr_pass_rate": asr_pass_rate,
+            "asr_blocked": any_asr_blocked,
         },
         "results": results,
     }
@@ -256,16 +299,21 @@ if __name__ == "__main__":
         sys.exit(2)
 
     summary = report.get("summary", {})
+    if summary.get("asr_blocked") and not args.skip_asr:
+        print("[ERROR] ASR listening verification is unavailable / blocked. Exit 2.", file=sys.stderr)
+        sys.exit(2)
+
     asr_pass_rate = summary.get("asr_pass_rate")
-    render_failures = [
-        c for c in report.get("cases", [])
-        if not c.get("render_success", True)
-    ]
+    render_failures = []
+    for r in report.get("results", []):
+        for cname, cdata in r.get("configurations", {}).items():
+            if not cdata.get("success", False):
+                render_failures.append((r.get("case_id"), cname))
 
     # Exit 1 if any render failed or ASR acceptance is not 100 %
     if render_failures:
         print(
-            f"[FAIL] {len(render_failures)} render failure(s). Exit 1.",
+            f"[FAIL] {len(render_failures)} render failure(s): {render_failures}. Exit 1.",
             file=sys.stderr,
         )
         sys.exit(1)

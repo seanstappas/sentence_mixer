@@ -371,20 +371,23 @@ def test_evaluate_suite_asr_integration(monkeypatch, tmp_path):
     class FakeCompletedProcess:
         returncode = 0
 
+    orig_run = subprocess.run
+
     def fake_subprocess_run(cmd, *args, **kwargs):
-        if "--render" in cmd and "--plan" in cmd:
+        if "--render" in cmd:
             render_idx = cmd.index("--render") + 1
-            plan_idx = cmd.index("--plan") + 1
             mp4_path = Path(cmd[render_idx])
-            plan_path = Path(cmd[plan_idx])
             wav_path = mp4_path.with_suffix(".wav")
 
             mp4_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(smoke_wav, wav_path)
             mp4_path.write_bytes(b"dummy_mp4_container")
-            plan_path.write_text(json.dumps({"total_output_samples": 24000, "segments": []}))
+            if "--plan" in cmd:
+                plan_idx = cmd.index("--plan") + 1
+                plan_path = Path(cmd[plan_idx])
+                plan_path.write_text(json.dumps({"total_output_samples": 24000, "segments": []}))
             return FakeCompletedProcess()
-        return subprocess.run(cmd, *args, **kwargs)
+        return orig_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
 

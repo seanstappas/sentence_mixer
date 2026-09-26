@@ -32,6 +32,9 @@ def compute_file_sha256(file_path: Union[str, Path], chunk_size: int = 65536) ->
     return h.hexdigest()
 
 
+from cache import compute_media_hash
+
+
 def get_source_id(source_path: Union[str, Path]) -> str:
     """
     Generate a clean filesystem-safe source ID with content hash for caching.
@@ -39,8 +42,8 @@ def get_source_id(source_path: Union[str, Path]) -> str:
     """
     p = Path(source_path).resolve()
     clean_stem = re.sub(r"[^\w\-_]", "_", p.stem)[:40]
-    path_hash = hashlib.sha256(p.as_posix().encode("utf-8")).hexdigest()[:8]
-    return f"{clean_stem}_{path_hash}"
+    content_hash = compute_media_hash(p)[:8]
+    return f"{clean_stem}_{content_hash}"
 
 
 def _find_vocal_candidates(directory: Path) -> List[Path]:

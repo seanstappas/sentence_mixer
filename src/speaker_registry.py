@@ -100,10 +100,12 @@ class SpeakerRegistry:
         self,
         cluster_centroid: np.ndarray,
         threshold: Optional[float] = None,
+        ambiguity_margin: float = 0.05,
     ) -> Tuple[Optional[str], float]:
         """
         Compares a cluster centroid against known speaker profiles using cosine similarity.
-        Returns (best_speaker_id, best_score) if score >= threshold, else (None, best_score).
+        Returns (best_speaker_id, best_score) if score >= threshold and (best_score - runner_up_score) >= ambiguity_margin.
+        If the runner-up similarity is within ambiguity_margin, returns (None, best_score) to prevent ambiguous misclassification.
         """
         thresh = threshold if threshold is not None else self.similarity_threshold
         if cluster_centroid.ndim > 1:
@@ -112,21 +114,30 @@ class SpeakerRegistry:
         if norm > 1e-8:
             cluster_centroid = cluster_centroid / norm
 
-        best_id: Optional[str] = None
-        best_score = -1.0
-
+        scores: List[Tuple[str, float]] = []
         for spk_id, profile in self.speakers.items():
             ref_arr = profile.centroid_array()
             if ref_arr is None or len(ref_arr) != len(cluster_centroid):
                 continue
             sim = float(np.dot(cluster_centroid, ref_arr))
-            if sim > best_score:
-                best_score = sim
-                best_id = spk_id
+            scores.append((spk_id, sim))
 
-        if best_id is not None and best_score >= thresh:
-            return best_id, best_score
-        return None, best_score
+        if not scores:
+            return None, -1.0
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+        best_id, best_score = scores[0]
+
+        if best_score < thresh:
+            return None, best_score
+
+        if len(scores) > 1:
+            runner_up_score = scores[1][1]
+            if (best_score - runner_up_score) < ambiguity_margin:
+                # Ambiguous tie: margin too narrow to safely attribute identity
+                return None, best_score
+
+        return best_id, best_score
 
     def register_or_update(
         self,
@@ -201,10 +212,10 @@ class SpeakerRegistry:
             return matched_id
 
         # Determine default ID
-        default_id = cluster_id if cluster_id.startswith(default_prefix) else f"{default_prefix}_{len(self.speakers) + 1:02d}"
+        default_id = cluster_id if cluster_id.startswith("anon:") or cluster_id.startswith(default_prefix) else f"{default_prefix}_{len(self.speakers) + 1:02d}"
 
-        assigned_id = default_id
-        assigned_name = default_id
+        assigned_id = None
+        assigned_name = None
 
         is_tty = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
         if interactive and is_tty:
@@ -219,13 +230,17 @@ class SpeakerRegistry:
                     assigned_id = user_val.lower().replace(" ", "_")
                     assigned_name = user_val
             except (EOFError, KeyboardInterrupt):
-                assigned_id = default_id
+                pass
 
-        print(f"[+] Registering speaker profile: '{assigned_id}'")
-        self.register_or_update(
-            speaker_id=assigned_id,
-            display_name=assigned_name,
-            centroid=centroid,
-            sample_count=turn_count,
-        )
-        return assigned_id
+        if assigned_id:
+            print(f"[+] Registering speaker profile: '{assigned_id}'")
+            self.register_or_update(
+                speaker_id=assigned_id,
+                display_name=assigned_name,
+                centroid=centroid,
+                sample_count=turn_count,
+            )
+            return assigned_id
+        else:
+            print(f"[+] Leaving cluster unassigned in registry; using scoped anonymous ID '{default_id}'")
+            return default_id

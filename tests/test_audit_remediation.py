@@ -173,6 +173,7 @@ def test_r11_stereo_audio_preserved_without_mono_downmixing(tmp_path: Path):
                 target_phones=["S", "T", "EH1", "R", "IY0", "OW0"],
                 span_type="phrase",
                 source_video_path=str(stereo_wav),
+                gain_db=0.0,
             )
         ],
     )

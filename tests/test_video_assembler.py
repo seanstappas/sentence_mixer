@@ -43,6 +43,7 @@ def test_render_master_pcm_exact_sample_count():
             target_phones=[],
             span_type="word",
             source_video_path=str(src_wav),
+            gain_db=0.0,
         )
 
         seg2 = PlanSegment(
@@ -57,6 +58,7 @@ def test_render_master_pcm_exact_sample_count():
             target_phones=[],
             span_type="word",
             source_video_path=str(src_wav),
+            gain_db=0.0,
         )
 
         trans = PlanTransition(
@@ -127,6 +129,7 @@ def test_render_master_pcm_audio_track_selection():
             target_phones=[],
             span_type="word",
             source_video_path=str(comb_wav),
+            gain_db=0.0,
         )
 
         plan = EditPlan(
@@ -189,6 +192,7 @@ def test_render_sentence_mix_audio_track_both():
             source_video_path="",  # triggers fallback color frame
             video_start_frame=0,
             video_frame_count=30,
+            gain_db=0.0,
         )
 
         plan = EditPlan(
@@ -259,6 +263,7 @@ def test_render_master_pcm_audio_track_recombined():
             target_phones=[],
             span_type="word",
             source_video_path="",
+            gain_db=0.0,
         )
 
         plan = EditPlan(
@@ -325,6 +330,7 @@ def test_render_sentence_mix_audio_track_all():
             source_video_path="",
             video_start_frame=0,
             video_frame_count=30,
+            gain_db=0.0,
         )
 
         plan = EditPlan(

@@ -6,8 +6,16 @@ overlap crossfades, pauses, and loudness normalization into an immutable EditPla
 
 from __future__ import annotations
 
+import json
+import re
+import subprocess
+import tempfile
 import uuid
+from pathlib import Path
 from typing import List, Literal, Optional
+
+import numpy as np
+import soundfile as sf
 
 from contracts import (
     EDIT_PLAN_SCHEMA_VERSION,
@@ -112,6 +120,12 @@ def build_edit_plan(
 
         target_phones = [graph.nodes[nid].phone for nid in span.covered_nodes if nid < len(graph.nodes)]
 
+        realized = getattr(span, "realized_phones", None)
+        if not realized and inventory is not None:
+            realized = [inventory.events[eid].label for eid in span.event_ids if eid in inventory.events and inventory.events[eid].kind == "phone"]
+        if not realized:
+            realized = list(target_phones)
+
         seg = PlanSegment(
             segment_index=seg_idx,
             source_content_id=span.source_content_id,
@@ -127,6 +141,7 @@ def build_edit_plan(
             video_start_frame=start_frame,
             video_frame_count=frame_count,
             video_source_pts_sec=source_pts,
+            realized_phones=realized,
         )
         segments.append(seg)
         seg_idx += 1
@@ -241,7 +256,14 @@ def build_edit_plan(
     # Check for trailing gap (boundary after last token)
     if selected_spans and segments:
         last_node = graph.nodes[selected_spans[-1].covered_nodes[-1]]
-        trailing_gap = getattr(graph, "explicit_gaps", {}).get(last_node.token_index, 0.0)
+        explicit_gaps = getattr(graph, "explicit_gaps", {})
+        if last_node.token_index in explicit_gaps:
+            trailing_gap = explicit_gaps[last_node.token_index]
+        elif rendering_mode != "cuts-only":
+            trailing_gap = graph.punctuation_pauses.get(last_node.token_index, 0.0)
+        else:
+            trailing_gap = 0.0
+
         if trailing_gap > 0.0:
             last_speech_seg = segments[-1]
             pause_samples = int(round(trailing_gap * project_sample_rate))
@@ -283,6 +305,46 @@ def build_edit_plan(
     total_output_samples = current_output_sample
     total_video_frames = cumulative_frame_ceiling(total_output_samples, project_sample_rate, video_fps)
 
+    # Deterministic picture-switch policy during audio overlap:
+    # Partition cumulative timeline at crossfade midpoint so sum(video_frame_count) == total_video_frames
+    if segments:
+        overlap_by_from_seg = {}
+        for t in transitions:
+            if t.transition_type == "overlap":
+                overlap_by_from_seg[t.from_segment_index] = t.overlap_samples
+
+        v_display_starts = [0] * len(segments)
+        v_display_ends = [0] * len(segments)
+
+        v_display_starts[0] = 0
+        for k in range(len(segments) - 1):
+            curr_seg = segments[k]
+            next_seg = segments[k + 1]
+            ov = overlap_by_from_seg.get(curr_seg.segment_index, 0)
+            if ov > 0:
+                midpoint = next_seg.output_start_sample + (ov // 2)
+                v_display_ends[k] = midpoint
+                v_display_starts[k + 1] = midpoint
+            else:
+                v_display_ends[k] = curr_seg.output_end_sample
+                v_display_starts[k + 1] = next_seg.output_start_sample
+
+        v_display_ends[-1] = total_output_samples
+
+        for k, seg in enumerate(segments):
+            v_start = v_display_starts[k]
+            v_end = v_display_ends[k]
+            start_f = cumulative_frame_ceiling(v_start, project_sample_rate, video_fps)
+            end_f = cumulative_frame_ceiling(v_end, project_sample_rate, video_fps)
+            seg.video_start_frame = start_f
+            seg.video_frame_count = max(0, end_f - start_f)
+
+            # Adjust video_source_pts_sec for audio overlap offset if not silence
+            if not seg.is_silence:
+                offset_samples = v_start - seg.output_start_sample
+                if offset_samples > 0:
+                    seg.video_source_pts_sec += (offset_samples / float(project_sample_rate))
+
     plan = EditPlan(
         schema_version=EDIT_PLAN_SCHEMA_VERSION,
         plan_id=plan_id,
@@ -300,4 +362,152 @@ def build_edit_plan(
         metadata={"num_cuts": len(transitions)},
     )
     plan.validate()
+    finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"))
+    return plan
+
+
+def finalize_edit_plan(
+    plan: EditPlan,
+    inventory: Optional[InventoryIndex] = None,
+    normalize_loudness: bool = True,
+    target_i: float = -16.0,
+    target_tp: float = -1.0,
+    target_lra: float = 11.0,
+) -> EditPlan:
+    """
+    Freezes all DSP decisions into the EditPlan before rendering:
+    1. Computes float gain_db for all non-silence segments over consolidated natural runs.
+       In cuts-only mode or if normalize_loudness is False, gain_db is 0.0.
+    2. Measures EBU R128 loudness on an unpublished analysis master and records the
+       analysis stats and target parameters in plan metadata.
+    3. Guarantees that rendering will not need to make DSP decisions or mutate the plan.
+    """
+    is_cuts_only = (plan.rendering_mode == "cuts-only")
+
+    # Step 1: Consolidate natural runs and compute gain_db for every segment
+    runs: List[List[PlanSegment]] = []
+    curr_run: List[PlanSegment] = []
+
+    for seg in plan.segments:
+        if seg.is_silence:
+            seg.gain_db = 0.0
+            if curr_run:
+                runs.append(curr_run)
+                curr_run = []
+            continue
+
+        if not curr_run:
+            curr_run.append(seg)
+        else:
+            prev_seg = curr_run[-1]
+            if (
+                prev_seg.source_content_id == seg.source_content_id
+                and prev_seg.source_end_sample == seg.source_start_sample
+            ):
+                curr_run.append(seg)
+            else:
+                runs.append(curr_run)
+                curr_run = [seg]
+
+    if curr_run:
+        runs.append(curr_run)
+
+    for run in runs:
+        if is_cuts_only or not normalize_loudness:
+            for s in run:
+                s.gain_db = 0.0
+            continue
+
+        first_seg = run[0]
+        src_rec = plan.sources.get(first_seg.source_content_id) if plan.sources else None
+        src_path = None
+        if src_rec:
+            if src_rec.cached_pcm_path and Path(src_rec.cached_pcm_path).exists():
+                src_path = src_rec.cached_pcm_path
+            elif src_rec.source_path and Path(src_rec.source_path).exists():
+                src_path = src_rec.source_path
+        elif first_seg.source_video_path and Path(first_seg.source_video_path).exists():
+            src_path = first_seg.source_video_path
+
+        run_audio_chunks = []
+        if src_path:
+            try:
+                arr, native_rate = sf.read(str(src_path))
+                rec_sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else native_rate
+                for s in run:
+                    if native_rate != rec_sr:
+                        st = int(round(s.source_start_sample * native_rate / rec_sr))
+                        en = int(round(s.source_end_sample * native_rate / rec_sr))
+                    else:
+                        st = s.source_start_sample
+                        en = s.source_end_sample
+                    st = max(0, min(len(arr), st))
+                    en = max(0, min(len(arr), en))
+                    chunk = arr[st:en]
+                    if native_rate != plan.project_sample_rate and len(chunk) > 0:
+                        import librosa
+                        if chunk.ndim > 1:
+                            chunk = librosa.resample(chunk, orig_sr=native_rate, target_sr=plan.project_sample_rate, axis=0)
+                        else:
+                            chunk = librosa.resample(chunk, orig_sr=native_rate, target_sr=plan.project_sample_rate)
+                    run_audio_chunks.append(chunk)
+            except Exception:
+                pass
+
+        if run_audio_chunks:
+            run_audio = np.concatenate(run_audio_chunks, axis=0)
+            if run_audio.ndim > 1:
+                run_audio = np.mean(run_audio, axis=1)
+            active_mask = np.abs(run_audio) > 1e-4
+            if np.sum(active_mask) > 50:
+                rms = float(np.sqrt(np.mean(run_audio[active_mask] ** 2)))
+            else:
+                rms = float(np.sqrt(np.mean(run_audio ** 2))) if len(run_audio) > 0 else 0.0
+
+            if rms > 1e-4:
+                rms_db = 20.0 * np.log10(rms)
+                auto_gain_db = -20.0 - rms_db
+                gain_val = float(max(-9.0, min(9.0, auto_gain_db)))
+            else:
+                gain_val = 0.0
+        else:
+            gain_val = 0.0
+
+        for s in run:
+            s.gain_db = gain_val
+
+    # Ensure all segments have a valid float gain_db
+    for s in plan.segments:
+        if s.gain_db is None:
+            s.gain_db = 0.0
+
+    # Step 2: Measure loudness on an unpublished analysis master and record metadata
+    if not is_cuts_only and normalize_loudness:
+        try:
+            from video_assembler import render_master_pcm
+            with tempfile.TemporaryDirectory(prefix="sm_loudness_analysis_") as tmp_d:
+                analysis_wav = Path(tmp_d) / "analysis_master.wav"
+                render_master_pcm(plan, str(analysis_wav), normalize_loudness=False)
+                if analysis_wav.exists() and analysis_wav.stat().st_size > 0:
+                    cmd1 = [
+                        "ffmpeg", "-nostats",
+                        "-i", str(analysis_wav),
+                        "-af", f"loudnorm=I={target_i:.1f}:TP={target_tp:.1f}:LRA={target_lra:.1f}:print_format=json",
+                        "-f", "null", "-"
+                    ]
+                    proc1 = subprocess.run(cmd1, capture_output=True, text=True)
+                    if proc1.returncode == 0:
+                        match = re.search(r"\{\s*\"input_i\"\s*:.*?\}", proc1.stderr, re.DOTALL)
+                        if match:
+                            stats = json.loads(match.group(0))
+                            plan.metadata["ebur128_analysis"] = stats
+                            plan.metadata["ebur128_target"] = {
+                                "target_i": target_i,
+                                "target_tp": target_tp,
+                                "target_lra": target_lra,
+                            }
+        except Exception:
+            pass
+
+    plan.metadata["normalize_loudness"] = normalize_loudness
     return plan

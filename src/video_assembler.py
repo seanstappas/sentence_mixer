@@ -38,6 +38,7 @@ def normalize_audio_ebur128(
     target_tp: float = -1.0,
     target_lra: float = 11.0,
     sample_rate: int = 48000,
+    premeasured_stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Applies two-pass FFmpeg loudnorm filter according to EBU R128 / ITU-R BS.1770
@@ -79,22 +80,25 @@ def normalize_audio_ebur128(
             "target_tp": target_tp,
         }
 
-    # Pass 1: Measure loudness metrics with loudnorm
-    cmd1 = [
-        "ffmpeg", "-nostats",
-        "-i", str(in_p),
-        "-af", f"loudnorm=I={target_i:.1f}:TP={target_tp:.1f}:LRA={target_lra:.1f}:print_format=json",
-        "-f", "null", "-"
-    ]
-    proc1 = subprocess.run(cmd1, capture_output=True, text=True)
-    if proc1.returncode != 0:
-        raise RuntimeError(f"FFmpeg loudnorm pass 1 failed (code {proc1.returncode}): {proc1.stderr}")
+    if premeasured_stats is not None and "input_i" in premeasured_stats:
+        stats = dict(premeasured_stats)
+    else:
+        # Pass 1: Measure loudness metrics with loudnorm
+        cmd1 = [
+            "ffmpeg", "-nostats",
+            "-i", str(in_p),
+            "-af", f"loudnorm=I={target_i:.1f}:TP={target_tp:.1f}:LRA={target_lra:.1f}:print_format=json",
+            "-f", "null", "-"
+        ]
+        proc1 = subprocess.run(cmd1, capture_output=True, text=True)
+        if proc1.returncode != 0:
+            raise RuntimeError(f"FFmpeg loudnorm pass 1 failed (code {proc1.returncode}): {proc1.stderr}")
 
-    match = re.search(r"\{\s*\"input_i\"\s*:.*?\}", proc1.stderr, re.DOTALL)
-    if not match:
-        raise RuntimeError(f"FFmpeg loudnorm pass 1 did not output JSON metrics: {proc1.stderr}")
+        match = re.search(r"\{\s*\"input_i\"\s*:.*?\}", proc1.stderr, re.DOTALL)
+        if not match:
+            raise RuntimeError(f"FFmpeg loudnorm pass 1 did not output JSON metrics: {proc1.stderr}")
 
-    stats: Dict[str, Any] = json.loads(match.group(0))
+        stats = json.loads(match.group(0))
     measured_i = stats.get("input_i", "-70.0")
     if measured_i == "-inf" or float(measured_i) <= -70.0:
         if in_p != out_p:
@@ -357,21 +361,18 @@ def render_master_pcm(
                     else:
                         inst_slice = inst_slice[:expected_dur]
 
-            # Level / gain vocal slice ONLY (purity in cuts-only mode: no leveling)
-            is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
-            v_gain_db = seg.gain_db
-            if not is_cuts_only and v_gain_db is None and normalize_loudness and len(vocal_slice) > 0:
-                active_mask = np.abs(vocal_slice) > 1e-4
-                if np.sum(active_mask) > 50:
-                    rms = float(np.sqrt(np.mean(vocal_slice[active_mask] ** 2)))
-                else:
-                    rms = float(np.sqrt(np.mean(vocal_slice ** 2)))
-                if rms > 1e-4:
-                    rms_db = 20.0 * np.log10(rms)
-                    auto_gain_db = -20.0 - rms_db
-                    v_gain_db = max(-9.0, min(9.0, auto_gain_db))
+            # Level / gain vocal slice ONLY using frozen plan gain_db
+            if not seg.is_silence:
+                if seg.gain_db is None:
+                    raise ValueError(
+                        f"Undecided gain_db (None) on segment {seg.segment_index} ('{seg.target_text}'). "
+                        "All non-silence segments must have a frozen float gain_db in the EditPlan before rendering."
+                    )
+                v_gain_db = seg.gain_db
+            else:
+                v_gain_db = 0.0
 
-            if v_gain_db is not None and v_gain_db != 0.0:
+            if v_gain_db != 0.0:
                 vocal_slice = vocal_slice * float(10.0 ** (v_gain_db / 20.0))
 
             # Channel alignment between vocal and instrumental
@@ -472,23 +473,18 @@ def render_master_pcm(
         elif len(slice_audio) > expected_dur:
             slice_audio = slice_audio[:expected_dur]
 
-        # Tier 1 Speech Leveling across disparate cuts:
-        # In cuts-only mode, purity is preserved: NO leveling applied!
-        is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
-        gain_to_apply_db = seg.gain_db
-        if not is_cuts_only and gain_to_apply_db is None and normalize_loudness and len(slice_audio) > 0:
-            active_mask = np.abs(slice_audio) > 1e-4
-            if np.sum(active_mask) > 50:
-                rms = float(np.sqrt(np.mean(slice_audio[active_mask] ** 2)))
-            else:
-                rms = float(np.sqrt(np.mean(slice_audio ** 2)))
+        # Tier 1 Speech Leveling across disparate cuts using frozen plan gain_db
+        if not seg.is_silence:
+            if seg.gain_db is None:
+                raise ValueError(
+                    f"Segment {seg.segment_index} ('{seg.target_text}') has undecided gain_db (None). "
+                    "All non-silence segments must have a frozen float gain_db in the EditPlan before rendering."
+                )
+            gain_to_apply_db = seg.gain_db
+        else:
+            gain_to_apply_db = 0.0
 
-            if rms > 1e-4:
-                rms_db = 20.0 * np.log10(rms)
-                auto_gain_db = -20.0 - rms_db
-                gain_to_apply_db = max(-9.0, min(9.0, auto_gain_db))
-
-        if gain_to_apply_db is not None and gain_to_apply_db != 0.0:
+        if gain_to_apply_db != 0.0:
             scale = float(10.0 ** (gain_to_apply_db / 20.0))
             slice_audio = slice_audio * scale
 
@@ -542,13 +538,19 @@ def render_master_pcm(
 
     # Tier 2: Master EBU R128 Loudness Normalization (disabled in cuts-only mode)
     if not is_cuts_only and normalize_loudness:
+        frozen_stats = getattr(plan, "metadata", {}).get("ebur128_analysis")
+        target_meta = getattr(plan, "metadata", {}).get("ebur128_target", {})
+        t_i = target_meta.get("target_i", -16.0)
+        t_tp = target_meta.get("target_tp", -1.0)
+        t_lra = target_meta.get("target_lra", 11.0)
         normalize_audio_ebur128(
             input_wav=out_wav,
             output_wav=out_wav,
-            target_i=-16.0,
-            target_tp=-1.0,
-            target_lra=11.0,
+            target_i=t_i,
+            target_tp=t_tp,
+            target_lra=t_lra,
             sample_rate=sr,
+            premeasured_stats=frozen_stats,
         )
         # Re-zero silence segments after loudnorm to guarantee pure digital silence without dither bleed
         silence_segs = [seg for seg in plan.segments if seg.is_silence]
@@ -675,6 +677,11 @@ def render_sentence_mix_legacy(
         segments.append(seg)
         curr_sample += dur_samples
 
+    has_video = any(Path(u["source_video"]).exists() and _has_video_stream(u["source_video"]) for u in units)
+    metadata = {}
+    if not has_video:
+        metadata["visual_policy"] = "audio-only"
+
     total_video_frames = sum(s.video_frame_count for s in segments)
     plan = EditPlan(
         plan_id="legacy_plan",
@@ -686,7 +693,10 @@ def render_sentence_mix_legacy(
         total_video_frames=total_video_frames,
         segments=segments,
         sources=sources,
+        metadata=metadata,
     )
+    from edit_plan import finalize_edit_plan
+    finalize_edit_plan(plan, normalize_loudness=normalize_loudness)
     return render_sentence_mix(
         plan,
         output_mp4_path,
@@ -780,26 +790,31 @@ def render_sentence_mix(
             # Check if this segment is a pause/freeze-frame cut
             is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
             if is_freeze:
-                freeze_img = temp_dir / f"freeze_{idx:04d}.png"
+                holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
+                holds_dir.mkdir(parents=True, exist_ok=True)
+                freeze_img = holds_dir / f"hold_{idx:04d}.png"
                 extracted = False
-                if idx > 0 and len(slice_files) > 0:
-                    cmd_extract = [
-                        "ffmpeg", "-y",
-                        "-sseof", "-0.05",
-                        "-i", str(slice_files[-1]),
-                        "-update", "1",
-                        "-q:v", "1",
-                        str(freeze_img),
-                    ]
-                    res = subprocess.run(cmd_extract, capture_output=True)
-                    if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
-                        extracted = True
+
+                if freeze_img.exists() and freeze_img.stat().st_size > 0:
+                    extracted = True
                 elif seg.source_video_path and Path(seg.source_video_path).exists() and _has_video_stream(seg.source_video_path):
                     cmd_extract = [
                         "ffmpeg", "-y",
                         "-ss", f"{seg.video_source_pts_sec:.6f}",
                         "-i", str(seg.source_video_path),
                         "-frames:v", "1",
+                        "-q:v", "1",
+                        str(freeze_img),
+                    ]
+                    res = subprocess.run(cmd_extract, capture_output=True)
+                    if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                        extracted = True
+                elif idx > 0 and len(slice_files) > 0:
+                    cmd_extract = [
+                        "ffmpeg", "-y",
+                        "-sseof", "-0.05",
+                        "-i", str(slice_files[-1]),
+                        "-update", "1",
                         "-q:v", "1",
                         str(freeze_img),
                     ]
@@ -826,14 +841,19 @@ def render_sentence_mix(
                     slice_files.append(slice_mp4)
                     continue
 
-            if seg.source_video_path and Path(seg.source_video_path).exists() and _has_video_stream(seg.source_video_path):
+            has_valid_source = bool(
+                seg.source_video_path
+                and Path(seg.source_video_path).exists()
+                and _has_video_stream(seg.source_video_path)
+            )
+            if has_valid_source:
                 start_pts = seg.video_source_pts_sec
                 cmd = [
                     "ffmpeg", "-y",
                     "-ss", f"{start_pts:.6f}",
                     "-i", str(seg.source_video_path),
                     "-frames:v", str(frame_count),
-                    "-vf", f"fps={fps_str},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+                    "-vf", f"fps={fps_str},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,tpad=stop_mode=clone:stop=-1",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "18",
@@ -842,19 +862,35 @@ def render_sentence_mix(
                     str(slice_mp4)
                 ]
             else:
-                # Fallback to color frame if source video does not exist or has no video stream
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-f", "lavfi",
-                    "-i", f"color=c=black:s=1920x1080:r={fps_str}",
-                    "-frames:v", str(frame_count),
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "18",
-                    "-r", fps_str,
-                    "-an",
-                    str(slice_mp4)
-                ]
+                is_audio_only = (
+                    not seg.source_video_path
+                    or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                )
+                if is_audio_only:
+                    # Fallback to color frame if source video does not exist or has no video stream only when explicit audio-only visual policy requested
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-f", "lavfi",
+                        "-i", f"color=c=black:s=1920x1080:r={fps_str}",
+                        "-frames:v", str(frame_count),
+                        "-c:v", "libx264",
+                        "-preset", "veryfast",
+                        "-crf", "18",
+                        "-r", fps_str,
+                        "-an",
+                        str(slice_mp4)
+                    ]
+                else:
+                    if not Path(seg.source_video_path).exists():
+                        raise FileNotFoundError(
+                            f"Missing source video for segment {seg.segment_index}: '{seg.source_video_path}'. "
+                            "Audio-only visual policy not requested."
+                        )
+                    else:
+                        raise ValueError(
+                            f"Unreadable source video (no video stream found) for segment {seg.segment_index}: '{seg.source_video_path}'. "
+                            "Audio-only visual policy not requested."
+                        )
 
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             slice_files.append(slice_mp4)
