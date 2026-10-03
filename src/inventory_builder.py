@@ -448,18 +448,37 @@ def build_units_inventory(
     )
     inv.validate()
 
+    reconciled_legacy_phones: Dict[str, List[Dict[str, Any]]] = {}
+    for ev in events_dict.values():
+        if ev.kind == "phone":
+            reconciled_legacy_phones.setdefault(ev.label, []).append({
+                "source_video": str(source_video_path),
+                "chunk_id": ev.utterance_id,
+                "label": ev.label,
+                "start_sec": ev.start_sample / sr,
+                "end_sec": ev.end_sample / sr,
+                "duration": (ev.end_sample - ev.start_sample) / sr,
+                "sample_start": ev.start_sample,
+                "sample_end": ev.end_sample,
+                "speaker_id": ev.speaker_id,
+                "source_content_id": content_id,
+                "is_eligible": getattr(ev, "is_eligible", True),
+                "eligibility_reason": getattr(ev, "eligibility_reason", ""),
+            })
+
     out_dict = inv.to_dict()
     # Add legacy compatibility fields
     out_dict["source_video"] = str(source_video_path)
     out_dict["words_inventory"] = legacy_words
-    out_dict["phones_inventory"] = legacy_phones
+    out_dict["phones_inventory"] = reconciled_legacy_phones
 
     out_p = Path(output_index_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
     with open(out_p, "w", encoding="utf-8") as f:
         json.dump(out_dict, f, indent=2)
 
-    print(f"[+] Successfully indexed {total_words_indexed} words and {total_events_indexed} events to {out_p}")
+    uri_str = out_p.as_uri() if hasattr(out_p, "as_uri") else str(out_p)
+    print(f"[+] Successfully indexed {total_words_indexed} words and {total_events_indexed} events to {uri_str}")
     return out_dict
 
 

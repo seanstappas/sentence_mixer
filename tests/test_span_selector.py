@@ -4,7 +4,7 @@ Verifies the Phrase -> Word -> Whole Phone hierarchy, intact word preservation (
 repeated 14ms unit edit handling, and exact DP vs brute-force agreement.
 """
 
-from typing import List
+from typing import Dict, List
 
 from contracts import AlignedEvent, InventoryIndex, SourceRecord, WordOccurrence
 from lexicon import Lexicon
@@ -410,5 +410,136 @@ def test_t10_competing_occurrences_and_partition_invariance():
 
     assert len(path1) == len(path2)
     assert [s.start_sample for s in path1] == [s.start_sample for s in path2]
+
+
+def test_surrounding_source_coherence_sandwich_splice():
+    """
+    Validates that a swapped word inside a sentence returns to the surrounding
+    sentence in Source A rather than jumping to an unrelated Source C.
+    """
+    sr = 48000
+    src_a = SourceRecord("src_a", "video_a.mp4", native_sample_rate=sr, native_channels=2)
+    src_b = SourceRecord("src_b", "video_b.mp4", native_sample_rate=sr, native_channels=2)
+    src_c = SourceRecord("src_c", "video_c.mp4", native_sample_rate=sr, native_channels=2)
+
+    events: Dict[str, AlignedEvent] = {}
+    words: Dict[str, WordOccurrence] = {}
+
+    # Source A: Part 1 "hello" (sample 10000 to 20000)
+    events["e_a_hello_h"] = AlignedEvent("e_a_hello_h", "src_a", "u1", "spk1", "phone", 10000, 15000, "HH", "HH")
+    events["e_a_hello_o"] = AlignedEvent("e_a_hello_o", "src_a", "u1", "spk1", "phone", 15000, 20000, "OW1", "OW")
+    words["w_a_hello"] = WordOccurrence("w_a_hello", "src_a", "spk1", "hello", "hello", 10000, 20000, ["e_a_hello_h", "e_a_hello_o"], ["HH", "OW1"])
+
+    # Source B: Swapped word "there" (sample 5000 to 15000)
+    events["e_b_there_dh"] = AlignedEvent("e_b_there_dh", "src_b", "u2", "spk1", "phone", 5000, 10000, "DH", "DH")
+    events["e_b_there_er"] = AlignedEvent("e_b_there_er", "src_b", "u2", "spk1", "phone", 10000, 15000, "ER1", "ER")
+    words["w_b_there"] = WordOccurrence("w_b_there", "src_b", "spk1", "there", "there", 5000, 15000, ["e_b_there_dh", "e_b_there_er"], ["DH", "ER1"])
+
+    # Source A: Part 3 "friend" resuming surrounding sentence (sample 25000 to 35000, only 5000 samples / 0.1s after hello!)
+    events["e_a_friend_f"] = AlignedEvent("e_a_friend_f", "src_a", "u1", "spk1", "phone", 25000, 30000, "F", "F")
+    events["e_a_friend_end"] = AlignedEvent("e_a_friend_end", "src_a", "u1", "spk1", "phone", 30000, 35000, "EH1", "EH")
+    words["w_a_friend"] = WordOccurrence("w_a_friend", "src_a", "spk1", "friend", "friend", 25000, 35000, ["e_a_friend_f", "e_a_friend_end"], ["F", "EH1"])
+
+    # Source C: Competitor for Part 3 "friend" from unrelated video C
+    events["e_c_friend_f"] = AlignedEvent("e_c_friend_f", "src_c", "u3", "spk1", "phone", 50000, 55000, "F", "F")
+    events["e_c_friend_end"] = AlignedEvent("e_c_friend_end", "src_c", "u3", "spk1", "phone", 55000, 60000, "EH1", "EH")
+    words["w_c_friend"] = WordOccurrence("w_c_friend", "src_c", "spk1", "friend", "friend", 50000, 60000, ["e_c_friend_f", "e_c_friend_end"], ["F", "EH1"])
+
+    inv = InventoryIndex(
+        sources={"src_a": src_a, "src_b": src_b, "src_c": src_c},
+        events=events,
+        words=words,
+        word_to_word_ids={
+            "hello": ["w_a_hello"],
+            "there": ["w_b_there"],
+            "friend": ["w_c_friend", "w_a_friend"],
+        },
+    )
+
+    lex = Lexicon()
+    lex.word_to_pronunciations["hello"] = [["HH", "OW1"]]
+    lex.word_to_pronunciations["there"] = [["DH", "ER1"]]
+    lex.word_to_pronunciations["friend"] = [["F", "EH1"]]
+
+    builder = TargetGraphBuilder(lex)
+    graph = builder.build("hello there friend")
+
+    selector = SpanSelector(inv, edit_penalty=0.5)
+    path = selector.select(graph)
+
+    assert len(path) == 3
+    assert path[0].matched_word == "hello" and path[0].source_content_id == "src_a"
+    assert path[1].matched_word == "there" and path[1].source_content_id == "src_b"
+    # Part 3 must return to src_a via surrounding sentence affinity, NOT jump to src_c
+    assert path[2].matched_word == "friend" and path[2].source_content_id == "src_a"
+
+
+def test_unit_reuse_penalty_encourages_variety():
+    """
+    Validates that when multiple identical-quality instances of a phoneme exist,
+    the unit reuse penalty encourages selecting distinct donor instances.
+    """
+    sr = 16000
+    src = SourceRecord("s1", "vid.mp4", native_sample_rate=sr, native_channels=1)
+    events: Dict[str, AlignedEvent] = {}
+
+    # Two identical 100ms instances of AA1
+    events["ev_aa_1"] = AlignedEvent("ev_aa_1", "s1", "u1", "spk1", "phone", 1000, 2600, "AA1", "AA")
+    events["ev_aa_2"] = AlignedEvent("ev_aa_2", "s1", "u2", "spk1", "phone", 5000, 6600, "AA1", "AA")
+
+    inv = InventoryIndex(
+        sources={"s1": src},
+        events=events,
+        words={},
+        phone_to_event_ids={"AA1": ["ev_aa_1", "ev_aa_2"]},
+    )
+
+    lex = Lexicon()
+    builder = TargetGraphBuilder(lex)
+    # Target with two AA1 sounds
+    graph = builder.build("{AA1} {AA1}")
+
+    selector = SpanSelector(inv, edit_penalty=0.2)
+    path = selector.select(graph)
+
+    assert len(path) == 2
+    # First unit selects one instance, second unit selects the other instance rather than duplicate reuse
+    selected_events = [p.event_ids[0] for p in path]
+    assert len(set(selected_events)) == 2
+    assert "ev_aa_1" in selected_events and "ev_aa_2" in selected_events
+
+
+def test_asymmetric_vowel_duration_preference():
+    """
+    Validates that a longer, well-enunciated vowel receives lower cost than a rushed/truncated vowel.
+    """
+    sr = 16000
+    src = SourceRecord("s1", "vid.mp4", native_sample_rate=sr, native_channels=1)
+    events: Dict[str, AlignedEvent] = {}
+
+    # AA1 prior is 160 ms (2560 samples).
+    # Long enunciated vowel: 180 ms (2880 samples)
+    events["ev_aa_long"] = AlignedEvent("ev_aa_long", "s1", "u1", "spk1", "phone", 1000, 3880, "AA1", "AA")
+    # Truncated / rushed vowel: 50 ms (800 samples)
+    events["ev_aa_rushed"] = AlignedEvent("ev_aa_rushed", "s1", "u2", "spk1", "phone", 5000, 5800, "AA1", "AA")
+
+    inv = InventoryIndex(
+        sources={"s1": src},
+        events=events,
+        words={},
+        phone_to_event_ids={"AA1": ["ev_aa_long", "ev_aa_rushed"]},
+    )
+
+    lex = Lexicon()
+    builder = TargetGraphBuilder(lex)
+    graph = builder.build("{AA1}")
+
+    selector = SpanSelector(inv, edit_penalty=0.5)
+    cands = selector.retrieve_candidates(graph)
+
+    c_long = next(c for c in cands if c.event_ids == ["ev_aa_long"])
+    c_rushed = next(c for c in cands if c.event_ids == ["ev_aa_rushed"])
+
+    assert c_long.target_cost < c_rushed.target_cost
 
 

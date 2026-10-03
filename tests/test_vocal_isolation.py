@@ -535,7 +535,7 @@ def test_ensure_source_aligned_with_isolate_vocals(
     vocal_stem_mock.write_bytes(b"RIFF_mock_vocal_stem")
 
     isolated_called = []
-    def mock_isolate(src, output_dir=None, force=False):
+    def mock_isolate(src, output_dir=None, force=False, **kwargs):
         isolated_called.append((src, output_dir))
         return vocal_stem_mock
 
@@ -710,5 +710,56 @@ def test_normalize_vocal_stem(tmp_path: Path):
     normalize_vocal_stem(silence_wav)
     silence_read, _ = sf.read(str(silence_wav))
     assert np.all(silence_read == 0.0)
+
+
+def test_audio_separator_mdx_flags_forwarded(tmp_path: Path, dummy_media: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Verifies that audio-separator receives MDX parameters (--mdx_segment_size 256,
+    --mdx_overlap 0.25, and optional --mdx_enable_denoise) when an MDX-Net model is used.
+    """
+    from vocal_isolation import isolate_vocals
+
+    vocals_base = tmp_path / "vocals_out"
+    recorded_cmds: List[List[str]] = []
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        recorded_cmds.append(cmd)
+        out_dir = Path(cmd[cmd.index("--output_dir") + 1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        vocal_output = out_dir / f"{dummy_media.stem}_(Vocals).wav"
+        vocal_output.write_bytes(b"RIFF_mdx_vocals")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="Success", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    # 1. By default, denoise is disabled to avoid phase cancellation and match UVR GUI
+    stem_path = isolate_vocals(
+        source_path=dummy_media,
+        output_dir=vocals_base,
+        model_name="UVR-MDX-NET-Inst_HQ_4.onnx",
+        enable_denoise=False,
+    )
+
+    assert len(recorded_cmds) == 1
+    cmd = recorded_cmds[0]
+    assert "--mdx_segment_size" in cmd
+    assert cmd[cmd.index("--mdx_segment_size") + 1] == "256"
+    assert "--mdx_overlap" in cmd
+    assert cmd[cmd.index("--mdx_overlap") + 1] == "0.25"
+    assert "--mdx_enable_denoise" not in cmd
+    assert stem_path.exists()
+
+    # 2. When enable_denoise=True, flag is forwarded
+    recorded_cmds.clear()
+    isolate_vocals(
+        source_path=dummy_media,
+        output_dir=vocals_base,
+        model_name="UVR-MDX-NET-Inst_HQ_4.onnx",
+        force=True,
+        enable_denoise=True,
+    )
+    assert len(recorded_cmds) == 1
+    assert "--mdx_enable_denoise" in recorded_cmds[0]
+
 
 

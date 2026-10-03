@@ -483,3 +483,43 @@ def test_t16_boundary_crossing_word_multi_speaker_ineligible():
 
     assert reconciled[0]["speaker_eligible"] is False
     assert reconciled[0]["speaker_id"] == "OVERLAP"
+
+
+def test_diarize_and_wavlm_resampling_44100_audio(tmp_path: Path):
+    """
+    Verifies that diarization and WavLM feature extraction automatically
+    resample 44.1 kHz (and non-16kHz) audio to 16 kHz without throwing
+    Wav2Vec2FeatureExtractor sampling rate mismatch errors.
+    """
+    import soundfile as sf
+    import numpy as np
+
+    sr = 44100
+    duration = 1.0
+    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+    # 440 Hz tone
+    audio = (0.2 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+    wav_path = tmp_path / "audio_44100.wav"
+    sf.write(str(wav_path), audio, sr)
+
+    reg = SpeakerRegistry(config_path=tmp_path / "speaker_reg.json")
+    diarizer = SpeakerDiarizer(registry=reg)
+
+    # Calling diarize on 44.1 kHz audio must resample gracefully and succeed
+    intervals = diarizer.diarize(
+        audio_path=wav_path,
+        known_speaker="test_speaker",
+        candidate_turns=[(0.1, 0.8)],
+        interactive=False,
+    )
+
+    assert len(intervals) == 1
+    assert intervals[0].speaker_id == "test_speaker"
+
+    # Also test extract_embedding directly
+    emb = diarizer.extract_embedding(audio, sample_rate=44100)
+    assert isinstance(emb, np.ndarray)
+    assert len(emb) > 0
+    assert abs(np.linalg.norm(emb) - 1.0) < 1e-4
+

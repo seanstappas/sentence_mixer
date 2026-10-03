@@ -5,8 +5,10 @@ text normalization, and G2P fallback.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -22,6 +24,7 @@ except ImportError:
     pass
 
 _G2P_INSTANCE = None
+_STAGED_DICT_CACHE: Dict[Tuple[str, str, str], Tuple[int, int, str]] = {}
 
 
 def get_g2p():
@@ -117,6 +120,7 @@ class Lexicon:
     """
     def __init__(self, dict_paths: Optional[List[Union[str, Path]]] = None):
         self.word_to_pronunciations: Dict[str, List[List[str]]] = {}
+        self.custom_words: set[str] = set()
         self.loaded_files: List[str] = []
 
         if dict_paths:
@@ -128,6 +132,7 @@ class Lexicon:
         if not p.exists():
             return
         self.loaded_files.append(str(p))
+        is_custom = "custom_pronunciations" in p.name
 
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -143,6 +148,9 @@ class Lexicon:
                 # Remove pronunciation variant counter like 'word(2)' if present
                 word = re.sub(r"\(\d+\)$", "", word)
 
+                if not is_custom and word in self.custom_words:
+                    continue
+
                 # Collect phones, ignoring numeric probability columns from MFA dictionaries
                 phones = []
                 for tok in parts[1:]:
@@ -154,8 +162,33 @@ class Lexicon:
                         phones.append(p_clean)
 
                 if phones:
+                    if is_custom:
+                        self.custom_words.add(word)
+
+                    # Filter out truncated single-phone variants when a full pronunciation exists (e.g. 'eat' -> ['IY1'] vs ['IY1', 'T'])
+                    if len(phones) == 1 and word in self.word_to_pronunciations:
+                        existing = self.word_to_pronunciations[word]
+                        if any(len(p) >= 2 for p in existing):
+                            continue
+
+                    # Filter out coda stop-consonant omissions if a full stop-coda pronunciation exists (e.g. 'that' -> ['DH', 'AH0'] vs ['DH', 'AH0', 'T'])
+                    if word in self.word_to_pronunciations:
+                        existing = self.word_to_pronunciations[word]
+                        if any(len(p) == len(phones) + 1 and p[:-1] == phones and strip_phone_stress(p[-1]) in ("T", "D", "K", "P", "B", "G") for p in existing):
+                            continue
+
                     if word not in self.word_to_pronunciations:
                         self.word_to_pronunciations[word] = []
+
+                    # If this is a full stop-coda pronunciation, remove any prior truncated prefix variant
+                    if strip_phone_stress(phones[-1]) in ("T", "D", "K", "P", "B", "G"):
+                        self.word_to_pronunciations[word] = [
+                            p for p in self.word_to_pronunciations[word]
+                            if not (len(p) == len(phones) - 1 and phones[:-1] == p)
+                        ]
+
+                    if len(phones) >= 2 and word in self.word_to_pronunciations:
+                        self.word_to_pronunciations[word] = [p for p in self.word_to_pronunciations[word] if len(p) >= 2 or p == phones]
                     if phones not in self.word_to_pronunciations[word]:
                         self.word_to_pronunciations[word].append(phones)
 
@@ -178,6 +211,22 @@ class Lexicon:
                         combo.extend(comp_phones)
                     results.append(combo)
                 return results
+
+        # Compound word decomposition without hyphens (e.g. bitcoin -> bit + coin)
+        if len(w) >= 6:
+            for split_idx in range(3, len(w) - 2):
+                w1 = w[:split_idx]
+                w2 = w[split_idx:]
+                if w1 in self.word_to_pronunciations and w2 in self.word_to_pronunciations:
+                    p1_list = self.word_to_pronunciations[w1]
+                    p2_list = self.word_to_pronunciations[w2]
+                    combined: List[List[str]] = []
+                    for pr1 in p1_list:
+                        for pr2 in p2_list:
+                            pr2_demoted = [re.sub(r"1$", "2", p) if p.endswith("1") else p for p in pr2]
+                            combined.append(pr1 + pr2_demoted)
+                    if combined:
+                        return combined
 
 
         # G2P fallback
@@ -265,6 +314,8 @@ class Lexicon:
             self.word_to_pronunciations[clean_word] = []
         if clean_phones not in self.word_to_pronunciations[clean_word]:
             self.word_to_pronunciations[clean_word].insert(0, clean_phones)
+        self.custom_words.add(clean_word)
+        _STAGED_DICT_CACHE.clear()
 
 
 def normalize_numerals(text: str) -> str:
@@ -272,8 +323,23 @@ def normalize_numerals(text: str) -> str:
     Normalizes numeric digits outside phonetic {...} or tag <...> blocks to word equivalents using inflect.
     e.g. 'hello 1 world' -> 'hello one world'
     """
-    import inflect
-    engine = inflect.engine()
+    if not any(c.isdigit() for c in text):
+        return text
+
+    engine = None
+    try:
+        import inflect
+        engine = inflect.engine()
+    except Exception:
+        pass
+
+    _DIGIT_WORDS = {
+        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
+        "10": "ten", "11": "eleven", "12": "twelve", "13": "thirteen",
+        "14": "fourteen", "15": "fifteen", "16": "sixteen", "17": "seventeen",
+        "18": "eighteen", "19": "nineteen", "20": "twenty",
+    }
 
     def _repl(m: re.Match) -> str:
         if m.group(1):  # {...} block
@@ -282,11 +348,15 @@ def normalize_numerals(text: str) -> str:
             return m.group(2)
         if m.group(3):  # digits
             num_str = m.group(3)
-            try:
-                words = engine.number_to_words(num_str)
-                return words.replace(",", "").replace("-", " ")
-            except Exception:
-                return num_str
+            if engine is not None:
+                try:
+                    words = engine.number_to_words(num_str)
+                    return words.replace(",", "").replace("-", " ")
+                except Exception:
+                    pass
+            if num_str in _DIGIT_WORDS:
+                return _DIGIT_WORDS[num_str]
+            return num_str
         return m.group(0)
 
     pattern = re.compile(r"(\{[^}]*\})|(<[^>]+>)|(\b\d+(?:\.\d+)?\b)")
@@ -346,3 +416,120 @@ def format_phoneme_breakdown(phones: List[str]) -> str:
         desc = ARPABET_EXEMPLARS.get(base, base.lower())
         out.append(f"    {p:<4} -> {desc}{stress}")
     return "\n".join(out)
+
+
+def stage_mfa_dictionary(
+    base_dict_path: Optional[Union[str, Path]] = None,
+    custom_dict_path: Optional[Union[str, Path]] = None,
+    output_path: Optional[Union[str, Path]] = None,
+) -> Tuple[Path, str]:
+    """
+    Dynamically combines base dictionary (merged_dictionary.dict) and custom pronunciations
+    (custom_pronunciations.txt) into a single staged MFA dictionary (.build/mfa/staged_dictionary.dict).
+    Validates tab-separated ARPAbet format (WORD\\tP H O N E S), handles case variants
+    (both lowercase and uppercase), deduplicates entries, saves atomically with FileLock,
+    and returns the staged dictionary path and its SHA-256 content hash.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+
+    b_path = (Path(base_dict_path) if base_dict_path is not None else (repo_root / "dictionaries" / "merged_dictionary.dict")).resolve()
+    c_path = (Path(custom_dict_path) if custom_dict_path is not None else (repo_root / "dictionaries" / "custom_pronunciations.txt")).resolve()
+    out_p = (Path(output_path) if output_path is not None else (repo_root / ".build" / "mfa" / "staged_dictionary.dict")).resolve()
+
+    if not b_path.exists() and not c_path.exists():
+        raise FileNotFoundError(
+            f"Neither base dictionary ({b_path}) nor custom dictionary ({c_path}) found."
+        )
+
+    b_mtime_ns = b_path.stat().st_mtime_ns if b_path.exists() else 0
+    c_mtime_ns = c_path.stat().st_mtime_ns if c_path.exists() else 0
+    cache_key = (str(b_path), str(c_path), str(out_p))
+
+    # Fast in-memory check
+    if cache_key in _STAGED_DICT_CACHE:
+        cached_b, cached_c, cached_hash = _STAGED_DICT_CACHE[cache_key]
+        if cached_b == b_mtime_ns and cached_c == c_mtime_ns and out_p.exists() and out_p.stat().st_size > 0:
+            return out_p, cached_hash
+
+    # Check if existing staged file is newer than both inputs
+    if out_p.exists() and out_p.stat().st_size > 0:
+        try:
+            out_mtime_ns = out_p.stat().st_mtime_ns
+            if out_mtime_ns >= max(b_mtime_ns, c_mtime_ns):
+                h = hashlib.sha256()
+                with open(out_p, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                content_hash = h.hexdigest()
+                _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
+                return out_p, content_hash
+        except OSError:
+            pass
+
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    staged_lines: List[str] = []
+    seen: set[str] = set()
+
+    for p in (b_path, c_path):
+        if not p.exists():
+            continue
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                word = parts[0].strip()
+                # Remove pronunciation variant counter like 'word(2)' if present
+                word = re.sub(r"\(\d+\)$", "", word)
+
+                # Check for probability tokens (e.g. Kaldi acoustic model entries)
+                has_prob = any(is_numeric_prob(tok) for tok in parts[1:])
+                if has_prob:
+                    # Preserve probability columns for Kaldi/MFA
+                    rest = line.split("\t", 1)[1].strip() if "\t" in line else " ".join(parts[1:]).strip()
+                    entry = f"{word}\t{rest}"
+                    if entry not in seen:
+                        seen.add(entry)
+                        staged_lines.append(entry)
+                else:
+                    phones = [tok.strip().upper() for tok in parts[1:] if tok.strip()]
+                    if not phones:
+                        continue
+                    phones_str = " ".join(phones)
+                    # For custom pronunciations or non-prob entries, generate both lowercase and uppercase variants
+                    # to ensure robust matching regardless of subtitle cue casing.
+                    for w_variant in (word.lower(), word.upper()):
+                        entry = f"{w_variant}\t{phones_str}"
+                        if entry not in seen:
+                            seen.add(entry)
+                            staged_lines.append(entry)
+
+    content_bytes = ("\n".join(staged_lines) + "\n").encode("utf-8")
+    content_hash = hashlib.sha256(content_bytes).hexdigest()
+
+    lock_path = out_p.with_suffix(".lock")
+    from filelock import FileLock
+    with FileLock(str(lock_path), timeout=30):
+        if (
+            out_p.exists()
+            and out_p.stat().st_size > 0
+            and out_p.stat().st_mtime_ns >= max(b_mtime_ns, c_mtime_ns)
+        ):
+            _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
+            return out_p, content_hash
+        tmp_path = out_p.parent / f"{out_p.name}.tmp_{os.getpid()}_{uuid.uuid4().hex}"
+        try:
+            tmp_path.write_bytes(content_bytes)
+            tmp_path.replace(out_p)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
+    _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
+    return out_p, content_hash

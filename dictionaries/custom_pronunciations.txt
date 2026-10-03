@@ -1,5 +1,5 @@
-beato	B IY1 AA1 T OW0
-beato's	B IY1 AA1 T OW0 Z
+beato	B IY1 AA1 T OW1
+beato's	B IY1 AA1 T OW1 Z
 riaa	AA1 R AY1 EY1 EY1
 spotify	S P AA1 T AH0 F AY2
 youtube	Y UW1 T UW2 B
@@ -42,3 +42,39 @@ windu	W IH1 N D UW0
 to	T UW1
 masturbate	M AE1 S T ER0 B EY2 T
 yoda	Y OW1 D AH0
+as	AE1 Z
+all	AA1 L
+faggots	F AE1 G AH0 T S
+of	AH1 V
+bitcoin	B IH1 T K OY2 N
+bitcoins	B IH1 T K OY2 N Z
+eat	IY1 T
+bolognese	B OW0 L OW0 N Y EY1 Z
+bolognese	B OW0 L OW0 N EY1 Z
+bolognese	B AA1 L AH0 N EY1 Z
+spaghetti	S P AH0 G EH1 T IY0
+pudding	P UH1 D IH0 NG
+pizza	P IY1 T S AH0
+pizza	P IY1 S AH0
+pizza	P IY1 Z AH0
+tiktok	T IH1 K T AA2 K
+jedi	JH EH1 D AY1
+jedi's	JH EH1 D AY1 Z
+jedis	JH EH1 D AY1 Z
+JEDI	JH EH1 D AY1
+invest	IH0 N V EH1 S T
+invest	IH2 N V EH1 S T
+that	DH AE1 T
+that	DH AH0 T
+grandmother	G R AE1 N M AH0 DH ER0
+grandmother	G R AE1 N M AH2 DH ER0
+grandmother	G R AE1 N D M AH0 DH ER0
+grandmother	G R AE1 N D M AH2 DH ER0
+grandmother's	G R AE1 N M AH0 DH ER0 Z
+grandmother's	G R AE1 N M AH2 DH ER0 Z
+grandmother's	G R AE1 N D M AH0 DH ER0 Z
+grandmother's	G R AE1 N D M AH2 DH ER0 Z
+grandmothers	G R AE1 N M AH0 DH ER0 Z
+grandmothers	G R AE1 N M AH2 DH ER0 Z
+grandmothers	G R AE1 N D M AH0 DH ER0 Z
+grandmothers	G R AE1 N D M AH2 DH ER0 Z

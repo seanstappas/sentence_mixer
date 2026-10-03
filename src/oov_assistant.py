@@ -112,6 +112,7 @@ class OOVAssistant:
             print(f"Known word with {len(known_prons)} pronunciation variants:")
             for v_idx, pr in enumerate(known_prons, 1):
                 print(f"  [{v_idx}] {' '.join(pr)}")
+                print(format_phoneme_breakdown(pr))
             print("  [m] Enter custom ARPAbet phonemes manually")
             print("  [r] Speak pronunciation into microphone")
             print(f"  [s] Skip / accept default ({' '.join(known_prons[0])})")

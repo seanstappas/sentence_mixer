@@ -214,6 +214,8 @@ def render_master_pcm(
             continue
 
         src_rec = plan.sources.get(seg.source_content_id)
+        src_path = src_rec.cached_pcm_path if src_rec and src_rec.cached_pcm_path else None
+        src_key = seg.source_content_id
         if audio_track in ("isolated", "vocals"):
             vocal_path = getattr(src_rec, "cached_vocal_pcm_path", "") if src_rec else ""
             if not vocal_path or not Path(vocal_path).exists():
@@ -271,136 +273,128 @@ def render_master_pcm(
                         if inst_matches:
                             inst_path = str(inst_matches[0])
 
-            if not vocal_path or not Path(vocal_path).exists() or not inst_path or not Path(inst_path).exists():
-                raise RuntimeError(
-                    f"Cannot render recombined audio track: Missing vocal or instrumental stem for source '{seg.source_content_id}'. "
-                    f"Vocal: {vocal_path}, Instrumental: {inst_path}. Run with --isolate-vocals to produce stems."
-                )
+            if vocal_path and Path(vocal_path).exists() and inst_path and Path(inst_path).exists():
+                # Load vocal stem
+                v_key = f"{seg.source_content_id}_vocals"
+                if v_key not in decoded_sources:
+                    v_arr, v_rate = sf.read(vocal_path)
+                    decoded_sources[v_key] = (v_arr, v_rate)
+                vocal_arr, v_rate = decoded_sources[v_key]
 
-            # Load vocal stem
-            v_key = f"{seg.source_content_id}_vocals"
-            if v_key not in decoded_sources:
-                v_arr, v_rate = sf.read(vocal_path)
-                decoded_sources[v_key] = (v_arr, v_rate)
-            vocal_arr, v_rate = decoded_sources[v_key]
+                # Load instrumental stem
+                i_key = f"{seg.source_content_id}_instrumental"
+                if i_key not in decoded_sources:
+                    i_arr, i_rate = sf.read(inst_path)
+                    decoded_sources[i_key] = (i_arr, i_rate)
+                inst_arr, i_rate = decoded_sources[i_key]
 
-            # Load instrumental stem
-            i_key = f"{seg.source_content_id}_instrumental"
-            if i_key not in decoded_sources:
-                i_arr, i_rate = sf.read(inst_path)
-                decoded_sources[i_key] = (i_arr, i_rate)
-            inst_arr, i_rate = decoded_sources[i_key]
+                if not is_stereo and ((vocal_arr.ndim > 1 and vocal_arr.shape[1] >= 2) or (inst_arr.ndim > 1 and inst_arr.shape[1] >= 2)):
+                    is_stereo = True
+                    master_audio = np.column_stack([master_audio, master_audio])
 
-            if not is_stereo and ((vocal_arr.ndim > 1 and vocal_arr.shape[1] >= 2) or (inst_arr.ndim > 1 and inst_arr.shape[1] >= 2)):
-                is_stereo = True
-                master_audio = np.column_stack([master_audio, master_audio])
-
-            rec_sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else v_rate
-            if v_rate != rec_sr:
-                v_start = int(round(seg.source_start_sample * v_rate / rec_sr))
-                v_end = int(round(seg.source_end_sample * v_rate / rec_sr))
-            else:
-                v_start = seg.source_start_sample
-                v_end = seg.source_end_sample
-
-            if v_start < 0 or v_end > len(vocal_arr) or v_end < v_start:
-                raise ValueError(
-                    f"Invalid source sample range [{seg.source_start_sample}, {seg.source_end_sample}] "
-                    f"for vocal stem of length {len(vocal_arr)}"
-                )
-
-            if i_rate != rec_sr:
-                i_start = int(round(seg.source_start_sample * i_rate / rec_sr))
-                i_end = int(round(seg.source_end_sample * i_rate / rec_sr))
-            else:
-                i_start = seg.source_start_sample
-                i_end = seg.source_end_sample
-
-            if i_start < 0 or i_end > len(inst_arr) or i_end < i_start:
-                raise ValueError(
-                    f"Invalid source sample range [{seg.source_start_sample}, {seg.source_end_sample}] "
-                    f"for instrumental stem of length {len(inst_arr)}"
-                )
-
-            vocal_slice = vocal_arr[v_start:v_end].astype(np.float32)
-            inst_slice = inst_arr[i_start:i_end].astype(np.float32)
-
-            # Resample both to project sample rate if needed
-            if v_rate != sr and len(vocal_slice) > 0:
-                if vocal_slice.ndim > 1:
-                    vocal_slice = librosa.resample(vocal_slice, orig_sr=v_rate, target_sr=sr, axis=0)
+                rec_sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else v_rate
+                if v_rate != rec_sr:
+                    v_start = int(round(seg.source_start_sample * v_rate / rec_sr))
+                    v_end = int(round(seg.source_end_sample * v_rate / rec_sr))
                 else:
-                    vocal_slice = librosa.resample(vocal_slice, orig_sr=v_rate, target_sr=sr)
-            if i_rate != sr and len(inst_slice) > 0:
-                if inst_slice.ndim > 1:
-                    inst_slice = librosa.resample(inst_slice, orig_sr=i_rate, target_sr=sr, axis=0)
-                else:
-                    inst_slice = librosa.resample(inst_slice, orig_sr=i_rate, target_sr=sr)
+                    v_start = seg.source_start_sample
+                    v_end = seg.source_end_sample
 
-            expected_dur = seg.duration_samples
-            for stem_name, s_arr, stem_sr in [("vocal", vocal_slice, v_rate), ("instrumental", inst_slice, i_rate)]:
-                if len(s_arr) < expected_dur:
-                    if stem_sr == sr:
-                        raise ValueError(
-                            f"{stem_name.capitalize()} slice length {len(s_arr)} is less than expected duration {expected_dur}"
-                        )
-                    elif expected_dur - len(s_arr) > 2:
-                        raise ValueError(
-                            f"Resampled {stem_name} slice length {len(s_arr)} is less than expected duration {expected_dur}"
-                        )
-                    else:
-                        diff = expected_dur - len(s_arr)
-                        pad_shape = ((0, diff), (0, 0)) if s_arr.ndim > 1 else (0, diff)
-                        if stem_name == "vocal":
-                            vocal_slice = np.pad(vocal_slice, pad_shape, mode="edge")
-                        else:
-                            inst_slice = np.pad(inst_slice, pad_shape, mode="edge")
-                elif len(s_arr) > expected_dur:
-                    if stem_name == "vocal":
-                        vocal_slice = vocal_slice[:expected_dur]
-                    else:
-                        inst_slice = inst_slice[:expected_dur]
-
-            # Level / gain vocal slice ONLY using frozen plan gain_db
-            if not seg.is_silence:
-                if seg.gain_db is None:
+                if v_start < 0 or v_end > len(vocal_arr) or v_end < v_start:
                     raise ValueError(
-                        f"Undecided gain_db (None) on segment {seg.segment_index} ('{seg.target_text}'). "
-                        "All non-silence segments must have a frozen float gain_db in the EditPlan before rendering."
+                        f"Invalid source sample range [{seg.source_start_sample}, {seg.source_end_sample}] "
+                        f"for vocal stem of length {len(vocal_arr)}"
                     )
-                v_gain_db = seg.gain_db
-            else:
-                v_gain_db = 0.0
 
-            if v_gain_db != 0.0:
-                vocal_slice = vocal_slice * float(10.0 ** (v_gain_db / 20.0))
+                if i_rate != rec_sr:
+                    i_start = int(round(seg.source_start_sample * i_rate / rec_sr))
+                    i_end = int(round(seg.source_end_sample * i_rate / rec_sr))
+                else:
+                    i_start = seg.source_start_sample
+                    i_end = seg.source_end_sample
 
-            # Channel alignment between vocal and instrumental
-            if vocal_slice.ndim != inst_slice.ndim:
-                if vocal_slice.ndim == 1 and inst_slice.ndim == 2:
-                    vocal_slice = np.column_stack([vocal_slice, vocal_slice])
-                elif vocal_slice.ndim == 2 and inst_slice.ndim == 1:
-                    inst_slice = np.column_stack([inst_slice, inst_slice])
+                if i_start < 0 or i_end > len(inst_arr) or i_end < i_start:
+                    raise ValueError(
+                        f"Invalid source sample range [{seg.source_start_sample}, {seg.source_end_sample}] "
+                        f"for instrumental stem of length {len(inst_arr)}"
+                    )
 
-            # Sum normalized vocal slice + original background instrumental slice
-            slice_audio = vocal_slice + inst_slice
+                vocal_slice = vocal_arr[v_start:v_end].astype(np.float32)
+                inst_slice = inst_arr[i_start:i_end].astype(np.float32)
 
-            if is_stereo and slice_audio.ndim == 1:
-                slice_audio = np.column_stack([slice_audio, slice_audio])
-            elif not is_stereo and slice_audio.ndim > 1:
-                slice_audio = np.mean(slice_audio, axis=1)
+                # Resample both to project sample rate if needed
+                if v_rate != sr and len(vocal_slice) > 0:
+                    if vocal_slice.ndim > 1:
+                        vocal_slice = librosa.resample(vocal_slice, orig_sr=v_rate, target_sr=sr, axis=0)
+                    else:
+                        vocal_slice = librosa.resample(vocal_slice, orig_sr=v_rate, target_sr=sr)
+                if i_rate != sr and len(inst_slice) > 0:
+                    if inst_slice.ndim > 1:
+                        inst_slice = librosa.resample(inst_slice, orig_sr=i_rate, target_sr=sr, axis=0)
+                    else:
+                        inst_slice = librosa.resample(inst_slice, orig_sr=i_rate, target_sr=sr)
 
-            # Splice into master buffer
-            out_start = seg.output_start_sample
-            out_end = min(total_samples, out_start + expected_dur)
-            actual_len = out_end - out_start
-            if actual_len > 0:
-                segment_slices[seg.segment_index] = slice_audio[:actual_len]
-                master_audio[out_start:out_end] += slice_audio[:actual_len]
-            continue
-        else:
-            src_path = src_rec.cached_pcm_path if src_rec and src_rec.cached_pcm_path else None
-            src_key = seg.source_content_id
+                expected_dur = seg.duration_samples
+                for stem_name, s_arr, stem_sr in [("vocal", vocal_slice, v_rate), ("instrumental", inst_slice, i_rate)]:
+                    if len(s_arr) < expected_dur:
+                        if stem_sr == sr:
+                            raise ValueError(
+                                f"{stem_name.capitalize()} slice length {len(s_arr)} is less than expected duration {expected_dur}"
+                            )
+                        elif expected_dur - len(s_arr) > 2:
+                            raise ValueError(
+                                f"Resampled {stem_name} slice length {len(s_arr)} is less than expected duration {expected_dur}"
+                            )
+                        else:
+                            diff = expected_dur - len(s_arr)
+                            pad_shape = ((0, diff), (0, 0)) if s_arr.ndim > 1 else (0, diff)
+                            if stem_name == "vocal":
+                                vocal_slice = np.pad(vocal_slice, pad_shape, mode="edge")
+                            else:
+                                inst_slice = np.pad(inst_slice, pad_shape, mode="edge")
+                    elif len(s_arr) > expected_dur:
+                        if stem_name == "vocal":
+                            vocal_slice = vocal_slice[:expected_dur]
+                        else:
+                            inst_slice = inst_slice[:expected_dur]
+
+                # Level / gain vocal slice ONLY using frozen plan gain_db
+                if not seg.is_silence:
+                    if seg.gain_db is None:
+                        raise ValueError(
+                            f"Undecided gain_db (None) on segment {seg.segment_index} ('{seg.target_text}'). "
+                            "All non-silence segments must have a frozen float gain_db in the EditPlan before rendering."
+                        )
+                    v_gain_db = seg.gain_db
+                else:
+                    v_gain_db = 0.0
+
+                if v_gain_db != 0.0:
+                    vocal_slice = vocal_slice * float(10.0 ** (v_gain_db / 20.0))
+
+                # Channel alignment between vocal and instrumental
+                if vocal_slice.ndim != inst_slice.ndim:
+                    if vocal_slice.ndim == 1 and inst_slice.ndim == 2:
+                        vocal_slice = np.column_stack([vocal_slice, vocal_slice])
+                    elif vocal_slice.ndim == 2 and inst_slice.ndim == 1:
+                        inst_slice = np.column_stack([inst_slice, inst_slice])
+
+                # Sum normalized vocal slice + original background instrumental slice
+                slice_audio = vocal_slice + inst_slice
+
+                if is_stereo and slice_audio.ndim == 1:
+                    slice_audio = np.column_stack([slice_audio, slice_audio])
+                elif not is_stereo and slice_audio.ndim > 1:
+                    slice_audio = np.mean(slice_audio, axis=1)
+
+                # Splice into master buffer
+                out_start = seg.output_start_sample
+                out_end = min(total_samples, out_start + expected_dur)
+                actual_len = out_end - out_start
+                if actual_len > 0:
+                    segment_slices[seg.segment_index] = slice_audio[:actual_len]
+                    master_audio[out_start:out_end] += slice_audio[:actual_len]
+                continue
 
         if not src_path or not Path(src_path).exists():
             # Fallback to source video extraction if cached PCM not found
@@ -517,13 +511,14 @@ def render_master_pcm(
                     if is_stereo:
                         prev_tail = prev_slice[-fade_len:] if len(prev_slice) >= fade_len else np.pad(prev_slice, ((fade_len - len(prev_slice), 0), (0, 0)))
                         next_head = next_slice[:fade_len] if len(next_slice) >= fade_len else np.pad(next_slice, ((0, fade_len - len(next_slice)), (0, 0)))
-                        fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)[:, np.newaxis]
-                        fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)[:, np.newaxis]
                     else:
                         prev_tail = prev_slice[-fade_len:] if len(prev_slice) >= fade_len else np.pad(prev_slice, (fade_len - len(prev_slice), 0))
                         next_head = next_slice[:fade_len] if len(next_slice) >= fade_len else np.pad(next_slice, (0, fade_len - len(next_slice)))
-                        fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
-                        fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+                    fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+                    fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+                    if is_stereo:
+                        fade_out = fade_out[:, np.newaxis]
+                        fade_in = fade_in[:, np.newaxis]
                     master_audio[fade_start:fade_end] = (prev_tail * fade_out) + (next_head * fade_in)
 
     # Normalize audio to prevent clipping if summed overlaps peak (disabled in cuts-only mode)

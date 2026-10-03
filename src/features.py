@@ -223,7 +223,7 @@ def compute_join_cost(
     e1 = max(1e-5, feat_exit.rms_energy)
     e2 = max(1e-5, feat_entry.rms_energy)
     energy_diff = abs(math.log(e1) - math.log(e2))
-    cost += 0.3 * min(energy_diff, 3.0)
+    cost += 0.15 * min(energy_diff, 3.0)
 
     # 2. Spectral (MFCC) distance
     if feat_exit.mfcc_13 and feat_entry.mfcc_13:
@@ -234,11 +234,14 @@ def compute_join_cost(
 
     # 3. Pitch (F0) continuity
     if feat_exit.f0_hz is not None and feat_entry.f0_hz is not None:
-        # Both voiced: compare semitones
+        # Both voiced: compare semitones with steep penalty for larger melodic jumps
         f1 = feat_exit.f0_hz
         f2 = feat_entry.f0_hz
         semitone_diff = abs(12.0 * math.log2(f2 / f1))
-        cost += 0.2 * min(semitone_diff / 12.0, 2.0)
+        if semitone_diff <= 2.0:
+            cost += 0.15 * (semitone_diff / 2.0)
+        else:
+            cost += 0.15 + 0.4 * min(semitone_diff - 2.0, 10.0)
     elif feat_exit.voicing_state != feat_entry.voicing_state:
         # Transition between voiced and unvoiced: moderate transition penalty
         cost += 0.25

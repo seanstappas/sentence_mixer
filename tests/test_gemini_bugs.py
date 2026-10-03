@@ -308,13 +308,14 @@ def test_bug3_isolate_vocals_synchronized_in_plan_metadata(tmp_path: Path, monke
     assert pdata_isolated["metadata"].get("isolate_vocals") is True
     assert pdata_isolated["metadata"].get("audio_track") == "isolated"
 
-    # Case B: User specifies --audio-track combined without --isolate-vocals (default)
+    # Case B: User specifies --audio-track combined with --no-isolate-vocals
     plan_combined = tmp_path / "plan_combined.json"
     monkeypatch.setattr(sys, "argv", [
         "run_mixer.py", "mix",
         "--text", "hello",
         "--inventory", str(inv_file),
         "--audio-track", "combined",
+        "--no-isolate-vocals",
         "--selector", "span",
         "--plan", str(plan_combined),
         "--render", str(tmp_path / "render_combined.mp4"),

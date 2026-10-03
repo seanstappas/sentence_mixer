@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import subprocess
 import numpy as np
 import soundfile as sf
 
@@ -53,15 +54,50 @@ class SpeakerDiarizer:
     def __init__(
         self,
         registry: Optional[SpeakerRegistry] = None,
-        distance_threshold: float = 0.28,
+        distance_threshold: float = 0.45,
         min_turn_duration: float = 0.35,
         wavlm_model_id: str = "microsoft/wavlm-base",
+        sv_model_id: str = "microsoft/wavlm-base-plus-sv",
     ):
         self.registry = registry or SpeakerRegistry()
         self.distance_threshold = distance_threshold
         self.min_turn_duration = min_turn_duration
         self.wavlm_model_id = wavlm_model_id
+        self.sv_model_id = sv_model_id
         self._wavlm_backend = None
+        self._sv_model = None
+        self._sv_feature_extractor = None
+        self._sv_device = None
+        self._sv_initialized = False
+
+    def _get_sv_backend(self):
+        """
+        Lazily loads WavLMForXVector (speaker verification model, e.g. microsoft/wavlm-base-plus-sv).
+        Returns (model, feature_extractor, device) or (None, None, None).
+        """
+        if not self._sv_initialized:
+            self._sv_initialized = True
+            try:
+                import torch
+                from transformers import AutoFeatureExtractor, WavLMForXVector
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model_name = self.sv_model_id
+                try:
+                    fe = AutoFeatureExtractor.from_pretrained(model_name, local_files_only=True)
+                    model = WavLMForXVector.from_pretrained(model_name, local_files_only=True).to(device)
+                except Exception:
+                    fe = AutoFeatureExtractor.from_pretrained(model_name)
+                    model = WavLMForXVector.from_pretrained(model_name).to(device)
+                model.eval()
+                self._sv_model = model
+                self._sv_feature_extractor = fe
+                self._sv_device = device
+                print(f"[*] Loaded WavLM speaker verification model: {model_name} on {device}")
+            except Exception:
+                self._sv_model = None
+                self._sv_feature_extractor = None
+                self._sv_device = None
+        return self._sv_model, self._sv_feature_extractor, self._sv_device
 
     def _get_wavlm_backend(self):
         if self._wavlm_backend is None:
@@ -80,6 +116,38 @@ class SpeakerDiarizer:
         if audio.ndim > 1:
             audio = np.mean(audio, axis=1)
 
+        if sample_rate != 16000:
+            try:
+                import soxr
+                audio = soxr.resample(audio, sample_rate, 16000)
+            except Exception:
+                try:
+                    import librosa
+                    audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
+                except Exception:
+                    import scipy.signal
+                    num_target_samples = int(round(len(audio) * 16000 / sample_rate))
+                    audio = scipy.signal.resample(audio, num_target_samples)
+            sample_rate = 16000
+
+        # Preferred: Dedicated Speaker Verification model (WavLM-SV / WavLMForXVector)
+        sv_model, sv_fe, sv_dev = self._get_sv_backend()
+        if sv_model is not None and sv_fe is not None:
+            import torch
+            chunk = audio
+            chunk = (chunk - np.mean(chunk)) / (np.std(chunk) + 1e-7)
+            if len(chunk) < 1600:
+                chunk = np.pad(chunk, (0, 1600 - len(chunk)))
+            inp = sv_fe(chunk, sampling_rate=16000, return_tensors="pt").input_values.to(sv_dev)
+            with torch.no_grad():
+                out = sv_model(inp)
+                vec = out.embeddings.squeeze(0).cpu().numpy()
+                norm = np.linalg.norm(vec)
+                if norm > 1e-8:
+                    vec /= norm
+                return vec.astype(np.float32)
+
+        # Fallback 1: Raw WavLM backend
         backend = self._get_wavlm_backend()
         if backend is not None:
             dense = backend.extract_dense_embeddings(audio, sample_rate=sample_rate)
@@ -92,9 +160,6 @@ class SpeakerDiarizer:
         # Fallback: MFCC + Delta + Spectral features via librosa/numpy
         try:
             import librosa
-            if sample_rate != 16000:
-                audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
-                sample_rate = 16000
             mfcc = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=20)
             delta = librosa.feature.delta(mfcc)
             cent = librosa.feature.spectral_centroid(y=audio, sr=sample_rate)
@@ -141,7 +206,14 @@ class SpeakerDiarizer:
 
         # Dynamic energy thresholding
         p25 = float(np.percentile(rms, 25))
-        active_thresh = max(energy_threshold, p25 + 0.005)
+        p75 = float(np.percentile(rms, 75))
+        p90 = float(np.percentile(rms, 90))
+        if p90 > p25 + 0.003:
+            # Dynamically adapt threshold between noise floor (p25) and active speech
+            adaptive_thresh = p25 + (p75 - p25) * 0.35
+            active_thresh = max(0.002, min(energy_threshold, adaptive_thresh))
+        else:
+            active_thresh = max(energy_threshold, p25 + 0.005)
         is_speech = rms >= active_thresh
 
         intervals: List[Tuple[float, float]] = []
@@ -193,16 +265,51 @@ class SpeakerDiarizer:
         candidate_turns: Optional[List[Tuple[float, float]]] = None,
         interactive: bool = True,
         content_id: Optional[str] = None,
+        subtitle_path: Optional[Union[str, Path]] = None,
+        cluster_preview_dir: Optional[Union[str, Path]] = None,
     ) -> List[DiarizationInterval]:
         """
         Diarizes an audio file (typically clean vocals.wav).
         - candidate_turns: optional pre-extracted speech intervals (e.g. from VTT cues).
         - known_speaker: if supplied, forces all single-speaker turns to this speaker_id.
+        - subtitle_path: optional path to VTT/SRT subtitle file used to extract dialogue
+          snippets shown during interactive speaker review.
+        - cluster_preview_dir: optional directory where per-cluster preview WAVs are
+          written. Defaults to <audio_dir>/.build/clusters/ when not supplied.
         """
         a_path = Path(audio_path).resolve()
-        data, sr = sf.read(str(a_path))
+        video_exts = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
+        read_path = a_path
+        if a_path.suffix.lower() in video_exts:
+            cache_audio_dir = Path(".build") / "audio_extracts"
+            cache_audio_dir.mkdir(parents=True, exist_ok=True)
+            wav_path = cache_audio_dir / f"{a_path.stem}.wav"
+            if not wav_path.exists() or wav_path.stat().st_mtime < a_path.stat().st_mtime:
+                cmd = [
+                    "ffmpeg", "-y", "-i", str(a_path),
+                    "-vn", "-ac", "1", "-ar", "16000",
+                    str(wav_path)
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            read_path = wav_path
+
+        data, sr = sf.read(str(read_path))
         if data.ndim > 1:
             data = np.mean(data, axis=1)
+
+        if sr != 16000:
+            try:
+                import soxr
+                data = soxr.resample(data, sr, 16000)
+            except Exception:
+                try:
+                    import librosa
+                    data = librosa.resample(data, orig_sr=sr, target_sr=16000)
+                except Exception:
+                    import scipy.signal
+                    num_target_samples = int(round(len(data) * 16000 / sr))
+                    data = scipy.signal.resample(data, num_target_samples)
+            sr = 16000
 
         if content_id is None:
             try:
@@ -212,8 +319,154 @@ class SpeakerDiarizer:
                 import hashlib
                 content_id = hashlib.sha256(a_path.as_posix().encode("utf-8")).hexdigest()[:12]
 
+        # Resolve cluster preview output directory
+        if cluster_preview_dir is not None:
+            _preview_dir = Path(cluster_preview_dir)
+        else:
+            _preview_dir = a_path.parent / ".build" / "clusters"
+
+        # Load subtitle cues for dialogue snippet extraction (best-effort)
+        _sub_cues: List[Tuple[float, float, str, Optional[List[Dict[str, Any]]]]] = []
+        if subtitle_path is not None:
+            try:
+                from vtt_preprocessor import load_accurate_vtt_cues, parse_vtt_cues
+                try:
+                    _raw_cues = load_accurate_vtt_cues(str(Path(subtitle_path).resolve()))
+                except Exception:
+                    _raw_cues = parse_vtt_cues(str(Path(subtitle_path).resolve()))
+                _sub_cues = [
+                    (c["start_sec"], c["end_sec"], c.get("text", "").strip(), c.get("words"))
+                    for c in _raw_cues
+                    if c.get("text", "").strip()
+                ]
+            except Exception:
+                pass  # Dialogue snippets are best-effort; don't abort diarization
+
+        def _dialogue_for_interval(t_start: float, t_end: float) -> Optional[str]:
+            """Return subtitle dialogue text matching a specific speech turn interval."""
+            if not _sub_cues:
+                return None
+            t_dur = max(0.01, t_end - t_start)
+            matched: List[str] = []
+            for c_start, c_end, c_text, c_words in _sub_cues:
+                c_dur = max(0.01, c_end - c_start)
+                overlap = min(t_end, c_end) - max(t_start, c_start)
+                if overlap > 0:
+                    frac_cue = overlap / c_dur
+                    frac_turn = overlap / t_dur
+                    if (overlap >= 0.20 and (frac_cue >= 0.15 or frac_turn >= 0.20)) or overlap >= 0.5:
+                        if c_words:
+                            turn_words = []
+                            for w_info in c_words:
+                                ws = float(w_info.get("start_sec", c_start))
+                                we = float(w_info.get("end_sec", c_end))
+                                if min(t_end + 0.15, we) > max(t_start - 0.15, ws):
+                                    turn_words.append(w_info.get("text", ""))
+                            sub_text = " ".join(turn_words).strip()
+                            if sub_text and sub_text not in matched:
+                                matched.append(sub_text)
+                        elif c_text and c_text not in matched:
+                            matched.append(c_text)
+            # Only snap if the turn is short (< 0.8s) and separated by a tiny gap (<= 0.15s)
+            if not matched and t_dur < 0.8:
+                best_cue = None
+                best_dist = 0.15
+                for c_start, c_end, c_text, _ in _sub_cues:
+                    raw_gap = max(t_start - c_end, c_start - t_end)
+                    if 0.0 <= raw_gap <= best_dist:
+                        best_dist = raw_gap
+                        best_cue = c_text
+                if best_cue and best_cue not in matched:
+                    matched.append(best_cue)
+            return " … ".join(matched) if matched else None
+
+        def _get_clips_info(turn_list: List[Tuple[float, float]]) -> List[Dict[str, Any]]:
+            """Extract structured clip metadata for every turn in a cluster."""
+            chronological = sorted(turn_list, key=lambda t: t[0])
+            clips = []
+            for idx, (t_start, t_end) in enumerate(chronological, start=1):
+                clips.append({
+                    "index": idx,
+                    "start_sec": t_start,
+                    "end_sec": t_end,
+                    "duration_sec": t_end - t_start,
+                    "dialogue": _dialogue_for_interval(t_start, t_end),
+                })
+            return clips
+
+        def _dialogue_snippet_for_turns(turn_list: List[Tuple[float, float]], max_chars: int = 240) -> Optional[str]:
+            """Return subtitle text that overlaps with any of the speech turns (best-effort)."""
+            if not _sub_cues:
+                return None
+            parts: List[str] = []
+            total = 0
+            chronological = sorted(turn_list, key=lambda t: t[0])
+            for t_start, t_end in chronological:
+                d = _dialogue_for_interval(t_start, t_end)
+                if d and d not in parts:
+                    parts.append(d)
+                    total += len(d)
+                if total >= max_chars:
+                    break
+            if not parts:
+                return None
+            snippet = " … ".join(parts)
+            if len(snippet) > max_chars:
+                snippet = snippet[: max_chars - 1] + "…"
+            return snippet
+
+        def _write_cluster_preview(
+            cluster_safe_id: str,
+            turn_list: List[Tuple[float, float]],
+            target_duration: float = 15.0,
+            max_turn_snippet: float = 2.5,
+        ) -> Optional[Path]:
+            """
+            Write a representative preview WAV for a cluster by concatenating
+            audio from ALL speech turns in chronological order with short pauses.
+            Ensures the user hears all clips associated with this speaker.
+            """
+            try:
+                _preview_dir.mkdir(parents=True, exist_ok=True)
+                preview_path = _preview_dir / f"{cluster_safe_id}_preview.wav"
+                chronological = sorted(turn_list, key=lambda t: t[0])
+                chunks: List[np.ndarray] = []
+                silence_gap = np.zeros(int(0.15 * sr), dtype=np.float32)
+                accumulated = 0.0
+
+                for t_start, t_end in chronological:
+                    if accumulated >= target_duration:
+                        break
+                    remain = target_duration - accumulated
+                    turn_dur = t_end - t_start
+                    take_dur = min(turn_dur, max_turn_snippet, remain)
+                    s_idx = max(0, int(t_start * sr))
+                    e_idx = min(len(data), int((t_start + take_dur) * sr))
+                    chunk = data[s_idx:e_idx]
+                    if len(chunk) > 0:
+                        if chunks:
+                            chunks.append(silence_gap)
+                        chunks.append(chunk)
+                        accumulated += take_dur
+
+                if not chunks:
+                    return None
+                preview_audio = np.concatenate(chunks).astype(np.float32)
+                sf.write(str(preview_path), preview_audio, sr)
+                return preview_path
+            except Exception:
+                return None
+
         # 1. Obtain turn boundaries
-        turns = candidate_turns or self.detect_speech_turns(data, sr)
+        turns = candidate_turns
+        if not turns and _sub_cues:
+            turns = [
+                (c_start, c_end)
+                for c_start, c_end, c_text in _sub_cues
+                if (c_end - c_start) >= self.min_turn_duration
+            ]
+        if not turns:
+            turns = self.detect_speech_turns(data, sr)
         if not turns:
             return []
 
@@ -270,12 +523,19 @@ class SpeakerDiarizer:
             # No registry match -> prompt in TTY or assign anonymous ID D4
             s, e = valid_turns[0]
             cluster_id = f"anon:{content_id}:0"
+            cluster_safe_id = cluster_id.replace(":", "_")
+            _preview_path = _write_cluster_preview(cluster_safe_id, [(s, e)])
+            _snippet = _dialogue_snippet_for_turns([(s, e)])
+            _clips_info = _get_clips_info([(s, e)])
             assigned_id = self.registry.prompt_or_register_cluster(
                 cluster_id=cluster_id,
                 centroid=mean_vec,
                 turn_count=1,
                 duration_sec=e - s,
                 interactive=interactive,
+                audio_preview_path=_preview_path,
+                dialogue_snippet=_snippet,
+                clips=_clips_info,
             )
             conf = 1.0 if not assigned_id.startswith("anon:") else 0.0
             print(f"[+] Single-turn, unrecognized speaker -> assigned ID '{assigned_id}' (confidence: {conf})")
@@ -295,10 +555,20 @@ class SpeakerDiarizer:
         row_norms[row_norms < 1e-8] = 1.0
         emb_matrix /= row_norms
 
+        # Determine calibrated distance threshold:
+        # WavLM-SV x-vectors have intra-distance ~0.13 and inter-distance ~0.24, so threshold 0.18 is optimal.
+        # Fallback raw WavLM / MFCC representations use threshold 0.45.
+        effective_thresh = self.distance_threshold
+        if getattr(self, "_sv_model", None) is not None:
+            if effective_thresh is None or np.isclose(effective_thresh, 0.45):
+                effective_thresh = 0.18
+        elif effective_thresh is None:
+            effective_thresh = 0.45
+
         clustering = AgglomerativeClustering(
             metric="cosine",
             linkage="average",
-            distance_threshold=self.distance_threshold,
+            distance_threshold=effective_thresh,
             n_clusters=None,
         )
         labels = clustering.fit_predict(emb_matrix)
@@ -307,7 +577,56 @@ class SpeakerDiarizer:
         unique_labels = sorted(list(set(labels)))
         cluster_to_speaker: Dict[int, str] = {}
 
-        for c_label in unique_labels:
+        total_speech_sec = sum(e - s for s, e in valid_turns)
+        header_text = f"Diarization analyzed entire input: discovered {len(unique_labels)} speaker group(s) across {len(valid_turns)} speech turns ({total_speech_sec:.1f}s speech)"
+
+        use_rich_summary = False
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            from rich import box
+            use_rich_summary = True
+        except ImportError:
+            pass
+
+        if use_rich_summary:
+            summary_table = Table(
+                title=f"[bold bright_cyan]{header_text}[/]",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold bright_white on blue",
+                border_style="bright_blue",
+                safe_box=True,
+            )
+            summary_table.add_column("Group", style="bold cyan", justify="center")
+            summary_table.add_column("Turns", justify="right")
+            summary_table.add_column("Duration", justify="right", style="green")
+            summary_table.add_column("Dialogue Excerpt", style="bold bright_yellow")
+
+            for g_idx, c_label in enumerate(unique_labels, start=1):
+                indices = np.where(labels == c_label)[0]
+                c_turns = len(indices)
+                c_dur = sum(valid_turns[idx][1] - valid_turns[idx][0] for idx in indices)
+                c_turn_list = [valid_turns[idx] for idx in indices]
+                g_snip = _dialogue_snippet_for_turns(c_turn_list, max_chars=80)
+                snip_cell = f'"{g_snip}"' if g_snip else "[dim italic][Uncaptioned speech][/]"
+                summary_table.add_row(f"{g_idx} / {len(unique_labels)}", f"{c_turns} turn(s)", f"{c_dur:.1f}s", snip_cell)
+
+            Console(safe_box=True).print(summary_table)
+            print()
+        else:
+            print(f"\n[+] {header_text}:")
+            for g_idx, c_label in enumerate(unique_labels, start=1):
+                indices = np.where(labels == c_label)[0]
+                c_turns = len(indices)
+                c_dur = sum(valid_turns[idx][1] - valid_turns[idx][0] for idx in indices)
+                c_turn_list = [valid_turns[idx] for idx in indices]
+                g_snip = _dialogue_snippet_for_turns(c_turn_list, max_chars=80)
+                snip_str = f' | Dialogue: "{g_snip}"' if g_snip else ""
+                print(f"    - Group {g_idx}/{len(unique_labels)}: {c_turns} turn(s), {c_dur:.1f}s total{snip_str}")
+            print()
+
+        for g_idx, c_label in enumerate(unique_labels, start=1):
             indices = np.where(labels == c_label)[0]
             cluster_embs = emb_matrix[indices]
             centroid = np.mean(cluster_embs, axis=0)
@@ -319,12 +638,21 @@ class SpeakerDiarizer:
             c_dur = sum(valid_turns[idx][1] - valid_turns[idx][0] for idx in indices)
 
             cluster_id = f"anon:{content_id}:{c_label}"
+            cluster_safe_id = cluster_id.replace(":", "_")
+            c_turn_list = [valid_turns[idx] for idx in indices]
+            _preview_path = _write_cluster_preview(cluster_safe_id, c_turn_list)
+            _snippet = _dialogue_snippet_for_turns(c_turn_list)
+            _clips_info = _get_clips_info(c_turn_list)
             c_spk_id = self.registry.prompt_or_register_cluster(
                 cluster_id=cluster_id,
                 centroid=centroid,
                 turn_count=c_turns,
                 duration_sec=c_dur,
                 interactive=interactive,
+                audio_preview_path=_preview_path,
+                dialogue_snippet=_snippet,
+                group_label=f"Group {g_idx} of {len(unique_labels)}",
+                clips=_clips_info,
             )
             cluster_to_speaker[c_label] = c_spk_id
 
@@ -339,6 +667,7 @@ class SpeakerDiarizer:
                 c_mean /= c_norm
             cluster_centroids[c_l] = c_mean
 
+        total_audio_sec = len(data) / sr if sr > 0 else 0.0
         diarized_intervals: List[DiarizationInterval] = []
         for idx, (s, e) in enumerate(valid_turns):
             c_label = labels[idx]
@@ -355,6 +684,14 @@ class SpeakerDiarizer:
             if spk_id.startswith("anon:"):
                 conf = 0.0
 
+            # Extend interval into surrounding silence (hangover collar) to ensure trailing word phones are covered
+            prev_e = valid_turns[idx - 1][1] if idx > 0 else 0.0
+            next_s = valid_turns[idx + 1][0] if idx + 1 < len(valid_turns) else total_audio_sec
+            pad_left = min(0.20, max(0.0, (s - prev_e) / 2.0))
+            pad_right = min(0.35, max(0.0, (next_s - e) / 2.0))
+            padded_s = max(0.0, s - pad_left)
+            padded_e = min(total_audio_sec, e + pad_right)
+
             # Check if this turn overlaps with any other turn in time
             is_ov = False
             for j, (os_sec, oe_sec) in enumerate(valid_turns):
@@ -364,8 +701,8 @@ class SpeakerDiarizer:
 
             diarized_intervals.append(
                 DiarizationInterval(
-                    start_sec=s,
-                    end_sec=e,
+                    start_sec=padded_s,
+                    end_sec=padded_e,
                     speaker_id=spk_id,
                     confidence=conf,
                     is_overlap=is_ov,

@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -26,8 +26,9 @@ if sys.platform == "win32":
 
 
 def timestamp_to_seconds(ts_str: str) -> float:
-    """Convert HH:MM:SS.mmm or MM:SS.mmm string to seconds float."""
-    parts = ts_str.strip().split(":")
+    """Convert HH:MM:SS.mmm, HH:MM:SS,mmm, MM:SS.mmm, or MM:SS,mmm string to seconds float."""
+    ts_str = ts_str.strip().replace(",", ".")
+    parts = ts_str.split(":")
     if len(parts) == 3:
         h, m, s = parts
         return int(h) * 3600 + int(m) * 60 + float(s)
@@ -160,18 +161,19 @@ def clean_rolling_cues(cues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def parse_vtt_cues(vtt_path: str) -> List[Dict[str, Any]]:
     """
-    Parse a WebVTT file and extract clean, non-duplicate speech intervals.
+    Parse a WebVTT or SRT file and extract clean, non-duplicate speech intervals.
     Correctly handles:
       1. Ordinary multiline cues (preserves all lines in order).
       2. Rolling auto-generated captions with temporal overlap or <= 0.5s spacer gaps.
       3. Genuine repetitions that are temporally separated (> 0.5s).
+      4. SubRip (.srt) comma millisecond separators and cue index headers.
     """
     with open(vtt_path, "r", encoding="utf-8", errors="replace") as f:
-        content = f.read()
+        content = f.read().replace("\r\n", "\n").replace("\r", "\n")
 
     # Pattern for cues: start --> end [settings] \n [body]
     cue_pattern = re.compile(
-        r"(\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}\.\d{3}|\d{1,2}:\d{2}\.\d{3})[^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{1,2}:\d{2}|\d+\n|\Z))"
+        r"(\d{1,2}:\d{2}:\d{2}[.,]\d{3}|\d{1,2}:\d{2}[.,]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{3}|\d{1,2}:\d{2}[.,]\d{3})[^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{1,2}:\d{2}|\d+\n|\Z))"
     )
 
     raw_matches = cue_pattern.findall(content)
@@ -206,6 +208,142 @@ def parse_vtt_cues(vtt_path: str) -> List[Dict[str, Any]]:
             merged.append(chunk)
 
     return merged
+
+
+def load_accurate_vtt_cues(vtt_path: Union[str, Path]) -> List[Dict[str, Any]]:
+    """
+    Loads subtitle cues from WebVTT or SRT with enhanced timestamp accuracy.
+    If the file contains inline word timestamps (e.g. YouTube auto-captions),
+    it refines cue boundaries and splits cues across uncaptioned gaps (>1.0s)
+    to prevent uncaptioned speech from falsely inheriting neighboring dialogue.
+    """
+    vtt_p = Path(vtt_path).resolve()
+    if not vtt_p.exists():
+        return []
+
+    try:
+        with open(vtt_p, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read().replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return []
+
+    cue_pattern = re.compile(
+        r"(\d{1,2}:\d{2}:\d{2}[.,]\d{3}|\d{1,2}:\d{2}[.,]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{3}|\d{1,2}:\d{2}[.,]\d{3})[^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{1,2}:\d{2}|\d+\n|\Z))"
+    )
+
+    raw_matches = cue_pattern.findall(content)
+    raw_cues: List[Dict[str, Any]] = []
+    for s_str, e_str, body in raw_matches:
+        raw_cues.append({
+            "start_sec": timestamp_to_seconds(s_str),
+            "end_sec": timestamp_to_seconds(e_str),
+            "lines": [line_str.strip() for line_str in body.split("\n") if line_str.strip()],
+        })
+
+    cleaned = clean_rolling_cues(raw_cues)
+
+    # Check for inline timestamps in raw lines
+    has_inline_ts = bool(re.search(r"<\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}>", content))
+    if not has_inline_ts:
+        return cleaned
+
+    refined_cues: List[Dict[str, Any]] = []
+    for c in cleaned:
+        c_start = c["start_sec"]
+        c_end = c["end_sec"]
+        text_raw = c["text"]
+
+        # Find matching raw cue to check for inline timestamps
+        matching_raw_lines: List[str] = []
+        for rc in raw_cues:
+            if abs(rc["start_sec"] - c_start) < 0.1 and abs(rc["end_sec"] - c_end) < 0.1:
+                matching_raw_lines = rc["lines"]
+                break
+
+        line_with_ts: Optional[str] = None
+        for rl in matching_raw_lines:
+            if re.search(r"<\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}>", rl):
+                clean_rl = clean_vtt_text(rl)
+                if clean_rl and (clean_rl in text_raw or text_raw in clean_rl):
+                    line_with_ts = rl
+                    break
+
+        if line_with_ts:
+            parts = re.split(r"<(\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3})>", line_with_ts)
+            if len(parts) >= 3:
+                # Extract fine-grained word timings
+                word_timings: List[Dict[str, Any]] = []
+                w_curr = clean_vtt_text(parts[0])
+                t_curr = c_start
+
+                for idx in range(1, len(parts), 2):
+                    next_t = timestamp_to_seconds(parts[idx])
+                    if w_curr:
+                        est_w_dur = max(0.20, min(1.2, 0.08 * len(w_curr) + 0.15))
+                        w_end = min(next_t, t_curr + est_w_dur)
+                        word_timings.append({
+                            "text": w_curr,
+                            "start_sec": t_curr,
+                            "end_sec": max(w_end, next_t - 0.02),
+                        })
+                    w_curr = clean_vtt_text(parts[idx + 1]) if idx + 1 < len(parts) else ""
+                    t_curr = next_t
+
+                if w_curr:
+                    est_last_dur = max(0.35, min(1.2, 0.08 * len(w_curr) + 0.20))
+                    last_end = min(c_end, t_curr + est_last_dur)
+                    word_timings.append({
+                        "text": w_curr,
+                        "start_sec": t_curr,
+                        "end_sec": last_end,
+                    })
+
+                # Sub-segment splitting across pauses (>0.8s)
+                sub_segments: List[Tuple[float, float, str, List[Dict[str, Any]]]] = []
+                seg_words: List[Dict[str, Any]] = []
+
+                for wt in word_timings:
+                    if seg_words:
+                        prev_wt = seg_words[-1]
+                        pause = wt["start_sec"] - prev_wt["end_sec"]
+                        if pause > 0.65:
+                            s_start = seg_words[0]["start_sec"]
+                            s_end = seg_words[-1]["end_sec"]
+                            s_text = " ".join(item["text"] for item in seg_words)
+                            sub_segments.append((s_start, s_end, s_text, list(seg_words)))
+                            seg_words = []
+                    seg_words.append(wt)
+
+                if seg_words:
+                    s_start = seg_words[0]["start_sec"]
+                    s_end = seg_words[-1]["end_sec"]
+                    s_text = " ".join(item["text"] for item in seg_words)
+                    sub_segments.append((s_start, s_end, s_text, list(seg_words)))
+
+                if len(sub_segments) > 1:
+                    for s, e, txt, w_list in sub_segments:
+                        refined_cues.append({
+                            "start_sec": s,
+                            "end_sec": e,
+                            "duration": e - s,
+                            "text": txt,
+                            "words": w_list,
+                        })
+                    continue
+                elif sub_segments:
+                    s, e, txt, w_list = sub_segments[0]
+                    refined_cues.append({
+                        "start_sec": s,
+                        "end_sec": e,
+                        "duration": e - s,
+                        "text": txt,
+                        "words": w_list,
+                    })
+                    continue
+
+        refined_cues.append(c)
+
+    return refined_cues
 
 
 def preprocess_source(

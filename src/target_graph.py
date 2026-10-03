@@ -298,6 +298,23 @@ class TargetGraphBuilder:
         start_nodes = [b[0] for b in word_branches[0]]
         end_nodes = [b[1] for b in word_branches[-1]]
 
+        for nid in start_nodes:
+            nodes[nid].left_context_phone = "sil"
+
+        for nid in end_nodes:
+            nodes[nid].is_phrase_final = True
+            nodes[nid].right_context_phone = "sil"
+
+        # Apply pause/gap context: tokens followed by punctuation or explicit gaps
+        for node in nodes:
+            if node.token_index in punctuation_pauses or node.token_index in explicit_gaps:
+                if node.is_word_final:
+                    node.is_phrase_final = True
+                    node.right_context_phone = "sil"
+            if (node.token_index - 1) in punctuation_pauses or (node.token_index - 1) in explicit_gaps:
+                if node.is_word_initial:
+                    node.left_context_phone = "sil"
+
         graph = TargetGraph(
             raw_text=target_text,
             normalized_words=normalized_words,

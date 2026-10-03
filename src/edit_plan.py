@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import numpy as np
 import soundfile as sf
@@ -38,6 +38,7 @@ def build_edit_plan(
     video_fps: Optional[RationalTime] = None,
     rendering_mode: Literal["source-derived", "cuts-only"] = "source-derived",
     overlap_duration_ms: float = 14.0,
+    lead_in_sec: float = 0.0,
 ) -> EditPlan:
     """
     Constructs an immutable, sample-accurate EditPlan from selected spans.
@@ -58,7 +59,7 @@ def build_edit_plan(
     seg_idx = 0
 
     # Check for leading gap (boundary index -1)
-    leading_gap = getattr(graph, "explicit_gaps", {}).get(-1, 0.0)
+    leading_gap = getattr(graph, "explicit_gaps", {}).get(-1, lead_in_sec)
     if leading_gap > 0.0 and selected_spans:
         first_span = selected_spans[0]
         first_src_rec = inventory.sources[first_span.source_content_id]
@@ -126,6 +127,15 @@ def build_edit_plan(
         if not realized:
             realized = list(target_phones)
 
+        target_words_covered: List[str] = []
+        if graph and hasattr(graph, "nodes"):
+            for nid in span.covered_nodes:
+                if nid < len(graph.nodes):
+                    w_txt = getattr(graph.nodes[nid], "word_text", "")
+                    if w_txt and (not target_words_covered or target_words_covered[-1] != w_txt):
+                        target_words_covered.append(w_txt)
+        target_label = " ".join(target_words_covered) if target_words_covered else span.matched_word
+
         seg = PlanSegment(
             segment_index=seg_idx,
             source_content_id=span.source_content_id,
@@ -134,7 +144,7 @@ def build_edit_plan(
             source_end_sample=span.end_sample,
             output_start_sample=seg_start_sample,
             output_end_sample=seg_end_sample,
-            target_text=span.matched_word,
+            target_text=target_label,
             target_phones=target_phones,
             span_type=span.span_type,
             source_video_path=src_rec.source_path,
@@ -234,7 +244,11 @@ def build_edit_plan(
                     ))
                 else:
                     if rendering_mode == "source-derived":
-                        overlap = min(overlap_samples_const, resampled_duration // 4)
+                        next_src_rec = inventory.sources.get(next_span.source_content_id)
+                        next_sr = next_src_rec.native_sample_rate if next_src_rec and next_src_rec.native_sample_rate > 0 else project_sample_rate
+                        next_resampled_dur = int(round(float(next_span.end_sample - next_span.start_sample) * project_sample_rate / float(next_sr)))
+                        max_overlap = min(resampled_duration // 5, next_resampled_dur // 5)
+                        overlap = min(overlap_samples_const, max_overlap)
                         current_output_sample -= overlap
                         transitions.append(PlanTransition(
                             transition_index=len(transitions),
@@ -412,6 +426,8 @@ def finalize_edit_plan(
     if curr_run:
         runs.append(curr_run)
 
+    segment_rms_db: Dict[int, float] = {}
+
     for run in runs:
         if is_cuts_only or not normalize_loudness:
             for s in run:
@@ -467,19 +483,92 @@ def finalize_edit_plan(
             if rms > 1e-4:
                 rms_db = 20.0 * np.log10(rms)
                 auto_gain_db = -20.0 - rms_db
-                gain_val = float(max(-9.0, min(9.0, auto_gain_db)))
+                is_subword_or_phone = any(s.span_type in ("subword", "phone") for s in run)
+                limit_db = 12.0 if is_subword_or_phone else 9.0
+                gain_val = float(max(-limit_db, min(limit_db, auto_gain_db)))
             else:
+                rms_db = -20.0
                 gain_val = 0.0
         else:
+            rms_db = -20.0
             gain_val = 0.0
 
         for s in run:
             s.gain_db = gain_val
+            segment_rms_db[s.segment_index] = rms_db
 
     # Ensure all segments have a valid float gain_db
     for s in plan.segments:
         if s.gain_db is None:
             s.gain_db = 0.0
+
+    # Step 1b: Dialogue acoustic loudness smoothing and intra-word consistency
+    # Limit rapid loudness transitions between consecutive spliced phonetic fragments (subwords/phones)
+    # to <= 3.0 dB to prevent jarring volume jumps between consonants and vowels, while allowing
+    # full multi-clip leveling range between long independent dialogue phrases.
+    if not is_cuts_only and normalize_loudness:
+        speech_indices = [idx for idx, s in enumerate(plan.segments) if not s.is_silence]
+        threshold_samples = int(round(0.250 * plan.project_sample_rate))
+        if len(speech_indices) > 1:
+            for i in range(len(speech_indices) - 1):
+                idx_curr = speech_indices[i]
+                idx_next = speech_indices[i + 1]
+                s_c = plan.segments[idx_curr]
+                s_n = plan.segments[idx_next]
+                is_fragment = (
+                    s_c.target_text == s_n.target_text
+                    or s_c.span_type in ("subword", "phone")
+                    or s_n.span_type in ("subword", "phone")
+                    or s_c.duration_samples < threshold_samples
+                    or s_n.duration_samples < threshold_samples
+                )
+                max_jump = 3.0 if (is_fragment and idx_next == idx_curr + 1) else 18.0
+                level_curr = segment_rms_db.get(s_c.segment_index, -20.0) + (s_c.gain_db or 0.0)
+                level_next = segment_rms_db.get(s_n.segment_index, -20.0) + (s_n.gain_db or 0.0)
+                if level_next > level_curr + max_jump:
+                    excess = level_next - (level_curr + max_jump)
+                    s_n.gain_db = float(max(-12.0, (s_n.gain_db or 0.0) - excess))
+                elif level_next < level_curr - max_jump:
+                    deficit = (level_curr - max_jump) - level_next
+                    s_n.gain_db = float(min(12.0, (s_n.gain_db or 0.0) + deficit))
+
+            for i in range(len(speech_indices) - 1, 0, -1):
+                idx_curr = speech_indices[i]
+                idx_prev = speech_indices[i - 1]
+                s_c = plan.segments[idx_curr]
+                s_p = plan.segments[idx_prev]
+                is_fragment = (
+                    s_c.target_text == s_p.target_text
+                    or s_c.span_type in ("subword", "phone")
+                    or s_p.span_type in ("subword", "phone")
+                    or s_c.duration_samples < threshold_samples
+                    or s_p.duration_samples < threshold_samples
+                )
+                max_jump = 3.0 if (is_fragment and idx_curr == idx_prev + 1) else 18.0
+                level_curr = segment_rms_db.get(s_c.segment_index, -20.0) + (s_c.gain_db or 0.0)
+                level_prev = segment_rms_db.get(s_p.segment_index, -20.0) + (s_p.gain_db or 0.0)
+                if level_prev > level_curr + max_jump:
+                    excess = level_prev - (level_curr + max_jump)
+                    s_p.gain_db = float(max(-12.0, (s_p.gain_db or 0.0) - excess))
+                elif level_prev < level_curr - max_jump:
+                    deficit = (level_curr - max_jump) - level_prev
+                    s_p.gain_db = float(min(12.0, (s_p.gain_db or 0.0) + deficit))
+
+        # Step 1c: Sentence-level speech leveling anchor
+        # Prevent any speech segment inside a sentence from dropping > 3.5 dB below the median
+        # sentence speech level to prevent quiet words or suffixes (e.g. 'pudding') from being swallowed.
+        speech_segs = [s for s in plan.segments if not s.is_silence]
+        if speech_segs:
+            speech_levels = [segment_rms_db.get(s.segment_index, -20.0) + (s.gain_db or 0.0) for s in speech_segs]
+            median_level = float(np.median(speech_levels))
+            min_allowed_level = median_level - 3.5
+            for s in speech_segs:
+                current_level = segment_rms_db.get(s.segment_index, -20.0) + (s.gain_db or 0.0)
+                if current_level < min_allowed_level:
+                    deficit = min_allowed_level - current_level
+                    is_subword_or_phone = s.span_type in ("subword", "phone")
+                    limit_db = 12.0 if is_subword_or_phone else 9.0
+                    s.gain_db = float(min(limit_db, (s.gain_db or 0.0) + deficit))
 
     # Step 2: Measure loudness on an unpublished analysis master and record metadata
     if not is_cuts_only and normalize_loudness:

@@ -119,13 +119,23 @@ class WavLMBackend:
         if audio_array.ndim > 1:
             audio_array = np.mean(audio_array, axis=1)
 
+        if sample_rate != 16000:
+            try:
+                import librosa
+                audio_array = librosa.resample(audio_array, orig_sr=sample_rate, target_sr=16000)
+            except Exception:
+                import scipy.signal
+                num_target_samples = int(round(len(audio_array) * 16000 / sample_rate))
+                audio_array = scipy.signal.resample(audio_array, num_target_samples)
+            sample_rate = 16000
+
         min_samples = 1600
         if len(audio_array) < min_samples:
             audio_array = np.pad(audio_array, (0, min_samples - len(audio_array)))
 
         inputs = self.feature_extractor(
             audio_array,
-            sampling_rate=sample_rate,
+            sampling_rate=16000,
             return_tensors="pt",
         )
         input_values = inputs.input_values.to(self.device)

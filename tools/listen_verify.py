@@ -664,7 +664,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--require-all-words",
         action="store_true",
         default=False,
-        help="Require 100% of target words even if WER is within tolerance",
+        help="Require 100%% of target words even if WER is within tolerance",
     )
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--output-json", help="Path to write JSON results file")

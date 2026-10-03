@@ -1,0 +1,31 @@
+{
+  "suite_name": "Acoustic Listening & Enunciation Verification Suite",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "case_id": "obiwan_powerpoint_quantum_v2",
+      "target_text": "PowerPoint presentations are a path to quantum computing that no Jedi can teach you.",
+      "critical_words": ["powerpoint", "presentations", "path", "quantum", "computing", "that", "no", "jedi", "teach"]
+    },
+    {
+      "case_id": "anakin_beato_hindenburg_v3",
+      "target_text": "As wise as Rick Beato, as powerful as Adolf Hindenburg.",
+      "critical_words": ["wise", "powerful", "beato", "hindenburg"]
+    },
+    {
+      "case_id": "anakin_pizza_guacamole_v4",
+      "target_text": "Did you order the pepperoni pizza and guacamole?",
+      "critical_words": ["order", "pepperoni", "pizza", "guacamole"]
+    },
+    {
+      "case_id": "anakin_why_did_you_eat_my_grandmothers_v4",
+      "target_text": "Anakin, why did you eat my grandmother's sandwich?",
+      "critical_words": ["anakin", "eat", "sandwich"]
+    },
+    {
+      "case_id": "anakin_bitcoin_tiktok_v4",
+      "target_text": "I am going to invest in bitcoin and dance on TikTok.",
+      "critical_words": ["going", "invest", "bitcoin", "dance", "tiktok"]
+    }
+  ]
+}
