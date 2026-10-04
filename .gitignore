@@ -11,8 +11,12 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-/.agents
+/.agents/*
+!/.agents/skills/
+scratch_*.wav
+/scratch/
 environment-win-64.lock.yml
 requirements-dev.lock
 requirements-wavlm.lock
 /corpus
+/aligned

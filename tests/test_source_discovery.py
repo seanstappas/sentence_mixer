@@ -409,7 +409,7 @@ def test_incremental_delta_alignment_cache_hit_performance(tmp_path: Path, monke
             transcript_hash=vtt_hash,
             dict_hash=dict_hash,
             acoustic_model="english_us_arpa",
-            mfa_options={},
+            mfa_options={"asr_tail_enrichment": False},
             preprocessor_version="2.0",
         )
         inv_key = compute_labeled_inventory_cache_key(

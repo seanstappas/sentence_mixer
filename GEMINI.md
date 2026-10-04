@@ -13,4 +13,4 @@
 ## Audio Quality & Mixing Heuristics
 - Default to `--audio-track recombined` to preserve cinematic background atmosphere underneath EBU R128 (-16 LUFS) normalized vocals.
 - **Synthesis Realism**: Target sentences sound natural only when constructed primarily from words or phrases already in the speaker's vocabulary. If a target is >70% out-of-vocabulary (OOV), advise the user to either expand the corpus (`run_mixer.py ingest`) or rephrase using existing dialogue.
-- Auto-generated subtitles frequently omit low-energy tail words; verify subtitle alignment with Whisper ASR tail enrichment if expected words are missing.
+- Whisper tail enrichment is opt-in (`--asr-fill-tails`, default off). Its words are unverified and get force-aligned as if spoken, so never enable it by default or treat its output as ground truth. If expected words are missing from captions, prefer fixing the subtitle file.

@@ -177,7 +177,7 @@ python run_mixer.py ingest --folder "vids/" --watch --poll-interval 5.0
 
 ### Ingestion Pipeline Highlights
 1. **Vocal Stem Isolation (`--isolate-vocals`)**: Uses `audio-separator` (UVR MDX-Net / Demucs) to extract clean speech stems into `.build/vocals/`, removing orchestral scores and background noise before alignment.
-2. **Subtitle Cleaning & Whisper ASR Tail Enrichment**: De-duplicates rolling captions and automatically recovers dropped tail speech (common in auto-generated YouTube captions) using local Whisper ASR before alignment.
+2. **Subtitle Cleaning**: De-duplicates rolling captions and strips non-speech markers. Optional Whisper tail enrichment (`--asr-fill-tails`, off by default) appends words Whisper hears after a cue ends; its output is unverified and can add hallucinated or other speakers' words, so use it only for sources whose captions are known to drop trailing words. The setting is part of the alignment cache key, so turning it on or off re-aligns affected sources automatically.
 3. **Diarization & Speaker Verification**: Identifies speech turns using WavLM speaker verification (`microsoft/wavlm-base-plus-sv`).
 4. **Interactive Speaker Clustering (`--interactive-clusters`)**: In interactive mode, unrecognized speaker clusters generate short 2-3 second `.wav` previews (`.build/clusters/<id>_preview.wav`) and present ranked candidate profiles for quick assignment.
 5. **Dynamic Custom Dictionary Staging**: Automatically merges `dictionaries/custom_pronunciations.txt` into `dictionaries/merged_dictionary.dict` at `.build/mfa/staged_dictionary.dict` so custom proper nouns and names align as intact words rather than OOV noise (`spn`).
@@ -274,6 +274,7 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | `--record-target` | Record spoken target audio interactively via microphone | `False` |
 | `--review-pronunciations` | Interactively review pronunciations for OOV words | `False` |
 | `--force-realign` | Invalidate cache and force fresh MFA alignment | `False` |
+| `--asr-fill-tails` | Opt-in Whisper tail enrichment of subtitle text before alignment (unverified words) | `False` |
 
 ### `run_mixer.py ingest` (Preprocessing)
 
@@ -289,6 +290,7 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | `--isolate-vocals` | Isolate speech stems before alignment | Enabled (`True`) |
 | `--diarize auto\|off\|force` | Diarization mode | `auto` |
 | `--interactive-clusters` | Interactively review and assign unrecognized speaker clusters | `False` |
+| `--asr-fill-tails` | Opt-in Whisper tail enrichment of subtitle text before alignment (unverified words) | `False` |
 
 ---
 
@@ -319,7 +321,7 @@ sentence_mixer/
 │   ├── unit_selector.py            # Legacy word-first matcher with phone fallback
 │   ├── video_assembler.py          # Frame-accurate FFmpeg cuts & audio recombination
 │   ├── vocal_isolation.py          # Demucs / UVR vocal separation
-│   └── vtt_preprocessor.py         # Subtitle parsing & Whisper ASR tail enrichment
+│   └── vtt_preprocessor.py         # Subtitle parsing & optional Whisper tail enrichment
 ├── tools/
 │   ├── evaluate.py                 # Automated multi-stratum test evaluation harness
 │   ├── listen_verify.py            # Unprimed ASR listening verification gate

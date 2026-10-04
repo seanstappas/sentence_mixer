@@ -314,10 +314,12 @@ def ensure_source_aligned(
     speaker_intervals: Optional[List[Dict[str, Any]]] = None,
     isolate_vocals: bool = False,
     cache_status: Optional[Dict[str, Any]] = None,
+    asr_fill_tails: bool = False,
 ) -> str:
     """
     Ensures a video source is preprocessed, aligned with MFA, and indexed into an inventory.
     Returns path to units_index.json.
+    asr_fill_tails enables opt-in Whisper tail enrichment of subtitle text before alignment.
     """
     v_abs = Path(video_path).resolve()
     if not v_abs.exists():
@@ -355,7 +357,8 @@ def ensure_source_aligned(
     media_hash = compute_media_hash(v_abs, cache_dir=CACHE_BASE_DIR)
     vtt_hash = hash_file_content(vtt_candidate)
     acoustic_model = "english_us_arpa"
-    mfa_options: Dict[str, Any] = {}
+    # The enrichment setting changes the MFA transcript, so it is part of the alignment key.
+    mfa_options: Dict[str, Any] = {"asr_tail_enrichment": bool(asr_fill_tails)}
     preprocessor_version = "2.0"
 
     align_key = compute_alignment_cache_key(
@@ -540,6 +543,7 @@ def ensure_source_aligned(
         single_speaker_verified=single_speaker_verified,
         assume_single_speaker=assume_single_speaker,
         audio_source_path=vocal_stem_path,
+        asr_tail_enrichment=asr_fill_tails,
     )
 
     # 2. MFA Alignment
@@ -993,6 +997,7 @@ def ingest_sources(
             speaker_intervals=item.get("speaker_intervals"),
             isolate_vocals=isolate_vocals_flag,
             cache_status=item_status,
+            asr_fill_tails=bool(getattr(args, "asr_fill_tails", False)),
         )
         inventory_paths.append(inv_path)
 
@@ -1256,6 +1261,12 @@ def run_watch_loop(
         sys.exit(0)
 
 
+ASR_FILL_TAILS_HELP = (
+    "Opt-in: append words that Whisper hears after a subtitle cue ends to the alignment transcript "
+    "(off by default; Whisper output is unverified and can add hallucinated or other speakers' words)"
+)
+
+
 def add_synthesis_args(p: argparse.ArgumentParser) -> None:
     """Add common synthesis arguments to a parser."""
     p.add_argument("--text", default=None, help="Target text / sentence to synthesize")
@@ -1281,6 +1292,12 @@ def add_synthesis_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--xml", help="Output Premiere Pro / FCP7 XML path")
     p.add_argument("--guide", help="Optional human prosody guide audio")
     p.add_argument("--force-realign", action="store_true", help="Force re-align even if source is cached")
+    p.add_argument(
+        "--asr-fill-tails",
+        action="store_true",
+        default=False,
+        help=ASR_FILL_TAILS_HELP,
+    )
     p.add_argument(
         "--normalize-loudness",
         action=argparse.BooleanOptionalAction,
@@ -1391,6 +1408,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--assume-single-speaker", action="store_true", default=False, help="Explicitly assume single speaker")
     p_ingest.add_argument("--force-realign", action="store_true", default=False, help="Force re-align even if source is cached")
     p_ingest.add_argument(
+        "--asr-fill-tails",
+        action="store_true",
+        default=False,
+        help=ASR_FILL_TAILS_HELP,
+    )
+    p_ingest.add_argument(
         "--isolate-vocals",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1439,6 +1462,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_prep.add_argument("--output", default=str(SCRIPT_DIR / "corpus"), help="Output corpus directory")
     p_prep.add_argument("--speaker", default=None, help="Speaker ID")
     p_prep.add_argument("--assume-single-speaker", action="store_true", help="Assume single speaker")
+    p_prep.add_argument(
+        "--asr-fill-tails",
+        action="store_true",
+        default=False,
+        help=ASR_FILL_TAILS_HELP,
+    )
     p_prep.add_argument(
         "--isolate-vocals",
         action=argparse.BooleanOptionalAction,
@@ -1690,6 +1719,7 @@ def main():
                 assume_single_speaker=args.assume_single_speaker,
                 speaker_intervals=item.get("speaker_intervals"),
                 isolate_vocals=isolate_vocals_flag,
+                asr_fill_tails=bool(getattr(args, "asr_fill_tails", False)),
             )
             inventory_paths.append(inv_path)
 
@@ -2440,6 +2470,7 @@ def main():
             speaker_id=args.speaker,
             assume_single_speaker=args.assume_single_speaker,
             audio_source_path=vocal_stem_path,
+            asr_tail_enrichment=args.asr_fill_tails,
         )
 
     elif args.command == "align":

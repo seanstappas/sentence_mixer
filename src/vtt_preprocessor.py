@@ -406,12 +406,18 @@ def preprocess_source(
     assume_single_speaker: bool = False,
     speaker_intervals: Optional[List[Dict[str, Any]]] = None,
     audio_source_path: Optional[Union[str, Path]] = None,
+    asr_tail_enrichment: bool = False,
 ) -> str:
     """
     Extracts 16kHz mono WAV chunks and clean text files for Montreal Forced Aligner.
     Saves corpus_manifest.json mapping chunk IDs to global video offsets, sample bounds,
     and verified speaker identities. If audio_source_path is provided, chunks are sliced
     from the isolated vocal audio instead of the source video.
+
+    asr_tail_enrichment (opt-in, default off) appends words that Whisper hears after the
+    end of a subtitle cue to the MFA transcript. Whisper output is unverified, so it can
+    add hallucinated or other speakers' words; enable it only for sources whose captions
+    are known to drop trailing words.
     """
     out_dir = Path(output_corpus_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -438,6 +444,7 @@ def preprocess_source(
         "audio_source_path": resolved_audio_src,
         "speaker_id": effective_speaker,
         "single_speaker_verified": is_verified,
+        "asr_tail_enrichment": bool(asr_tail_enrichment),
         "assume_single_speaker": assume_single_speaker,
         "total_chunks": len(chunks),
         "chunks": {},
@@ -481,9 +488,9 @@ def preprocess_source(
             print(f"[!] Warning: failed to extract audio for {chunk_id}")
 
         chunk_text = c["text"]
-        # Check if subtitle omitted speech that is audible in the audio chunk (e.g. YouTube caption cutoff)
+        # Opt-in only: append trailing words Whisper hears after the caption ends
         words_count = len(re.findall(r"[a-zA-Z0-9']+", chunk_text))
-        if dur > 2.0 and (dur - words_count * 0.45) > 1.2:
+        if asr_tail_enrichment and dur > 2.0 and (dur - words_count * 0.45) > 1.2:
             chunk_text = enrich_chunk_transcript_with_asr(wav_path, chunk_text)
 
         # Save transcription for MFA
@@ -518,6 +525,12 @@ if __name__ == "__main__":
     parser.add_argument("--speaker", default=None, help="Speaker identity")
     parser.add_argument("--assume-single-speaker", action="store_true", help="Explicitly assume single speaker")
     parser.add_argument("--audio-source", default=None, help="Path to isolated vocal stem or alternate audio source")
+    parser.add_argument(
+        "--asr-fill-tails",
+        action="store_true",
+        default=False,
+        help="Opt-in: append words Whisper hears after a cue ends (unverified; may add hallucinated words)",
+    )
     args = parser.parse_args()
 
     preprocess_source(
@@ -527,4 +540,5 @@ if __name__ == "__main__":
         speaker_id=args.speaker,
         assume_single_speaker=args.assume_single_speaker,
         audio_source_path=args.audio_source,
+        asr_tail_enrichment=args.asr_fill_tails,
     )
