@@ -471,6 +471,7 @@ def build_units_inventory(
     out_dict["source_video"] = str(source_video_path)
     out_dict["words_inventory"] = legacy_words
     out_dict["phones_inventory"] = reconciled_legacy_phones
+    out_dict["phones"] = reconciled_legacy_phones
 
     out_p = Path(output_index_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)

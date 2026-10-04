@@ -19,6 +19,20 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 
+def to_file_uri(p: Union[str, Path, None]) -> str:
+    """Format path as clickable file:/// URL."""
+    if not p:
+        return ""
+    path = Path(p).resolve()
+    try:
+        return path.as_uri()
+    except Exception:
+        as_posix = path.as_posix()
+        if not as_posix.startswith("/"):
+            as_posix = "/" + as_posix
+        return f"file://{as_posix}"
+
+
 def compute_file_sha256(file_path: Union[str, Path], chunk_size: int = 65536) -> str:
     """Compute sha256 hex digest of a file."""
     p = Path(file_path).resolve()
@@ -191,7 +205,7 @@ def _run_with_progress(
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=console,
-            transient=True,
+            transient=False,
         ) as progress:
             model_label = f" ({model_name})" if model_name else ""
             task = progress.add_task(f"Initializing {description}{model_label}...", total=100)
@@ -215,20 +229,21 @@ def _run_with_progress(
                 elif "Saving Vocals" in line_clean or "Saving Instrumental" in line_clean:
                     progress.update(task, description=f"Exporting vocal stem{model_label}...", completed=95)
                 elif "Separation complete" in line_clean:
-                    progress.update(task, description="Vocal isolation complete!", completed=100)
+                    progress.update(task, description=f"Vocal isolation complete!{model_label}", completed=100)
                 else:
                     t_m = tqdm_re.search(line_clean)
                     p_m = pct_re.search(line_clean)
-                    if t_m and p_m:
-                        curr_it = int(t_m.group(1))
-                        tot_it = int(t_m.group(2))
-                        pct = int(p_m.group(1))
+                    if t_m or p_m:
+                        curr_it = int(t_m.group(1)) if t_m else 0
+                        tot_it = int(t_m.group(2)) if t_m else 100
+                        pct = int(p_m.group(1)) if p_m else int((curr_it / max(1, tot_it)) * 100)
                         mapped_pct = min(95, 10 + int(pct * 0.85))
+                        iter_info = f" ({curr_it}/{tot_it})" if t_m else ""
                         progress.update(
                             task,
                             total=100,
                             completed=mapped_pct,
-                            description=f"Separating chunks ({curr_it}/{tot_it}){model_label}...",
+                            description=f"Separating chunks{iter_info}{model_label}...",
                         )
 
             proc.wait()
@@ -305,14 +320,12 @@ def isolate_vocals(
             return True
 
         if _is_cache_valid(stem_path, metadata_path):
-
-
-            print(f"[+] Using cached vocal stem: {stem_path}")
+            print(f"[+] Using cached vocal stem: {to_file_uri(stem_path)}")
             return stem_path
         direct_stem = out_base / "vocals.wav"
         direct_meta = out_base / "metadata.json"
         if direct_stem != stem_path and _is_cache_valid(direct_stem, direct_meta):
-            print(f"[+] Using cached vocal stem: {direct_stem}")
+            print(f"[+] Using cached vocal stem: {to_file_uri(direct_stem)}")
             return direct_stem
 
     # Forced rebuild or invalidated cache: clean up all stems and metadata (R04)
@@ -507,7 +520,7 @@ def isolate_vocals(
     if normalize:
         normalize_vocal_stem(stem_path)
 
-    print(f"[+] Vocal isolation complete: {stem_path} (via {tool_used})")
+    print(f"[+] Vocal isolation complete: {to_file_uri(stem_path)} (via {tool_used})")
     return stem_path
 
 

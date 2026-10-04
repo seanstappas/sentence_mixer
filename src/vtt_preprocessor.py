@@ -321,7 +321,9 @@ def load_accurate_vtt_cues(vtt_path: Union[str, Path]) -> List[Dict[str, Any]]:
                     sub_segments.append((s_start, s_end, s_text, list(seg_words)))
 
                 if len(sub_segments) > 1:
-                    for s, e, txt, w_list in sub_segments:
+                    for s_idx, (s, e, txt, w_list) in enumerate(sub_segments):
+                        if s_idx == len(sub_segments) - 1 and c_end > e:
+                            e = min(c_end, max(e, c_end - 1.5))
                         refined_cues.append({
                             "start_sec": s,
                             "end_sec": e,
@@ -332,6 +334,8 @@ def load_accurate_vtt_cues(vtt_path: Union[str, Path]) -> List[Dict[str, Any]]:
                     continue
                 elif sub_segments:
                     s, e, txt, w_list = sub_segments[0]
+                    if c_end > e:
+                        e = min(c_end, max(e, c_end - 1.5))
                     refined_cues.append({
                         "start_sec": s,
                         "end_sec": e,
@@ -344,6 +348,53 @@ def load_accurate_vtt_cues(vtt_path: Union[str, Path]) -> List[Dict[str, Any]]:
         refined_cues.append(c)
 
     return refined_cues
+
+
+def enrich_chunk_transcript_with_asr(wav_path: Union[str, Path], current_text: str) -> str:
+    """
+    If a subtitle cue has trailing speech that was omitted by auto-captions (e.g. YouTube cutoff),
+    uses faster-whisper on the extracted audio chunk to detect and append missing trailing words.
+    """
+    try:
+        from faster_whisper import WhisperModel
+        model = WhisperModel("base.en", device="cpu", compute_type="int8")
+        segs, _ = model.transcribe(str(wav_path), word_timestamps=True)
+        asr_words: List[str] = []
+        for s in segs:
+            for w in (s.words or []):
+                clean = re.sub(r"^[^\w]+|[^\w]+$", "", w.word.strip())
+                if clean:
+                    asr_words.append(clean)
+        if not asr_words:
+            return current_text
+
+        curr_words = re.findall(r"[a-zA-Z0-9']+", current_text)
+        if not curr_words:
+            return " ".join(asr_words)
+
+        curr_lower = [w.lower() for w in curr_words]
+        asr_lower = [w.lower() for w in asr_words]
+
+        match_end = -1
+        for span_len in range(min(len(curr_words), 3), 0, -1):
+            target_sub = curr_lower[-span_len:]
+            for idx in range(len(asr_lower) - span_len + 1):
+                if asr_lower[idx : idx + span_len] == target_sub:
+                    match_end = idx + span_len
+            if match_end != -1:
+                break
+
+        if match_end != -1 and match_end < len(asr_words):
+            trailing_words = asr_words[match_end:]
+            trailing_clean = [w for w in trailing_words if re.match(r"^[a-zA-Z0-9']+$", w)]
+            if trailing_clean:
+                enriched = f"{current_text} {' '.join(trailing_clean)}".strip()
+                print(f"[*] Subtitle gap detected in {Path(wav_path).name}: auto-enriched transcript with '{' '.join(trailing_clean)}'")
+                return enriched
+
+        return current_text
+    except Exception:
+        return current_text
 
 
 def preprocess_source(
@@ -409,10 +460,6 @@ def preprocess_source(
             if not in_interval:
                 continue
 
-        # Save transcription for MFA
-        with open(txt_path, "w", encoding="utf-8") as tf:
-            tf.write(c["text"] + "\n")
-
         # Extract 16kHz mono 16-bit PCM WAV using ffmpeg
         start_ts = seconds_to_timestamp(c["start_sec"])
         dur = c["duration"]
@@ -433,11 +480,21 @@ def preprocess_source(
         if res.returncode != 0:
             print(f"[!] Warning: failed to extract audio for {chunk_id}")
 
+        chunk_text = c["text"]
+        # Check if subtitle omitted speech that is audible in the audio chunk (e.g. YouTube caption cutoff)
+        words_count = len(re.findall(r"[a-zA-Z0-9']+", chunk_text))
+        if dur > 2.0 and (dur - words_count * 0.45) > 1.2:
+            chunk_text = enrich_chunk_transcript_with_asr(wav_path, chunk_text)
+
+        # Save transcription for MFA
+        with open(txt_path, "w", encoding="utf-8") as tf:
+            tf.write(chunk_text + "\n")
+
         manifest["chunks"][chunk_id] = {
             "start_sec": c["start_sec"],
             "end_sec": c["end_sec"],
             "duration": c["duration"],
-            "text": c["text"],
+            "text": chunk_text,
             "speaker_id": effective_speaker,
             "wav_path": str(wav_path),
             "txt_path": str(txt_path),

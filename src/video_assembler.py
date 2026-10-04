@@ -31,6 +31,20 @@ if sys.platform == "win32":
 from contracts import EditPlan, PlanSegment, RationalTime
 
 
+def to_file_uri(p: Union[str, Path, None]) -> str:
+    """Format path as clickable file:/// URL."""
+    if not p:
+        return ""
+    path = Path(p).resolve()
+    try:
+        return path.as_uri()
+    except Exception:
+        as_posix = path.as_posix()
+        if not as_posix.startswith("/"):
+            as_posix = "/" + as_posix
+        return f"file://{as_posix}"
+
+
 def normalize_audio_ebur128(
     input_wav: Union[str, Path],
     output_wav: Union[str, Path],
@@ -337,21 +351,12 @@ def render_master_pcm(
                 expected_dur = seg.duration_samples
                 for stem_name, s_arr, stem_sr in [("vocal", vocal_slice, v_rate), ("instrumental", inst_slice, i_rate)]:
                     if len(s_arr) < expected_dur:
-                        if stem_sr == sr:
-                            raise ValueError(
-                                f"{stem_name.capitalize()} slice length {len(s_arr)} is less than expected duration {expected_dur}"
-                            )
-                        elif expected_dur - len(s_arr) > 2:
-                            raise ValueError(
-                                f"Resampled {stem_name} slice length {len(s_arr)} is less than expected duration {expected_dur}"
-                            )
+                        diff = expected_dur - len(s_arr)
+                        pad_shape = ((0, diff), (0, 0)) if s_arr.ndim > 1 else (0, diff)
+                        if stem_name == "vocal":
+                            vocal_slice = np.pad(vocal_slice, pad_shape, mode="edge")
                         else:
-                            diff = expected_dur - len(s_arr)
-                            pad_shape = ((0, diff), (0, 0)) if s_arr.ndim > 1 else (0, diff)
-                            if stem_name == "vocal":
-                                vocal_slice = np.pad(vocal_slice, pad_shape, mode="edge")
-                            else:
-                                inst_slice = np.pad(inst_slice, pad_shape, mode="edge")
+                            inst_slice = np.pad(inst_slice, pad_shape, mode="edge")
                     elif len(s_arr) > expected_dur:
                         if stem_name == "vocal":
                             vocal_slice = vocal_slice[:expected_dur]
@@ -648,10 +653,18 @@ def render_sentence_mix_legacy(
 
         start_s = float(u["start_sec"])
         end_s = float(u["end_sec"])
-        dur_s = max(0.033, end_s - start_s)
+        dur_s = max(0.001, end_s - start_s)
         dur_samples = int(round(dur_s * audio_sample_rate))
-        start_frame = int(round(curr_sample * fps.numerator / (audio_sample_rate * fps.denominator)))
-        dur_frames = max(1, int(round(dur_samples * fps.numerator / (audio_sample_rate * fps.denominator))))
+
+        p_fps = fps.numerator
+        q_fps = fps.denominator
+        S_sr = audio_sample_rate
+
+        def Q_frame(n_sample: int) -> int:
+            return (n_sample * p_fps + S_sr * q_fps - 1) // (S_sr * q_fps) if n_sample > 0 else 0
+
+        start_frame = Q_frame(curr_sample)
+        dur_frames = max(0, Q_frame(curr_sample + dur_samples) - start_frame)
 
         seg = PlanSegment(
             segment_index=idx,
@@ -758,13 +771,13 @@ def render_sentence_mix(
         out_wav_vocals = out_mp4.parent / f"{out_mp4.stem}_vocals.wav"
         render_master_pcm(plan, out_wav_vocals, normalize_loudness=normalize_loudness, audio_track="vocals")
     elif audio_track in ("isolated", "vocals"):
-        print(f"[*] Rendering Isolated Vocal Master PCM WAV: {out_wav} ({plan.total_output_samples} samples)")
+        print(f"[*] Rendering Isolated Vocal Master PCM WAV: {to_file_uri(out_wav)} ({plan.total_output_samples} samples)")
         render_master_pcm(plan, out_wav, normalize_loudness=normalize_loudness, audio_track="vocals")
     elif audio_track == "recombined":
-        print(f"[*] Rendering Recombined (Normalized Vocals + Original Instrumental) Master PCM WAV: {out_wav} ({plan.total_output_samples} samples)")
+        print(f"[*] Rendering Recombined (Normalized Vocals + Original Instrumental) Master PCM WAV: {to_file_uri(out_wav)} ({plan.total_output_samples} samples)")
         render_master_pcm(plan, out_wav, normalize_loudness=normalize_loudness, audio_track="recombined")
     else:
-        print(f"[*] Rendering Master PCM WAV: {out_wav} ({plan.total_output_samples} samples)")
+        print(f"[*] Rendering Master PCM WAV: {to_file_uri(out_wav)} ({plan.total_output_samples} samples)")
         render_master_pcm(plan, out_wav, normalize_loudness=normalize_loudness, audio_track="raw")
 
     # 2. Render and re-encode video slices to temporary directory
@@ -772,7 +785,7 @@ def render_sentence_mix(
     slice_files: List[Path] = []
     concat_txt_path = temp_dir / "concat.txt"
 
-    print(f"[*] Cutting {len(plan.segments)} CFR video slices (-crf 18) to {temp_dir}...")
+    print(f"[*] Cutting {len(plan.segments)} CFR video slices (-crf 18) to {to_file_uri(temp_dir)}...")
     try:
         for idx, seg in enumerate(plan.segments):
             slice_mp4 = temp_dir / f"slice_{idx:04d}.mp4"
@@ -908,7 +921,7 @@ def render_sentence_mix(
         subprocess.run(concat_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # 4. Final multiplexing of concatenated video with master PCM WAV
-        print(f"[*] Multiplexing video with master WAV into final delivery MP4: {out_mp4}")
+        print(f"[*] Multiplexing video with master WAV into final delivery MP4: {to_file_uri(out_mp4)}")
         mux_cmd = [
             "ffmpeg", "-y",
             "-i", str(temp_concat_video),
@@ -922,7 +935,7 @@ def render_sentence_mix(
 
         if (is_both or is_all) and out_wav_vocals is not None:
             out_mp4_vocals = out_mp4.parent / f"{out_mp4.stem}_vocals.mp4"
-            print(f"[*] Multiplexing isolated vocal MP4: {out_mp4_vocals}")
+            print(f"[*] Multiplexing isolated vocal MP4: {to_file_uri(out_mp4_vocals)}")
             mux_vocals_cmd = [
                 "ffmpeg", "-y",
                 "-i", str(temp_concat_video),
@@ -936,7 +949,7 @@ def render_sentence_mix(
 
         if is_all and out_wav_recombined is not None:
             out_mp4_recombined = out_mp4.parent / f"{out_mp4.stem}_recombined.mp4"
-            print(f"[*] Multiplexing recombined MP4: {out_mp4_recombined}")
+            print(f"[*] Multiplexing recombined MP4: {to_file_uri(out_mp4_recombined)}")
             mux_recombined_cmd = [
                 "ffmpeg", "-y",
                 "-i", str(temp_concat_video),
@@ -953,9 +966,9 @@ def render_sentence_mix(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     if is_all:
-        print(f"[+] Render complete: {out_mp4}, {out_mp4.parent / f'{out_mp4.stem}_vocals.mp4'}, and {out_mp4.parent / f'{out_mp4.stem}_recombined.mp4'}")
+        print(f"[+] Render complete: {to_file_uri(out_mp4)}, {to_file_uri(out_mp4.parent / f'{out_mp4.stem}_vocals.mp4')}, and {to_file_uri(out_mp4.parent / f'{out_mp4.stem}_recombined.mp4')}")
     elif is_both:
-        print(f"[+] Render complete: {out_mp4} and {out_mp4.parent / f'{out_mp4.stem}_vocals.mp4'}")
+        print(f"[+] Render complete: {to_file_uri(out_mp4)} and {to_file_uri(out_mp4.parent / f'{out_mp4.stem}_vocals.mp4')}")
     else:
-        print(f"[+] Render complete: {out_mp4}")
+        print(f"[+] Render complete: {to_file_uri(out_mp4)}")
     return str(out_mp4)

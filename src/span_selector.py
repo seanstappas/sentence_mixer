@@ -723,12 +723,37 @@ class SpanSelector:
                     event_id_candidates.append((eid, 0.03))
                     seen_eids.add(eid)
 
+            # Unstressed vowel reduction / schwa (stress 0): AH0 <-> IH0 <-> EH0
+            if node.phone in ("AH0", "IH0", "EH0"):
+                for reduced_p in ("AH0", "IH0", "EH0"):
+                    if reduced_p != node.phone:
+                        for eid in self.inv.phone_to_event_ids.get(reduced_p, []):
+                            if eid not in seen_eids:
+                                event_id_candidates.append((eid, 0.08))
+                                seen_eids.add(eid)
+
             # Filter by speaker if applicable
             valid_events_and_costs: List[Tuple[Any, float]] = []
             for eid, stress_c in event_id_candidates:
                 ev = self.inv.events.get(eid)
                 if ev and getattr(ev, "is_eligible", True) and (speaker_id is None or ev.speaker_id == speaker_id):
                     valid_events_and_costs.append((ev, stress_c))
+
+            # Acoustic cognate donor fallback for missing phonemes (e.g. G -> K, NG -> N, V -> F)
+            if not valid_events_and_costs:
+                from unit_selector import PHONETIC_COGNATE_FALLBACKS
+                for cog in PHONETIC_COGNATE_FALLBACKS.get(node.base_phone, []):
+                    cog_base = strip_phone_stress(cog)
+                    cog_eids = list(self.inv.phone_to_event_ids.get(cog, []))
+                    for ceid in self.inv.base_phone_to_event_ids.get(cog_base, []):
+                        if ceid not in cog_eids:
+                            cog_eids.append(ceid)
+                    for ceid in cog_eids:
+                        ev = self.inv.events.get(ceid)
+                        if ev and getattr(ev, "is_eligible", True) and (speaker_id is None or ev.speaker_id == speaker_id):
+                            valid_events_and_costs.append((ev, 0.35))
+                    if valid_events_and_costs:
+                        break
 
             target_l_phone = node.left_context_phone
             target_r_phone = node.right_context_phone

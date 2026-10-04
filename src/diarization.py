@@ -461,9 +461,9 @@ class SpeakerDiarizer:
         turns = candidate_turns
         if not turns and _sub_cues:
             turns = [
-                (c_start, c_end)
-                for c_start, c_end, c_text in _sub_cues
-                if (c_end - c_start) >= self.min_turn_duration
+                (cue[0], cue[1])
+                for cue in _sub_cues
+                if (cue[1] - cue[0]) >= self.min_turn_duration
             ]
         if not turns:
             turns = self.detect_speech_turns(data, sr)
@@ -685,12 +685,17 @@ class SpeakerDiarizer:
                 conf = 0.0
 
             # Extend interval into surrounding silence (hangover collar) to ensure trailing word phones are covered
-            prev_e = valid_turns[idx - 1][1] if idx > 0 else 0.0
-            next_s = valid_turns[idx + 1][0] if idx + 1 < len(valid_turns) else total_audio_sec
-            pad_left = min(0.20, max(0.0, (s - prev_e) / 2.0))
-            pad_right = min(0.35, max(0.0, (next_s - e) / 2.0))
-            padded_s = max(0.0, s - pad_left)
-            padded_e = min(total_audio_sec, e + pad_right)
+            # Only apply boundary hangover if turns were derived from acoustic VAD, not fixed subtitle cue intervals
+            if candidate_turns is not None or not _sub_cues:
+                prev_e = valid_turns[idx - 1][1] if idx > 0 else 0.0
+                next_s = valid_turns[idx + 1][0] if idx + 1 < len(valid_turns) else total_audio_sec
+                pad_left = min(0.20, max(0.0, s - prev_e - 0.04))
+                pad_right = min(1.50, max(0.0, next_s - e - 0.04))
+                padded_s = max(0.0, s - pad_left)
+                padded_e = min(total_audio_sec, e + pad_right)
+            else:
+                padded_s = s
+                padded_e = e
 
             # Check if this turn overlaps with any other turn in time
             is_ov = False

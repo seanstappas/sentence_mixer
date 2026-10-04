@@ -59,6 +59,21 @@ from cache import (
 )
 
 
+def format_file_url(p: Union[str, Path, None]) -> str:
+    """Format path as clickable file:/// URL."""
+    if not p:
+        return ""
+    path = Path(p).resolve()
+    try:
+        return path.as_uri()
+    except Exception:
+        as_posix = path.as_posix()
+        if not as_posix.startswith("/"):
+            as_posix = "/" + as_posix
+        return f"file://{as_posix}"
+
+
+
 def get_mamba_config() -> Tuple[Optional[str], Optional[str]]:
     """Discovers micromamba executable and root prefix dynamically."""
     mamba_root = os.environ.get("MAMBA_ROOT_PREFIX")
@@ -402,7 +417,7 @@ def ensure_source_aligned(
                     inv_hit = False
 
     if inv_hit:
-        print(f"[+] Using cached labeled inventory: {inventory_path}")
+        print(f"[+] Using cached labeled inventory: {format_file_url(inventory_path)}")
         if cache_status is not None:
             cache_status["hit"] = True
             cache_status["realigned"] = False
@@ -1255,7 +1270,7 @@ def add_synthesis_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--speaker-registry", default="config/speaker_registry.json", help="Path to speaker registry JSON")
     p.add_argument("--guide-transcript", default=None, help="Path to transcript file for prosody guide audio")
-    p.add_argument("--selector", choices=["legacy", "span"], default="legacy", help="Selector backend ('legacy' or 'span')")
+    p.add_argument("--selector", choices=["legacy", "span"], default="span", help="Selector backend ('span' or 'legacy', default: span)")
     p.add_argument("--speaker", default=None, help="Speaker identity filter")
     p.add_argument("--assume-single-speaker", action="store_true", help="Explicitly assume single speaker")
     p.add_argument("--mode", choices=["source-derived", "cuts-only"], default="source-derived", help="Rendering mode")
@@ -1289,6 +1304,18 @@ def add_synthesis_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help="Disable interactive prompts (for OOV words, speaker naming, etc.) and fallback to defaults",
+    )
+    p.add_argument(
+        "--review-pronunciations",
+        action="store_true",
+        default=False,
+        help="Interactively review and select pronunciations for OOV words and variants (default: auto-select recommended)",
+    )
+    p.add_argument(
+        "--interactive-clusters",
+        action="store_true",
+        default=False,
+        help="Interactively review unassigned speaker clusters during diarization (default: false unless running ingest or explicitly set)",
     )
     p.add_argument(
         "--cache-dir",
@@ -1638,10 +1665,15 @@ def main():
                             print(f"[!] Warning: Speech turn detection failed ({vad_err}); falling back to default segmentation.")
                             candidate_turns = None
 
+                        is_cluster_interactive = (
+                            bool(getattr(args, "interactive_clusters", False))
+                            and sys.stdin.isatty()
+                            and not getattr(args, "non_interactive", False)
+                        )
                         intervals = diarizer.diarize(
                             diarize_media_path,
                             candidate_turns=candidate_turns,
-                            interactive=not getattr(args, "non_interactive", False),
+                            interactive=is_cluster_interactive,
                             content_id=source_id,
                             subtitle_path=item.get("vtt"),
                             cluster_preview_dir=CACHE_BASE_DIR / "clusters",
@@ -1794,7 +1826,11 @@ def main():
         lex = Lexicon([p for p in dict_files if p.exists()])
 
         from oov_assistant import OOVAssistant
-        is_interactive = sys.stdin.isatty() and not getattr(args, "non_interactive", False)
+        is_interactive = (
+            bool(getattr(args, "review_pronunciations", False))
+            and sys.stdin.isatty()
+            and not getattr(args, "non_interactive", False)
+        )
         oov_assistant = OOVAssistant(lex, custom_dict_path=SCRIPT_DIR / "dictionaries" / "custom_pronunciations.txt")
         review_choices = []
         try:
@@ -2103,12 +2139,12 @@ def main():
                     shutil.rmtree(backup_dir, ignore_errors=True)
                     raise
 
-                print(f"[+] Successfully published mix to: {render_p}")
-                print(f"[+] Saved EditPlan: {plan_p}")
+                print(f"[+] Successfully published mix to: {format_file_url(render_p)}")
+                print(f"[+] Saved EditPlan: {format_file_url(plan_p)}")
                 if xml_p:
-                    print(f"[+] Saved Final Cut Pro XML: {xml_p}")
+                    print(f"[+] Saved Final Cut Pro XML: {format_file_url(xml_p)}")
                 if subtitles_p:
-                    print(f"[+] Saved Subtitles: {subtitles_p}")
+                    print(f"[+] Saved Subtitles: {format_file_url(subtitles_p)}")
             finally:
                 shutil.rmtree(attempt_dir, ignore_errors=True)
 
@@ -2116,15 +2152,20 @@ def main():
             # Legacy selector
             print(f"\n[+] Running Legacy Word-First Unit Selection for: \"{args.text}\"")
             legacy_units_dict = legacy_inv_dict
+            words_source = legacy_inv_dict.get("words_inventory") or legacy_inv_dict.get("words", {})
+            phones_source = legacy_inv_dict.get("phones_inventory") or legacy_inv_dict.get("phones", {})
+
             if effective_speaker is not None:
                 filtered_w = {
                     w: [inst for inst in insts if inst.get("speaker_id") == effective_speaker and inst.get("is_eligible", True)]
-                    for w, insts in legacy_inv_dict.get("words", {}).items()
+                    for w, insts in words_source.items()
+                    if isinstance(insts, list)
                 }
                 filtered_w = {w: insts for w, insts in filtered_w.items() if insts}
                 filtered_p = {
                     ph: [inst for inst in insts if inst.get("speaker_id") == effective_speaker and inst.get("is_eligible", True)]
-                    for ph, insts in legacy_inv_dict.get("phones", {}).items()
+                    for ph, insts in phones_source.items()
+                    if isinstance(insts, list)
                 }
                 filtered_p = {ph: insts for ph, insts in filtered_p.items() if insts}
                 legacy_units_dict = {
@@ -2132,6 +2173,13 @@ def main():
                     "words_inventory": filtered_w,
                     "phones": filtered_p,
                     "phones_inventory": filtered_p,
+                }
+            else:
+                legacy_units_dict = {
+                    "words": words_source,
+                    "words_inventory": words_source,
+                    "phones": phones_source,
+                    "phones_inventory": phones_source,
                 }
 
             units, plan_descriptions = synthesize_sentence(args.text, legacy_units_dict, lexicon=lex, overrides=pron_overrides)
@@ -2305,11 +2353,11 @@ def main():
                     shutil.rmtree(backup_dir, ignore_errors=True)
                     raise
 
-                print(f"[+] Successfully published legacy mix to: {render_p}")
+                print(f"[+] Successfully published legacy mix to: {format_file_url(render_p)}")
                 if xml_p:
-                    print(f"[+] Saved Final Cut Pro XML: {xml_p}")
+                    print(f"[+] Saved Final Cut Pro XML: {format_file_url(xml_p)}")
                 if subtitles_p:
-                    print(f"[+] Saved Subtitles: {subtitles_p}")
+                    print(f"[+] Saved Subtitles: {format_file_url(subtitles_p)}")
             finally:
                 shutil.rmtree(attempt_dir, ignore_errors=True)
 
