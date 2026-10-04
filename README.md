@@ -45,16 +45,16 @@ On Windows PowerShell:
 # 1. Download portable micromamba executable
 curl.exe -L "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-win-64.tar.bz2" -o "micromamba.tar.bz2"
 tar.exe -xf "micromamba.tar.bz2"
-Move-Item -Force "Library\bin\micromamba.exe" "tools\sentence_mixer\bin\micromamba.exe"
+Move-Item -Force "Library\bin\micromamba.exe" "bin\micromamba.exe"
 Remove-Item -Recurse -Force "Library", "micromamba.tar.bz2", "info" -ErrorAction SilentlyContinue
 
 # 2. Create the isolated mfa_env environment
-& "tools\sentence_mixer\bin\micromamba.exe" create -n mfa_env -c conda-forge --root-prefix "C:\Users\Sean\micromamba" montreal-forced-aligner python=3.10 -y
+& "bin\micromamba.exe" create -n mfa_env -c conda-forge --root-prefix "C:\Users\Sean\micromamba" montreal-forced-aligner python=3.10 -y
 
 # 3. Download pre-trained ARPA acoustic, dictionary, and G2P models
-& "tools\sentence_mixer\bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download acoustic english_us_arpa
-& "tools\sentence_mixer\bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download dictionary english_us_arpa
-& "tools\sentence_mixer\bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download g2p english_us_arpa
+& "bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download acoustic english_us_arpa
+& "bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download dictionary english_us_arpa
+& "bin\micromamba.exe" run -r "C:\Users\Sean\micromamba" -n mfa_env mfa model download g2p english_us_arpa
 ```
 
 #### Option B: Standard Conda / Mamba (If already installed on system)
@@ -70,203 +70,260 @@ mfa model download g2p english_us_arpa
 
 ## Instructions for AI Agents & Developers
 
-Agents can invoke `tools/sentence_mixer/run_mixer.py` using system Python.
+Agents and developers can execute `run_mixer.py` using system Python or the virtual environment (`.venv\Scripts\python.exe` on Windows).
 
 ### 1. Basic Sentence Mixing (Using Any Source Video)
-Pass `--video` with your source file:
-- If the video has already been aligned, alignment is loaded from cache in `~0.05s`.
-- If the video is new, the toolkit automatically detects the adjacent `.vtt` file, runs preprocessing and MFA alignment, caches the index, and synthesizes the sentence.
+
+The primary synthesis workflow uses `run_mixer.py mix`:
+- If the video has already been aligned, alignment and units are loaded from cache in `< 0.05s`.
+- If the video is new, the toolkit automatically detects the adjacent `.vtt` or `.srt` file, runs vocal isolation, preprocessing, MFA alignment, and caches the inventory before synthesizing.
 
 ```bash
-python "tools/sentence_mixer/run_mixer.py" mix \
+python run_mixer.py mix \
   --video "path/to/source_video.mp4" \
+  --speaker "speaker_name" \
   --text "Target sentence to synthesize" \
-  --render "path/to/output.mp4"
+  --render "output/mix.mp4"
 ```
-*(XML output is omitted by default. If an FCP7/Premiere Pro sequence timeline is specifically desired, add `--xml "path/to/output.xml"`).*
+*(XML sequence export is optional; add `--xml "output/mix.xml"` if an FCP7 / Premiere Pro XML timeline is needed).*
 
-### 2. Multi-Source Sentence Mixing (Expanding Vocabulary & Corpus)
-You can provide multiple video sources by separating them with spaces or commas:
+### 2. Multi-Source Sentence Mixing & Folder Discovery
 
+Expand the speaker's available vocabulary across multiple recordings:
+
+**Explicit videos or comma-separated lists:**
 ```bash
-python "tools/sentence_mixer/run_mixer.py" mix \
-  --video "vids/source1.mp4" "vids/source2.mp4" "vids/source3.mp4" \
-  --text "Your sentence to synthesize across multiple sources" \
+python run_mixer.py mix \
+  --video "vids/clip1.mp4" "vids/clip2.mp4" "vids/clip3.mp4" \
+  --speaker obi-wan \
+  --text "Hello there" \
   --render "output/multisource_mix.mp4"
 ```
 
-Or pass a JSON manifest file listing all video and VTT paths:
+**Folder Auto-Discovery (`--folder`):**
+Scans one or more directories, automatically pairing media files (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`) with matching subtitle files (`.en.vtt`, `.vtt`, `.srt`):
 ```bash
-python "tools/sentence_mixer/run_mixer.py" mix \
-  --manifest "tools/sentence_mixer/sources_manifest.json" \
-  --text "Your sentence to synthesize across entire library" \
-  --render "output/library_mix.mp4"
+python run_mixer.py mix \
+  --folder "vids/" \
+  --speaker obi-wan \
+  --text "I have the high ground" \
+  --render "output/folder_mix.mp4"
 ```
 
-Manifest format (`sources_manifest.json`):
-```json
-[
-  {
-    "video": "path/to/video1.mp4",
-    "vtt": "path/to/video1.en.vtt"
-  },
-  {
-    "video": "path/to/video2.mp4"
-  }
-]
+**JSON Manifest (`--manifest`):**
+```bash
+python run_mixer.py mix \
+  --manifest "evaluation/anakin_sources.json" \
+  --speaker anakin \
+  --text "This is where the fun begins" \
+  --render "output/manifest_mix.mp4"
 ```
 
-**How Caching & Pooling Works:**
-- Each video is checked against its own independent cache (`cache/<source_id>/`).
-- Previously aligned videos load instantly. Any new video is aligned once and saved to cache.
-- The unit inventories (all words and phonemes) are merged seamlessly in memory into a single combined dictionary.
-- Each selected unit retains its own `source_video` path, so FFmpeg cuts directly from whichever video provides the word or phoneme.
-
-### 3. Auto-Detecting Subtitles vs Explicit `--vtt`
-If the subtitle file is named after the video (e.g. `source.mp4` and `source.en.vtt` or `source.vtt` in the same directory), `--vtt` is auto-detected. If the subtitle file is located elsewhere or named differently, pass `--vtt`:
-
+**Corpus-Wide Pooling (`--all-sources`):**
+Mix across all previously ingested and cached sources in `.build/` without re-specifying file paths:
 ```bash
-python "tools/sentence_mixer/run_mixer.py" mix \
-  --video "path/to/source_video.mp4" \
-  --vtt "path/to/custom_subtitles.vtt" \
-  --text "Your sentence to synthesize" \
+python run_mixer.py mix \
+  --all-sources \
+  --speaker obi-wan \
+  --text "You were the chosen one" \
+  --render "output/corpus_mix.mp4"
+```
+
+### 3. Subtitles & Burning
+
+Generate synchronized subtitles alongside the render, or burn them into the video frames:
+```bash
+# Export matching .srt subtitles
+python run_mixer.py mix \
+  --video "vids/clip.mp4" \
+  --speaker obi-wan \
+  --text "Hello there" \
+  --subtitles \
   --render "output/mix.mp4"
-```
 
-### 3. Advanced Variable-Span Unit Selection & Features (Milestones M0-M6)
-
-The engine now supports variable-span selection (Phrase -> Word -> Whole Phone), canonical edit planning, master PCM-first rendering, and optional WavLM neural feature reranking:
-
-```bash
-# Variable-span unit selection with basic acoustic features
+# Burn subtitles directly into video with classic YTP styling
 python run_mixer.py mix \
-  --manifest evaluation/smoke_sources.json \
+  --video "vids/clip.mp4" \
   --speaker obi-wan \
   --text "Hello there" \
-  --selector span \
-  --features basic \
-  --mode source-derived \
-  --fps 30000/1001 \
-  --render output/mix.mp4 \
-  --plan output/mix.plan.json \
-  --xml output/mix.xml
-
-# Variable-span unit selection with neural WavLM feature reranking
-python run_mixer.py mix \
-  --manifest evaluation/smoke_sources.json \
-  --speaker obi-wan \
-  --text "Hello there" \
-  --selector span \
-  --features wavlm \
-  --mode source-derived \
-  --render output/mix_wavlm.mp4
-
-# Validate output timing, sample count, provenance, and XML agreement
-python tools/validate_mix.py --stem output/mix
-
-# Run the automated multi-stratum evaluation suite
-python tools/evaluate.py --suite evaluation/suite.json --output-dir output/evaluation
+  --burn-subtitles \
+  --subtitle-style classic \
+  --subtitle-mode phrase \
+  --render "output/burned_mix.mp4"
 ```
-
-#### Supported CLI Options
-
-| Option | Description | Default |
-| --- | --- | --- |
-| `--selector legacy\|span` | Unit selection backend (`legacy` word-first or `span` variable-span) | `legacy` |
-| `--speaker <id>` | Filter inventory to verified speaker identity (strictly a filter, never relabels) | `None` |
-| `--assume-single-speaker` | Explicit assertion of single-speaker status for a single-source input | `False` |
-| `--diarize auto\|off\|force` | Speaker diarization mode (`auto`: cache/backend, `off`: manifest/asserted only, `force`: re-diarize) | `auto` |
-| `--speaker-registry <path>` | Path to persistent speaker registry JSON | `.build/speaker_registry.json` |
-| `--mode source-derived\|cuts-only` | Join smoothing mode | `source-derived` |
-| `--features basic\|wavlm` | Acoustic feature backend (`basic` continuous acoustics or `wavlm` neural) | `basic` |
-| `--fps <rate>` | Rational framerate (e.g. `30000/1001`, `24`, `25`, `29.97`) | `30000/1001` |
-| `--plan <path>` | Path to output canonical `EditPlan` JSON | `<render_stem>.plan.json` |
-| `--xml <path>` | Optional Final Cut Pro 7 / Premiere Pro XML timeline | `None` |
-| `--guide <audio>` | Human prosody guide audio (analysis-only, pitch contour & relative duration) | `None` |
-| `--guide-transcript <path>` | Explicit transcript file matching guide target words (required with `--guide`) | `None` |
-| `--target-audio <path>` | Spoken target audio recording for acoustic pronunciation review | `None` |
-| `--record-target` | Record spoken target audio interactively via microphone | `False` |
-| `--normalize-loudness` / `--no-normalize-loudness` | Enable/disable EBU R128 (-16 LUFS, -1.0 dBTP) loudness post-processing | Enabled |
-| `--audio-track combined\|raw\|vocals\|recombined\|all` | Output audio track variant | `combined` |
-| `--force-realign` | Invalidate cache and force fresh MFA alignment | `False` |
 
 ---
 
-## Governance Rules & Architecture
+## Corpus Ingestion & Continuous Watch Mode (`ingest`)
 
-### 1. Speaker Identity Governance (D1, D4, D5)
-- `--speaker <id>` is strictly a filter. It never creates, overwrites, or relabels cached sources.
-- Identities originate strictly from: (a) manifest entries with `single_speaker_verified: true` or `speaker_intervals`; (b) `--video` + `--speaker S` + `--assume-single-speaker`; or (c) diarization with a verified registry cosine threshold match (> 0.75).
-- Unmatched diarization clusters receive anonymous IDs (`anon:<content_id>:<cluster_index>`).
-- Single-speaker word eligibility strictly excludes words overlapping other speakers or outside valid speech intervals (with a 40ms silence collar).
+For processing large video libraries or maintaining a continuous ingest pipeline, use the dedicated `ingest` subcommand. `ingest` performs vocal isolation, diarization, MFA alignment, and inventory indexing without requiring dummy synthesis text.
 
-### 2. Legacy Selector Limits (D2)
-- The legacy selector is strictly restricted to plain text targets.
-- It rejects span markup (`{...}` phone groups, `<gap:...>` cadence tags), `--target-audio`, `--record-target`, prosody guides, and WavLM with an actionable error directing the user to `--selector span`.
-
-### 3. Spoken Target Recognition Tiers (D8)
-- **Tier 1 (Default)**: Unprimed Whisper word transcription followed by MFA forced alignment of the recording against candidate dictionary variants.
-- **Tier 2 (Optional)**: CTC acoustic phone recognizer for non-lexical sounds or nonce words.
-- **Spelling Fallback**: Pure G2P dictionary resolution with interactive review.
-
-### 4. Prosody Guide Requirements (D7, B10)
-- Providing `--guide <audio>` requires an accompanying `--guide-transcript <path>` matching the target words.
-- The guide extracts voiced F0 pitch contour and relative duration from source speech to bias candidate join costs, but never contributes audio to renders.
-
-### 4. Force Re-alignment
-If you modified subtitles or added custom dictionary entries:
+### Batch Ingestion
 ```bash
-python run_mixer.py mix \
-  --video "path/to/source_video.mp4" \
-  --text "Your sentence" \
-  --force-realign
+# Ingest an entire directory of clips
+python run_mixer.py ingest --folder "vids/"
+
+# Ingest via JSON manifest
+python run_mixer.py ingest --manifest "sources.json"
 ```
 
-### 5. Inspecting Alignment Quality & Phoneme Boundaries
-To verify boundary accuracy on any speech chunk:
-
+### Continuous Folder Monitoring (`--watch`)
+Monitors target folders indefinitely, automatically processing new or modified video/subtitle pairs as they are added:
 ```bash
-# Terminal table inspection of words and phonemes
-python "tools/sentence_mixer/src/inspect_alignment.py" --chunk 0 --aligned "tools/sentence_mixer/aligned" --corpus "tools/sentence_mixer/corpus"
-
-# Generate a visual waveform + spectrogram plot with overlaid boundaries
-python "tools/sentence_mixer/src/inspect_alignment.py" --chunk 0 --aligned "tools/sentence_mixer/aligned" --corpus "tools/sentence_mixer/corpus" --plot "output/inspect.png"
+python run_mixer.py ingest --folder "vids/" --watch --poll-interval 5.0
 ```
+- **Sub-Second Delta Alignment**: Unchanged media files hit the multi-layer content hash cache in milliseconds. Only new or modified files trigger processing.
+- **Graceful Termination**: Cleanly stops on `Ctrl+C` without corrupting cache indexes.
+
+### Ingestion Pipeline Highlights
+1. **Vocal Stem Isolation (`--isolate-vocals`)**: Uses `audio-separator` (UVR MDX-Net / Demucs) to extract clean speech stems into `.build/vocals/`, removing orchestral scores and background noise before alignment.
+2. **Subtitle Cleaning & Whisper ASR Tail Enrichment**: De-duplicates rolling captions and automatically recovers dropped tail speech (common in auto-generated YouTube captions) using local Whisper ASR before alignment.
+3. **Diarization & Speaker Verification**: Identifies speech turns using WavLM speaker verification (`microsoft/wavlm-base-plus-sv`).
+4. **Interactive Speaker Clustering (`--interactive-clusters`)**: In interactive mode, unrecognized speaker clusters generate short 2-3 second `.wav` previews (`.build/clusters/<id>_preview.wav`) and present ranked candidate profiles for quick assignment.
+5. **Dynamic Custom Dictionary Staging**: Automatically merges `dictionaries/custom_pronunciations.txt` into `dictionaries/merged_dictionary.dict` at `.build/mfa/staged_dictionary.dict` so custom proper nouns and names align as intact words rather than OOV noise (`spn`).
+
+---
+
+## Unit Selection Architecture: Variable-Span (`span`, Default) vs Legacy
+
+The sentence mixing toolkit defaults to **Variable-Span Unit Selection (`--selector span`)**, a global Viterbi optimization algorithm that dramatically outperforms greedy word-matching.
+
+### Multi-Tier Selection Hierarchy
+
+The variable-span engine optimizes cuts across four tiers:
+1. **Tier 1: Intact Phrase Spans**: Continuous multi-word phrases directly from the source video. Preserves natural coarticulation, F0 pitch contours, and timing with zero edit splices.
+2. **Tier 2: Whole Word Units**: Intact word tokens chosen near median duration to prevent anomalous outliers.
+3. **Tier 2.5: Subword / Morpheme Spans**: Contiguous acoustic sequences within words (e.g. `can` + `not`, prefix/suffix segments) discovered across adjacent phonemes.
+4. **Tier 3: Phoneme Spans with Acoustic Cognate Fallbacks**: Individual phone units linked via Viterbi shortest-path.
+
+#### Acoustic Cognate & Vowel Reduction Fallbacks
+Small speaker corpora (<10 seconds of speech) often lack specific phonemes (e.g., voiced velar stop `G`, velar nasal `NG`, voiced labiodental `V`). Instead of failing with a path disconnect:
+- **Consonant Cognates**: Substitutes phonetically compatible sounds at small acoustic cost (0.35):
+  - `G` $\leftrightarrow$ `K` (velar stops)
+  - `NG` $\leftrightarrow$ `N` / `M` (nasals)
+  - `V` $\leftrightarrow$ `F` (labiodental fricatives)
+  - `Z` $\leftrightarrow$ `S` / `JH` $\leftrightarrow$ `CH`
+- **Weak Vowel Reduction**: Unstressed vowels (`AH0` $\leftrightarrow$ `IH0` $\leftrightarrow$ `EH0`) reduce interchangeably at low cost (0.15).
+
+### Global Viterbi Dynamic Programming Search
+The selector minimizes total path cost across all target phoneme nodes:
+
+$$C_{\text{total}} = \sum C_{\text{target}}(u_i) + \sum C_{\text{join}}(u_{i-1}, u_i)$$
+
+- **Target Cost**: Penalizes phonetic mismatch, unnatural duration stretch, and non-realized pronunciation branches.
+- **Join / Concatenation Cost**: Evaluates physical boundary compatibility using measured energy differences, spectral flux, voicing continuity, and F0 pitch steps.
+
+### Cadence Tags & Span Markup
+- **Cadence Pauses (`<gap:Xms>`)**: Insert hard timeline gaps without audio bridging (e.g. `Hello <gap:350ms> there`).
+- **Explicit Pronunciation Branches (`{...}`)**: Disambiguate homographs or force phonetic realizations (e.g. `{R EH1 D}` vs `{R IY1 D}`).
+- **Prosody Guidance (`--guide <audio>` + `--guide-transcript <path>`)**: Biases candidate selection toward a human speaker's pitch contour and rhythm without donating guide audio.
+
+### Legacy Selector (`--selector legacy`)
+The legacy engine uses a greedy word-first lookup with phoneme fallback splicing. It is maintained strictly for baseline backwards compatibility. It does not support phrase spans, cadence tags (`<gap:...>`), pronunciation brackets, or prosody guides.
+
+---
+
+## Audio Rendering: Recombination & EBU R128 Normalization
+
+By default (`--audio-track recombined`), the rendering pipeline uses a high-fidelity two-stage audio mix:
+1. **Vocal Isolation & Loudness Normalization**: Dialogue is spliced from isolated vocal stems and normalized according to EBU R128 / ITU-R BS.1770 (-16 LUFS, -1.0 dBTP true peak). This eliminates jarring volume differences between quiet whispers and shouting.
+2. **Instrumental Recombination**: The normalized vocal cuts are recombined with the original background audio and music from the source video clips. Dialogue cuts remain clean and clear while preventing abrupt dead-silence drops in the background track.
+
+**Available Audio Tracks (`--audio-track`):**
+- `recombined` (default): Normalized vocals + original background instrumental.
+- `raw` (or `combined`): Direct unseparated audio cuts from source video.
+- `vocals` (or `isolated`): Clean isolated speech stems without background music.
+- `both`: Renders both `raw` and `vocals` tracks.
+- `all`: Renders `raw`, `vocals`, and `recombined` tracks.
+
+---
+
+## CLI Options Reference
+
+### `run_mixer.py mix` (Synthesis)
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--text <string>` | Target sentence / text to synthesize | `None` |
+| `--selector span\|legacy` | Unit selection backend (`span` Viterbi shortest-path or `legacy` word-first) | `span` |
+| `--speaker <id>` | Filter inventory to verified speaker identity (strictly a filter) | `None` |
+| `--assume-single-speaker` | Explicit assertion of single-speaker status for single-source input | `False` |
+| `--video <path...>` | Path(s) to source video(s) | `None` |
+| `--vtt <path...>` | Path(s) to WebVTT / SRT subtitle files | `None` |
+| `--folder <dir...>` | Path(s) to folder(s) containing source videos and subtitles | `None` |
+| `--manifest <path>` | Path to JSON source manifest | `None` |
+| `--all-sources` | Mix across all ingested and cached sources in `.build/` | `False` |
+| `--render <path>` | Output rendered MP4 video path | `None` |
+| `--plan <path>` | Output canonical `EditPlan` JSON path | `<stem>.plan.json` |
+| `--xml <path>` | Optional Final Cut Pro 7 / Premiere Pro XML timeline | `None` |
+| `--audio-track <track>` | Audio track variant: `recombined`, `raw`, `vocals`, `both`, `all` | `recombined` |
+| `--normalize-loudness` | Enable EBU R128 (-16 LUFS, -1.0 dBTP) loudness normalization | Enabled (`True`) |
+| `--isolate-vocals` | Isolate speech stems using audio-separator/Demucs before alignment | Enabled (`True`) |
+| `--features basic\|wavlm` | Acoustic feature backend (`basic` continuous acoustics or `wavlm` neural) | `basic` |
+| `--diarize auto\|off\|force` | Diarization mode (`auto`, `off`, `force`) | `auto` |
+| `--diarize-threshold <val>` | Cosine distance threshold for speaker clustering | `0.18` (WavLM) |
+| `--speaker-registry <path>` | Path to persistent speaker registry JSON | `config/speaker_registry.json` |
+| `--subtitles` | Export matching `.srt` subtitle file alongside output video | `False` |
+| `--burn-subtitles` | Hardcode subtitles directly into rendered video frames | `False` |
+| `--subtitle-style classic\|modern`| Subtitle styling (`classic` YTP yellow, `modern` clean white) | `classic` |
+| `--subtitle-mode phrase\|word` | Subtitle timing mode (`phrase` clauses, `word` highlights) | `phrase` |
+| `--fps <rate>` | Rational timeline framerate (e.g. `30000/1001`, `24`, `29.97`) | `30000/1001` |
+| `--guide <audio>` | Human prosody guide audio (analysis only) | `None` |
+| `--guide-transcript <path>` | Transcript matching prosody guide target words | `None` |
+| `--target-audio <path>` | Reference audio recording for target pronunciation recognition | `None` |
+| `--record-target` | Record spoken target audio interactively via microphone | `False` |
+| `--review-pronunciations` | Interactively review pronunciations for OOV words | `False` |
+| `--force-realign` | Invalidate cache and force fresh MFA alignment | `False` |
+
+### `run_mixer.py ingest` (Preprocessing)
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--folder <dir...>` | Path(s) to folder(s) containing source media and subtitles | `None` |
+| `--manifest <path>` | Path to JSON source manifest | `None` |
+| `--video <path...>` | Path(s) to source video(s) | `None` |
+| `--vtt <path...>` | Path(s) to subtitle files | `None` |
+| `--watch` | Continuously monitor folders for new media and ingest incrementally | `False` |
+| `--poll-interval <sec>` | Polling interval in seconds for continuous watch mode | `5.0` |
+| `--speaker <id>` | Speaker identity filter or assignment | `None` |
+| `--isolate-vocals` | Isolate speech stems before alignment | Enabled (`True`) |
+| `--diarize auto\|off\|force` | Diarization mode | `auto` |
+| `--interactive-clusters` | Interactively review and assign unrecognized speaker clusters | `False` |
 
 ---
 
 ## Directory Structure
 
 ```text
-tools/sentence_mixer/
+sentence_mixer/
 ├── bin/
-│   └── micromamba.exe              # Self-contained conda package manager for MFA / Kaldi
-├── cache/                          # Automatic alignment cache per source video ID
-├── corpus/                         # Speech intervals (16kHz WAV + TXT)
-├── aligned/                        # Aligned Praat .TextGrid files
+│   └── micromamba.exe              # Self-contained package manager for MFA / Kaldi
+├── config/
+│   └── speaker_registry.json       # Enrolled speaker acoustic profiles
 ├── dictionaries/
-│   ├── custom_pronunciations.txt   # User-defined proper nouns & slang terms
+│   ├── custom_pronunciations.txt   # User-defined proper nouns & custom phonetic spellings
 │   └── merged_dictionary.dict      # Full acoustic dictionary (208k entries)
-├── inventory/
-│   └── units_index.json            # Indexed database of all words & phonemes
-├── output/                         # Rendered MP4s, WAVs, and XML timelines
+├── evaluation/
+│   ├── anakin_sources.json         # Evaluation source manifests
+│   └── smoke_sources.json
 ├── src/
-│   ├── vtt_preprocessor.py         # Rolling caption de-duplicator & audio chunker
+│   ├── diarization.py              # WavLM speaker verification & turn clustering
+│   ├── fcp_xml_generator.py        # Final Cut Pro 7 / Premiere Pro XML timeline generator
+│   ├── inspect_alignment.py        # Spectrogram & terminal alignment inspector
 │   ├── inventory_builder.py        # TextGrid parser and unit indexer
-│   ├── unit_selector.py            # Word-first matcher with G2P phoneme fallback
-│   ├── fcp_xml_generator.py        # Final Cut Pro 7 XML sequence generator
-│   ├── video_assembler.py          # FFmpeg frame-accurate cuts with micro-crossfades
-│   └── inspect_alignment.py        # Spectrogram & terminal alignment inspector
-├── README.md                       # Documentation & setup guide
-└── run_mixer.py                    # Unified CLI entry point
+│   ├── lexicon.py                  # ARPAbet lexicon, compound handling, and validation
+│   ├── loudness.py                 # EBU R128 loudness normalization
+│   ├── oov_assistant.py            # Out-of-vocabulary pronunciation resolution
+│   ├── prosody.py                  # Prosody extraction and F0 contour matching
+│   ├── span_selector.py            # Variable-span Viterbi DP unit selection engine
+│   ├── unit_selector.py            # Legacy word-first matcher with phone fallback
+│   ├── video_assembler.py          # Frame-accurate FFmpeg cuts & audio recombination
+│   ├── vocal_isolation.py          # Demucs / UVR vocal separation
+│   └── vtt_preprocessor.py         # Subtitle parsing & Whisper ASR tail enrichment
+├── tools/
+│   ├── evaluate.py                 # Automated multi-stratum test evaluation harness
+│   ├── listen_verify.py            # Unprimed ASR listening verification gate
+│   └── validate_mix.py             # Timing, sample count, and manifest validator
+├── README.md                       # Comprehensive documentation & setup guide
+└── run_mixer.py                    # Unified CLI entry point (`mix`, `ingest`, `preprocess`)
 ```
-
----
-
-## How the Unit Selection Engine Works
-
-1. **Tokenization & Normalization**: Strips punctuation and splits the target text into word tokens.
-2. **Whole Word Lookup**: Looks up each token in the aligned inventory. If found, picks a clean occurrence near median duration to prevent outliers.
-3. **Phonetic Fallback**: If a word does not exist in the source video corpus, `g2p_en` decomposes the word into ARPA phonemes (e.g. `['HH', 'EY1', 'T']`).
-4. **Phoneme Splicing**: The engine extracts matching phoneme intervals from the corpus, selecting healthy duration candidates (50ms - 200ms) with smooth transitions.
-5. **Assembly**: Uses FFmpeg to extract standardized 1080p clips, adds 5ms audio micro-fades to eliminate boundary pops, and concatenates them into seamless video (`.mp4`) and audio (`.wav`) masters.
