@@ -105,6 +105,130 @@ def get_source_id(video_path: str) -> str:
     return f"{clean_stem}_{content_hash}"
 
 
+MOVIE_MFA_BATCH_SIZE = 400
+_MOVIE_SOURCE_CACHE: Dict[str, bool] = {}
+
+
+def is_movie_source(video_path: Union[str, Path]) -> bool:
+    """True for long or surround sources that use the block-cached movie pipeline."""
+    p = Path(video_path).resolve()
+    key = str(p)
+    if key not in _MOVIE_SOURCE_CACHE:
+        from movie_media import is_long_source
+        _MOVIE_SOURCE_CACHE[key] = p.exists() and is_long_source(p)
+    return _MOVIE_SOURCE_CACHE[key]
+
+
+def print_movie_ingest_summary(result: Dict[str, Any]) -> None:
+    voice = result.get("voice") or {}
+    counts = result.get("status_counts") or {}
+    print(
+        f"[+] Movie ready: {result['blocks_aligned'].__len__()}/{result['blocks_total']} blocks aligned "
+        f"({result['blocks_aligned_this_run']} this run), stems {'complete' if result['stems_complete'] else 'not available'}, "
+        f"{result['seconds']:.0f}s"
+    )
+    if counts:
+        print("    line labels: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    if voice and "skipped" not in voice:
+        print(
+            f"    voice checks: leave-one-out accuracy {voice.get('loo_accuracy')}, "
+            f"{voice.get('voice_mismatch')} labeled lines flagged, {voice.get('propagated')} unlabeled lines labeled by voice"
+        )
+    top = list((result.get("speaker_seconds") or {}).items())[:8]
+    if top:
+        print("    usable speech: " + ", ".join(f"{k} {v:.0f}s" for k, v in top))
+
+
+def load_movie_scenes(video_path: Union[str, Path]) -> List[Dict[str, Any]]:
+    """Scenes exported by tools/label_subtitles.py into the labeled subtitle report."""
+    stem = Path(video_path).stem
+    for name in (f"{stem}.en.vtt.report.json", f"{stem}.vtt.report.json"):
+        rp = CACHE_BASE_DIR / "subtitles" / "labeled" / name
+        if rp.exists():
+            try:
+                return json.loads(rp.read_text(encoding="utf-8")).get("scenes", []) or []
+            except Exception:
+                return []
+    return []
+
+
+def resolve_time_ranges(
+    range_args: Optional[List[str]],
+    scene_args: Optional[List[str]],
+    video_paths: List[str],
+) -> List[Tuple[float, float]]:
+    """Combines --range values and --scene selections (number or heading keyword) into ranges."""
+    from movie_ingest import parse_ranges
+    ranges = parse_ranges(range_args)
+    for sel in scene_args or []:
+        found = False
+        key = str(sel).strip()
+        for vp in video_paths:
+            scenes = load_movie_scenes(vp)
+            for sc in scenes:
+                # Numbers select by scene index only (screenplay headings often contain numbers)
+                if key.isdigit():
+                    hit = str(sc.get("index")) == key
+                else:
+                    hit = key.lower() in str(sc.get("heading", "")).lower()
+                if hit:
+                    ranges.append((float(sc["start"]), float(sc["end"])))
+                    found = True
+            if found:
+                break
+        if not found:
+            raise ValueError(
+                f"Scene '{sel}' not found. List scenes with: run_mixer.py scenes <movie>"
+            )
+    return sorted(ranges)
+
+
+def pick_timeline_fps(inventory: InventoryIndex, default: RationalTime) -> RationalTime:
+    """Most common video frame rate among the inventory's sources (so movies keep 23.976 fps)."""
+    counts: Dict[Tuple[int, int], int] = {}
+    for src in inventory.sources.values():
+        vf = getattr(src, "video_fps", None) or {}
+        num, den = int(vf.get("numerator", 0) or 0), int(vf.get("denominator", 0) or 0)
+        if num > 0 and den > 0:
+            counts[(num, den)] = counts.get((num, den), 0) + 1
+    if not counts:
+        return default
+    num, den = max(counts.items(), key=lambda kv: kv[1])[0]
+    return RationalTime(num, den)
+
+
+def restrict_inventory_to_ranges(
+    inventory: InventoryIndex,
+    ranges: List[Tuple[float, float]],
+) -> int:
+    """Marks words/events outside the time ranges ineligible. Returns eligible word count."""
+    kept = 0
+    for wo in inventory.words.values():
+        src = inventory.sources.get(wo.source_content_id)
+        sr = src.native_sample_rate if src and src.native_sample_rate else 48000
+        s, e = wo.start_sample / sr, wo.end_sample / sr
+        inside = any(rs <= s and e <= re_ for rs, re_ in ranges)
+        if not inside and wo.is_eligible:
+            wo.is_eligible = False
+            wo.eligibility_reason = "outside_range"
+            for ev_id in wo.phone_event_ids:
+                ev = inventory.events.get(ev_id)
+                if ev is not None:
+                    ev.is_eligible = False
+                    ev.eligibility_reason = "outside_range"
+        elif inside and wo.is_eligible:
+            kept += 1
+    for ev in inventory.events.values():
+        if ev.kind != "phone" or not ev.is_eligible:
+            continue
+        src = inventory.sources.get(ev.source_content_id)
+        sr = src.native_sample_rate if src and src.native_sample_rate else 48000
+        if not any(rs <= ev.start_sample / sr and ev.end_sample / sr <= re_ for rs, re_ in ranges):
+            ev.is_eligible = False
+            ev.eligibility_reason = "outside_range"
+    return kept
+
+
 def slugify_text(text: str, max_words: int = 8, max_length: int = 40) -> str:
     """
     Generate a clean, filesystem-safe filename slug from a text phrase.
@@ -140,6 +264,7 @@ def run_mfa_align(
     output_aligned_dir: str,
     dictionary_path: Optional[str] = None,
     acoustic_model: str = "english_us_arpa",
+    batch_size: int = 45,
 ) -> None:
     """Executes Montreal Forced Aligner inside the isolated mfa_env or PATH."""
     os.makedirs(output_aligned_dir, exist_ok=True)
@@ -267,7 +392,6 @@ def run_mfa_align(
         if target_temp.exists():
             shutil.rmtree(target_temp, ignore_errors=True)
 
-    batch_size = 45
     if len(wav_files) <= batch_size:
         _execute_mfa(c_path, out_aligned)
     else:
@@ -315,11 +439,18 @@ def ensure_source_aligned(
     isolate_vocals: bool = False,
     cache_status: Optional[Dict[str, Any]] = None,
     asr_fill_tails: bool = False,
+    ranges: Optional[List[Tuple[float, float]]] = None,
+    subtitle_stream: Optional[str] = None,
+    characters_path: Optional[str] = None,
+    voice_checks: bool = True,
 ) -> str:
     """
     Ensures a video source is preprocessed, aligned with MFA, and indexed into an inventory.
     Returns path to units_index.json.
     asr_fill_tails enables opt-in Whisper tail enrichment of subtitle text before alignment.
+    Long sources (whole movies) use the block-cached movie pipeline (src/movie_ingest.py);
+    ranges limits which blocks are processed, and labels come from subtitles, scripts and
+    voice checks instead of diarization.
     """
     v_abs = Path(video_path).resolve()
     if not v_abs.exists():
@@ -345,6 +476,31 @@ def ensure_source_aligned(
         custom_dict_path=SCRIPT_DIR / "dictionaries" / "custom_pronunciations.txt",
         output_path=staged_dict_dir / "staged_dictionary.dict",
     )
+
+    if is_movie_source(v_abs):
+        from movie_ingest import ensure_movie_aligned
+        result = ensure_movie_aligned(
+            v_abs,
+            source_id=source_id,
+            build_dir=CACHE_BASE_DIR,
+            run_mfa=lambda c, a: run_mfa_align(c, a, str(dict_path), acoustic_model="english_us_arpa", batch_size=MOVIE_MFA_BATCH_SIZE),
+            dict_hash=dict_hash,
+            subtitle_path=vtt_path,
+            subtitle_stream=subtitle_stream,
+            characters_path=characters_path,
+            ranges=ranges,
+            separate_stems=isolate_vocals,
+            voice_checks=voice_checks,
+            force_realign=force_realign,
+        )
+        print_movie_ingest_summary(result)
+        if cache_status is not None:
+            cache_status["hit"] = bool(result["cache_hit"])
+            cache_status["realigned"] = result["blocks_aligned_this_run"] > 0
+            cache_status["layer"] = 1 if result["cache_hit"] else 0
+            cache_status["inventory_path"] = result["inventory_path"]
+            cache_status["movie"] = result
+        return str(result["inventory_path"])
 
     # Resolve VTT
     vtt_candidate = vtt_path or find_associated_vtt(str(v_abs))
@@ -916,6 +1072,7 @@ def ingest_sources(
             item.get("single_speaker_verified")
             or assume_single
             or item.get("speaker_intervals")
+            or (v_abs.exists() and is_movie_source(v_abs))
         )
         if not is_asserted:
             if diarize_mode in ("auto", "force"):
@@ -998,6 +1155,10 @@ def ingest_sources(
             isolate_vocals=isolate_vocals_flag,
             cache_status=item_status,
             asr_fill_tails=bool(getattr(args, "asr_fill_tails", False)),
+            ranges=getattr(args, "resolved_ranges", None) or None,
+            subtitle_stream=getattr(args, "subtitle_stream", None),
+            characters_path=getattr(args, "characters", None),
+            voice_checks=bool(getattr(args, "voice_checks", True)),
         )
         inventory_paths.append(inv_path)
 
@@ -1286,7 +1447,11 @@ def add_synthesis_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--assume-single-speaker", action="store_true", help="Explicitly assume single speaker")
     p.add_argument("--mode", choices=["source-derived", "cuts-only"], default="source-derived", help="Rendering mode")
     p.add_argument("--features", choices=["basic", "wavlm"], default="basic", help="Feature extraction backend")
-    p.add_argument("--fps", default="30000/1001", help="Timeline framerate (e.g. 30000/1001 or 29.97)")
+    p.add_argument(
+        "--fps",
+        default="auto",
+        help="Timeline framerate: auto (the sources' own rate, e.g. 24000/1001 for movies; default) or a value such as 30000/1001",
+    )
     p.add_argument("--render", help="Output rendered MP4 path")
     p.add_argument("--plan", help="Output EditPlan JSON path")
     p.add_argument("--xml", help="Output Premiere Pro / FCP7 XML path")
@@ -1503,6 +1668,39 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_auto.add_argument("--output-name", default="ytp_mix", help="Base name for output mix files")
 
     # 6. Clean command
+    add_movie_args(p_mix)
+    add_movie_args(p_ingest)
+    for p_render in (p_mix, p_auto):
+        p_render.add_argument(
+            "--resolution",
+            default="1080p",
+            help="Output video size: 1080p (default), 1440p, 4k (3840x2160), source (native size), or WxH; letterboxed to fit",
+        )
+
+    p_scenes = subparsers.add_parser("scenes", help="List named scenes (with times) for a movie")
+    p_scenes.add_argument("source", help="Movie file")
+    p_scenes.add_argument("--cache-dir", default=None, help="Custom cache root directory (defaults to .build)")
+
+    p_speakers = subparsers.add_parser("speakers", help="List speakers and usable speech per ingested movie")
+    p_speakers.add_argument("source", nargs="*", default=None, help="Movie file(s); default: all ingested movies")
+    p_speakers.add_argument("--cache-dir", default=None, help="Custom cache root directory (defaults to .build)")
+
+    p_review = subparsers.add_parser(
+        "review-speakers",
+        help="Interactively label unlabeled or voice-flagged movie lines (saved to config/speaker_labels/)",
+    )
+    p_review.add_argument("source", help="Movie file (must be ingested)")
+    p_review.add_argument(
+        "--only",
+        choices=["unlabeled", "flagged", "voice", "all"],
+        default="flagged",
+        help="Which lines to review: flagged (voice mismatch + unlabeled, default), unlabeled, voice (voice-propagated), all",
+    )
+    p_review.add_argument("--range", action="append", default=None, metavar="START-END", help="Only lines inside this range")
+    p_review.add_argument("--limit", type=int, default=50, help="Maximum lines per session (default 50)")
+    p_review.add_argument("--no-play", action="store_true", default=False, help="Do not play audio previews")
+    p_review.add_argument("--cache-dir", default=None, help="Custom cache root directory (defaults to .build)")
+
     p_clean = subparsers.add_parser(
         "clean",
         help="Clean up cache and build artifacts for specific source(s) or all sources",
@@ -1540,6 +1738,41 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def add_movie_args(p: argparse.ArgumentParser) -> None:
+    """Options for long sources (whole movies)."""
+    p.add_argument(
+        "--range",
+        action="append",
+        default=None,
+        metavar="START-END",
+        help="Limit a movie to a time range, e.g. 01:30:00-01:35:00 (repeatable). Ingest aligns only the "
+        "overlapping 10-minute blocks; mix only uses words inside the range(s).",
+    )
+    p.add_argument(
+        "--scene",
+        action="append",
+        default=None,
+        help="Limit a movie to a scene by number or heading keyword (see 'run_mixer.py scenes <movie>'); repeatable",
+    )
+    p.add_argument(
+        "--subtitle-stream",
+        default=None,
+        help="Embedded subtitle track to use for a movie: auto, sdh, plain, or a stream index "
+        "(default: labeled VTT from tools/label_subtitles.py if present, else sidecar file, else auto)",
+    )
+    p.add_argument(
+        "--characters",
+        default=None,
+        help="Character alias list for resolving subtitle speaker labels (default: config/characters/star_wars.json)",
+    )
+    p.add_argument(
+        "--voice-checks",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="For movies: verify subtitle speaker labels by voice and label unlabeled lines by voice when confident (default: on)",
+    )
 
 
 def main():
@@ -1599,11 +1832,15 @@ def main():
                     parser.error(f"Guide audio file not found: {args.guide}")
 
         # Resolve target frame rate
-        fps = RationalTime.from_number(args.fps)
+        fps_auto = str(args.fps).strip().lower() == "auto"
+        fps = RationalTime(30000, 1001) if fps_auto else RationalTime.from_number(args.fps)
 
         # Collect source items to align / load
         try:
             source_items = collect_source_items(args)
+            args.resolved_ranges = resolve_time_ranges(
+                getattr(args, "range", None), getattr(args, "scene", None), [i["video"] for i in source_items]
+            )
         except (ValueError, FileNotFoundError) as err:
             parser.error(str(err))
 
@@ -1634,6 +1871,7 @@ def main():
                 item.get("single_speaker_verified")
                 or args.assume_single_speaker
                 or item.get("speaker_intervals")
+                or (v_abs.exists() and is_movie_source(v_abs))
             )
             if not is_asserted:
                 if args.diarize in ("auto", "force"):
@@ -1720,6 +1958,10 @@ def main():
                 speaker_intervals=item.get("speaker_intervals"),
                 isolate_vocals=isolate_vocals_flag,
                 asr_fill_tails=bool(getattr(args, "asr_fill_tails", False)),
+                ranges=getattr(args, "resolved_ranges", None) or None,
+                subtitle_stream=getattr(args, "subtitle_stream", None),
+                characters_path=getattr(args, "characters", None),
+                voice_checks=bool(getattr(args, "voice_checks", True)),
             )
             inventory_paths.append(inv_path)
 
@@ -1764,6 +2006,15 @@ def main():
 
         # Load inventory
         inventory_index, legacy_inv_dict = load_or_combine_inventories(inventory_paths)
+        if fps_auto:
+            fps = pick_timeline_fps(inventory_index, default=fps)
+        if getattr(args, "resolved_ranges", None):
+            if args.selector == "legacy":
+                parser.error("--range/--scene require --selector span.")
+            kept_words = restrict_inventory_to_ranges(inventory_index, args.resolved_ranges)
+            legacy_inv_dict = {"words": {}, "phones": {}, "words_inventory": {}, "phones_inventory": {}}
+            span_desc = ", ".join(f"{s / 60:.1f}-{e / 60:.1f} min" for s, e in args.resolved_ranges)
+            print(f"[*] Restricted to time range(s) {span_desc}: {kept_words} eligible words")
 
         # Collect all available speaker identities across words, events, and legacy views
         unique_speakers = sorted(list({
@@ -2007,6 +2258,7 @@ def main():
                     str(staged_render),
                     normalize_loudness=args.normalize_loudness,
                     audio_track=getattr(args, "audio_track", "raw"),
+                    output_resolution=getattr(args, "resolution", None),
                 )
 
                 if staged_xml:
@@ -2238,6 +2490,7 @@ def main():
                     target_fps=fps,
                     normalize_loudness=args.normalize_loudness,
                     audio_track=getattr(args, "audio_track", "raw"),
+                    output_resolution=getattr(args, "resolution", None),
                 )
 
                 if staged_xml:
@@ -2428,6 +2681,9 @@ def main():
 
         try:
             source_items = collect_source_items(args)
+            args.resolved_ranges = resolve_time_ranges(
+                getattr(args, "range", None), getattr(args, "scene", None), [i["video"] for i in source_items]
+            )
         except (ValueError, FileNotFoundError) as err:
             parser.error(str(err))
 
@@ -2494,6 +2750,29 @@ def main():
             speaker_id=args.speaker,
             single_speaker_verified=args.assume_single_speaker,
         )
+
+    elif args.command == "scenes":
+        from movie_commands import cmd_scenes
+        sys.exit(cmd_scenes(Path(args.source).resolve(), load_movie_scenes(args.source)))
+
+    elif args.command == "speakers":
+        from movie_commands import cmd_speakers
+        sys.exit(cmd_speakers([Path(s).resolve() for s in (args.source or [])], CACHE_BASE_DIR))
+
+    elif args.command == "review-speakers":
+        from movie_commands import cmd_review_speakers
+        try:
+            rc = cmd_review_speakers(
+                Path(args.source).resolve(),
+                CACHE_BASE_DIR,
+                only=args.only,
+                ranges=args.range,
+                limit=args.limit,
+                play=not args.no_play,
+            )
+        except (FileNotFoundError, ValueError) as err:
+            parser.error(str(err))
+        sys.exit(rc)
 
     elif args.command == "clean":
         from cache import clean_all_source_caches, clean_source_cache, format_bytes

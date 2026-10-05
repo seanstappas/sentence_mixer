@@ -448,7 +448,8 @@ def finalize_edit_plan(
         run_audio_chunks = []
         if src_path:
             try:
-                arr, native_rate = sf.read(str(src_path))
+                native_rate = int(sf.info(str(src_path)).samplerate)
+                n_frames = int(sf.info(str(src_path)).frames)
                 rec_sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else native_rate
                 for s in run:
                     if native_rate != rec_sr:
@@ -457,9 +458,10 @@ def finalize_edit_plan(
                     else:
                         st = s.source_start_sample
                         en = s.source_end_sample
-                    st = max(0, min(len(arr), st))
-                    en = max(0, min(len(arr), en))
-                    chunk = arr[st:en]
+                    st = max(0, min(n_frames, st))
+                    en = max(0, min(n_frames, en))
+                    # Ranged read: long sources (whole movies) are never loaded entirely
+                    chunk, _ = sf.read(str(src_path), start=st, stop=en) if en > st else (np.zeros(0), native_rate)
                     if native_rate != plan.project_sample_rate and len(chunk) > 0:
                         import librosa
                         if chunk.ndim > 1:

@@ -14,3 +14,8 @@
 - Default to `--audio-track recombined` to preserve cinematic background atmosphere underneath EBU R128 (-16 LUFS) normalized vocals.
 - **Synthesis Realism**: Target sentences sound natural only when constructed primarily from words or phrases already in the speaker's vocabulary. If a target is >70% out-of-vocabulary (OOV), advise the user to either expand the corpus (`run_mixer.py ingest`) or rephrase using existing dialogue.
 - Whisper tail enrichment is opt-in (`--asr-fill-tails`, default off). Its words are unverified and get force-aligned as if spoken, so never enable it by default or treat its output as ground truth. If expected words are missing from captions, prefer fixing the subtitle file.
+
+## Whole Movies
+- Long sources (>20 min or surround audio) go through `src/movie_ingest.py`: never decode a whole movie into memory or write >4 GB WAVs; read audio by sample range (`LazyAudio`, `sf.read(start=, stop=)`).
+- Speaker labels come from subtitles/transcripts (`tools/label_subtitles.py`), voice checks, and user review (`config/speaker_labels/`). Do not run clustering diarization on movies.
+- Labeled VTTs, label reports, screenplays/transcripts, and the alignment corpus contain copyrighted text: keep them in git-ignored folders and never copy their text into tracked files, tests, or chat output. Tests use invented dialogue.

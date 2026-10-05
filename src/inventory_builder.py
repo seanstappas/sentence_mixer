@@ -328,7 +328,19 @@ def build_units_inventory(
             })
 
         reconciled_by_idx: Dict[int, Dict[str, Any]] = {}
-        if active_speaker_intervals:
+        chunk_segments = chunk_info.get("segments")
+        segment_by_idx: Dict[int, Optional[Dict[str, Any]]] = {}
+        if chunk_segments:
+            # Movie chunks: words take the speaker of the subtitle segment they came from,
+            # matched by token order (exact for two-speaker dialogue-dash cues).
+            from movie_subtitles import assign_word_speakers
+            seg_words = [w for w in words_tier if w["text"].strip()]
+            assigned = assign_word_speakers([w["text"].strip() for w in seg_words], chunk_segments)
+            pos_by_id = {id(w): i for i, w in enumerate(seg_words)}
+            for w_idx, w_entry in enumerate(words_tier):
+                pos = pos_by_id.get(id(w_entry))
+                segment_by_idx[w_idx] = assigned[pos] if pos is not None else None
+        elif active_speaker_intervals:
             from diarization import reconcile_word_intervals_with_speakers
             reconciled_list = reconcile_word_intervals_with_speakers(
                 active_speaker_intervals,
@@ -370,7 +382,16 @@ def build_units_inventory(
             if not constituent_ids:
                 continue
 
-            if active_speaker_intervals:
+            if chunk_segments:
+                seg = segment_by_idx.get(w_idx)
+                if seg is not None:
+                    w_spk = seg.get("speaker_id") or ""
+                    w_eligible = bool(w_spk) and bool(seg.get("is_eligible", True))
+                    w_reason = "" if w_eligible else (seg.get("eligibility_reason") or "unassigned")
+                    w_status = seg.get("identity_status") or ("label" if w_eligible else "unassigned")
+                else:
+                    w_spk, w_eligible, w_reason, w_status = "", False, "segment_unresolved", "unassigned"
+            elif active_speaker_intervals:
                 rw = reconciled_by_idx.get(w_idx, {})
                 w_spk = rw.get("speaker_id", "UNKNOWN")
                 w_eligible = rw.get("is_eligible", False)
@@ -476,7 +497,10 @@ def build_units_inventory(
     out_p = Path(output_index_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
     with open(out_p, "w", encoding="utf-8") as f:
-        json.dump(out_dict, f, indent=2)
+        if manifest.get("movie"):
+            json.dump(out_dict, f, separators=(",", ":"))
+        else:
+            json.dump(out_dict, f, indent=2)
 
     uri_str = out_p.as_uri() if hasattr(out_p, "as_uri") else str(out_p)
     print(f"[+] Successfully indexed {total_words_indexed} words and {total_events_indexed} events to {uri_str}")

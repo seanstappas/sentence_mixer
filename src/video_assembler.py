@@ -30,6 +30,81 @@ if sys.platform == "win32":
 
 from contracts import EditPlan, PlanSegment, RationalTime
 
+COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
+OUTPUT_RESOLUTIONS = {"1080p": (1920, 1080), "1440p": (2560, 1440), "4k": (3840, 2160), "2160p": (3840, 2160)}
+
+
+def resolve_output_dims(plan: Any, output_resolution: str = "1080p") -> Tuple[int, int]:
+    """Returns (width, height). 'source' uses the first video source's size (even dims)."""
+    key = (output_resolution or "1080p").lower()
+    if key in OUTPUT_RESOLUTIONS:
+        return OUTPUT_RESOLUTIONS[key]
+    if key == "source":
+        for seg in getattr(plan, "segments", []):
+            path = getattr(seg, "source_video_path", "")
+            if not path or not Path(path).exists():
+                continue
+            try:
+                res = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                     "stream=width,height", "-of", "csv=p=0", str(path)],
+                    capture_output=True, text=True, check=True,
+                )
+                w, h = (int(x) for x in res.stdout.strip().split(",")[:2])
+                return w - (w % 2), h - (h % 2)
+            except Exception:
+                continue
+        return OUTPUT_RESOLUTIONS["1080p"]
+    m = re.match(r"^(\d+)x(\d+)$", key)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    raise ValueError(f"Unknown output resolution: {output_resolution}")
+
+
+class LazyAudio:
+    """
+    Seekable view of an audio file (WAV/FLAC) that reads only the requested sample
+    range. Supports len(), ndim, shape and [start:stop] slicing like a numpy array, so
+    long sources (whole movies and their stems) are never decoded into memory.
+    """
+
+    def __init__(self, path: Union[str, Path]):
+        self.path = str(path)
+        info = sf.info(self.path)
+        self.samplerate = int(info.samplerate)
+        self.frames = int(info.frames)
+        self.channels = int(info.channels)
+
+    def __len__(self) -> int:
+        return self.frames
+
+    @property
+    def ndim(self) -> int:
+        return 2 if self.channels > 1 else 1
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return (self.frames, self.channels) if self.channels > 1 else (self.frames,)
+
+    def __getitem__(self, key: slice) -> np.ndarray:
+        if not isinstance(key, slice) or key.step not in (None, 1):
+            raise TypeError("LazyAudio supports contiguous slices only")
+        start, stop, _ = key.indices(self.frames)
+        if stop <= start:
+            return np.zeros((0, self.channels) if self.channels > 1 else (0,), dtype=np.float32)
+        data, _ = sf.read(self.path, start=start, stop=stop, dtype="float32", always_2d=self.channels > 1)
+        return data
+
+
+def _open_source_audio(path: Union[str, Path]) -> Tuple[Any, int]:
+    """Opens an audio file for ranged reads (falls back to a full read if unsupported)."""
+    try:
+        lazy = LazyAudio(path)
+        return lazy, lazy.samplerate
+    except Exception:
+        arr, rate = sf.read(str(path))
+        return arr, rate
+
 
 def to_file_uri(p: Union[str, Path, None]) -> str:
     """Format path as clickable file:/// URL."""
@@ -291,14 +366,14 @@ def render_master_pcm(
                 # Load vocal stem
                 v_key = f"{seg.source_content_id}_vocals"
                 if v_key not in decoded_sources:
-                    v_arr, v_rate = sf.read(vocal_path)
+                    v_arr, v_rate = _open_source_audio(vocal_path)
                     decoded_sources[v_key] = (v_arr, v_rate)
                 vocal_arr, v_rate = decoded_sources[v_key]
 
                 # Load instrumental stem
                 i_key = f"{seg.source_content_id}_instrumental"
                 if i_key not in decoded_sources:
-                    i_arr, i_rate = sf.read(inst_path)
+                    i_arr, i_rate = _open_source_audio(inst_path)
                     decoded_sources[i_key] = (i_arr, i_rate)
                 inst_arr, i_rate = decoded_sources[i_key]
 
@@ -424,7 +499,7 @@ def render_master_pcm(
             source_arr, native_rate = decoded_sources[src_key]
         else:
             if src_key not in decoded_sources:
-                arr, native_rate = sf.read(src_path)
+                arr, native_rate = _open_source_audio(src_path)
                 decoded_sources[src_key] = (arr, native_rate)
             source_arr, native_rate = decoded_sources[src_key]
 
@@ -724,12 +799,14 @@ def render_sentence_mix(
     keep_temp: bool = False,
     normalize_loudness: bool = True,
     audio_track: str = "combined",
+    output_resolution: Optional[str] = None,
 ) -> str:
     """
     Renders video and audio according to an EditPlan (or legacy units list).
     Produces authoritative master WAV(s), re-encodes CFR video slices (-crf 18),
     and multiplexes with delivery AAC audio encoded once from the master WAV.
     Supports audio_track: 'combined' (default), 'isolated' (speech stem), or 'both' (renders both MP4s).
+    output_resolution: '1080p' (default), '1440p', '4k', 'source', or 'WxH'; letterboxed to fit.
     """
     out_mp4 = Path(output_mp4_path).resolve()
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -751,6 +828,13 @@ def render_sentence_mix(
 
     fps = plan.video_fps
     fps_str = f"{fps.numerator}/{fps.denominator}"
+    out_w, out_h = resolve_output_dims(
+        plan, output_resolution or getattr(plan, "metadata", {}).get("output_resolution") or "1080p"
+    )
+    scale_pad = (
+        f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    )
 
     # 1. Render authoritative Master PCM WAV(s)
     is_both = audio_track == "both"
@@ -837,10 +921,11 @@ def render_sentence_mix(
                         "-framerate", fps_str,
                         "-i", str(freeze_img),
                         "-frames:v", str(frame_count),
-                        "-vf", f"fps={fps_str},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+                        "-vf", f"fps={fps_str},{scale_pad},format=yuv420p",
                         "-c:v", "libx264",
                         "-preset", "veryfast",
                         "-crf", "18",
+                        *COLOR_TAGS,
                         "-r", fps_str,
                         "-an",
                         str(slice_mp4),
@@ -861,10 +946,11 @@ def render_sentence_mix(
                     "-ss", f"{start_pts:.6f}",
                     "-i", str(seg.source_video_path),
                     "-frames:v", str(frame_count),
-                    "-vf", f"fps={fps_str},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,tpad=stop_mode=clone:stop=-1",
+                    "-vf", f"fps={fps_str},{scale_pad},tpad=stop_mode=clone:stop=-1,format=yuv420p",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "18",
+                    *COLOR_TAGS,
                     "-r", fps_str,
                     "-an",
                     str(slice_mp4)
@@ -879,11 +965,12 @@ def render_sentence_mix(
                     cmd = [
                         "ffmpeg", "-y",
                         "-f", "lavfi",
-                        "-i", f"color=c=black:s=1920x1080:r={fps_str}",
+                        "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}",
                         "-frames:v", str(frame_count),
                         "-c:v", "libx264",
                         "-preset", "veryfast",
                         "-crf", "18",
+                        *COLOR_TAGS,
                         "-r", fps_str,
                         "-an",
                         str(slice_mp4)

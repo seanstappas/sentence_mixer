@@ -155,6 +155,81 @@ $Out = Join-Path (Get-Location) ('.build\subtitles\labeled\' + [IO.Path]::GetFil
 - Labels are not yet verified against the audio; a transcript can attribute a line the
   film gives to someone else.
 
+## 2B. Implemented on 2026-10-04 (second pass): full-movie ingest and mixing
+
+Both movies are ingested end to end and can be mixed by any labeled speaker, whole
+movie, time range, or scene, rendered in 4K. Work packages:
+
+| Package | Status | Where |
+| --- | --- | --- |
+| M01 large files | Done: FLAC staging (stereo 48 kHz program + 16 kHz center-channel analysis), 10-minute block vocal separation stitched into full-length FLAC stems (resumable), ranged reads everywhere (`LazyAudio` in the renderer, ranged gain reads in `edit_plan`), join features precomputed over speech spans only (parallel, incremental). Not done: `--proxy-video` (not needed: 4K slices cut in about 1 s each), `--isolation-input` (separation uses the stereo program). | [movie_media.py](../src/movie_media.py), [video_assembler.py](../src/video_assembler.py), [features.py](../src/features.py) |
+| M02 embedded subtitles | Done: text-track listing, auto selection (English SDH, then plain, then any text), `--subtitle-stream`, extraction to `.build/subtitles/<hash>/`. Order: `--vtt`, labeled VTT, sidecar, embedded. | [movie_media.py](../src/movie_media.py), [movie_ingest.py](../src/movie_ingest.py) |
+| M03 parsing | Done: parsing primitives moved to [subtitle_parsing.py](../src/subtitle_parsing.py) (the tool imports them); `<v>` tags read as speakers; cue padding (0.15 s before, 0.25 s after, never into the neighboring cue); skipped/zero-duration/sound-only/non-English counts reported. Not done: SDH-vs-plain OCR typo check (step 8). | [movie_subtitles.py](../src/movie_subtitles.py) |
+| M05 integration | Done: scenes exported by the tool (`scenes` in the report: 44 for Episode II, 90 for Episode III). The tool stays the offline labeling step. | [label_subtitles.py](../tools/label_subtitles.py) |
+| M06 voice | Done: WavLM-SV embeddings on the center channel per line (>= 1 s); per-speaker trimmed centroids; leave-one-out calibration; labeled lines whose voice matches another character by >= 0.10 are made ineligible; unlabeled lines labeled only above a margin with >= 95% leave-one-out precision. Not done: clustering leftover unknown voices into anonymous groups. | [movie_ingest.py](../src/movie_ingest.py) |
+| M07 label store | Done: `.build/movies/<hash>/speaker_labels.json` (per line: times, label, status, voice scores, text hash; no text), `review-speakers` (plays each line, Enter accepts suggestion), overrides in `config/speaker_labels/<hash>.json`, `speakers` command. Words take the speaker of their subtitle line by word order (exact for dash cues). | [movie_commands.py](../src/movie_commands.py), [inventory_builder.py](../src/inventory_builder.py) |
+| M08 ranges | Done: `--range` on ingest (aligns only overlapping blocks) and mix (out-of-range words made ineligible), block-level alignment cache. | [run_mixer.py](../run_mixer.py) |
+| M09 scenes | Done: `scenes` command, `--scene <number or keyword>`. | [run_mixer.py](../run_mixer.py) |
+| Rendering | Done: `--resolution` (1080p, 1440p, 4k, source, or WxH) (letterboxed, lanczos, 8-bit BT.709 H.264); `--fps auto` (default) uses the sources' frame rate (23.976 for the films). | [video_assembler.py](../src/video_assembler.py) |
+| M10 docs | Done: README "Whole Movies", option tables, SKILL.md, GEMINI.md. | |
+
+Tests: [test_movie_support.py](../tests/test_movie_support.py) (15 tests, invented dialogue).
+Full offline suite after the main changes: 491 passed, 1 skipped, 1 xpassed (known flaky
+dictionary-cache test deselected).
+
+Results:
+
+| | Episode II | Episode III |
+| --- | --- | --- |
+| Blocks aligned (last block is credits) | 14/15 | 14/15 |
+| Alignment time (MFA, one call per block) | 31 min | 25 min |
+| Vocal separation (CPU, 15 blocks) | 44 min | 47 min |
+| Lines: labeled and voice-consistent / unclear | 777 / 78 | 911 / 197 |
+| Lines flagged by voice (excluded) | 21 | 42 |
+| Unlabeled lines labeled by voice | 152 | 17 |
+| Still unlabeled | 194 | 58 |
+| Voice leave-one-out accuracy | 0.86 | 0.73 |
+| Top usable speech | anakin 382 s, obi-wan 314 s, padme 234 s, yoda 177 s, dooku 155 s | palpatine 475 s, anakin 462 s, obi-wan 402 s, yoda 195 s, padme 170 s |
+
+Alignment quality check (ASR on 40 random 4-word windows cut at MFA word times, base.en):
+Episode III word recall 0.79, in line with the existing short clips (0.76 to 0.84).
+Mixing time after ingest: about 15 s per sentence in 4K (it was about 140 s before the
+join-feature precompute).
+
+Test mixes (4K 3840x2160, 23.976 fps, recombined audio; original sentences; unprimed
+whisper-tiny WER from tools/listen_verify.py, in output/movie_tests/):
+
+| Movie | Speaker | Words in the speaker's vocabulary | WER |
+| --- | --- | --- | --- |
+| II | padme | 6/7 | 0.00 |
+| II | dooku | 5/6 | 0.17 |
+| II | anakin | 8/8 | 0.38 |
+| II | yoda | 5/8 | 0.38 |
+| II | obi-wan | 6/8 | 0.75 |
+| III | obi-wan | 5/7 | 0.00 |
+| III | anakin | 8/9 | 0.56 |
+| III | yoda | 4/7 | 0.57 |
+| III | mace-windu | 5/6 | 0.83 |
+| III | palpatine | mixed | 1.17 |
+| II + III | obi-wan (both films pooled) | 9/10 | 0.10 |
+
+High WER mostly comes from words assembled from single phones and from the selector
+picking very short instances (8 words in 1.4 s); it is not movie-specific (alignment
+accuracy matches the short clips). Improving selection for long inventories (prefer
+natural-duration instances, phrase-level prosody) is the next quality step.
+
+Known limitations and next steps:
+
+- Voice checks are moderately reliable on 1-3 s film lines (leave-one-out 0.73 to 0.86);
+  flags are conservative (a wrong voice in a mix is worse than a skipped line). Review
+  with `run_mixer.py review-speakers <movie> --only flagged`.
+- Mix quality depends on the sentence: lines built mostly from words the character says
+  sound natural; words built from single phones are often misheard (see the realism
+  guideline).
+- Remaining items: OCR typo check (M03 step 8), anonymous grouping of unknown voices
+  (M06), proxy video and isolation-input options (M01), center-vs-stereo separation
+  comparison.
+
 ## 3. Design overview
 
 ```text

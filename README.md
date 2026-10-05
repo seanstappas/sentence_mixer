@@ -184,6 +184,44 @@ python run_mixer.py ingest --folder "vids/" --watch --poll-interval 5.0
 
 ---
 
+## Whole Movies (Long Sources)
+
+Sources longer than 20 minutes or with surround audio (for example 2-hour 4K Blu-ray MKVs) use a dedicated, memory-safe pipeline (`src/movie_media.py`, `src/movie_ingest.py`). Nothing is decoded whole into memory, and every stage is cached and resumable.
+
+```powershell
+# 1. (Optional, recommended) Label speakers from the movie's own subtitles plus local
+#    transcripts/screenplays. Writes a git-ignored labeled VTT the ingest picks up automatically.
+python tools\label_subtitles.py --video "input\movie.mkv" --transcript input\ep3_transcript.txt `
+  --screenplay .build\scripts\ep3_imsdb.html --output ".build\subtitles\labeled\<movie file stem>.en.vtt"
+
+# 2. Ingest the whole movie (or only part of it with --range / --scene)
+python run_mixer.py ingest "input\movie.mkv"
+python run_mixer.py ingest "input\movie.mkv" --range 01:30:00-01:35:00
+
+# 3. Inspect speakers and scenes; review uncertain lines (plays each line, saves labels)
+python run_mixer.py speakers
+python run_mixer.py scenes "input\movie.mkv"
+python run_mixer.py review-speakers "input\movie.mkv" --only flagged
+
+# 4. Mix, optionally restricted to a scene or time range, rendered in 4K
+python run_mixer.py mix "input\movie.mkv" --speaker obi-wan --text "Your sentence" --resolution 4k
+python run_mixer.py mix --all-sources --speaker anakin --scene 42 --text "Your sentence" --resolution 4k
+```
+
+How it works:
+1. **Audio staged once as FLAC** under `.build/movies/<media hash>/audio/`: a stereo 48 kHz program downmix (raw track and separation input) and a 16 kHz analysis track taken from the **center channel** of 5.1 mixes (where film dialogue lives).
+2. **Vocal separation in 10-minute blocks** (with 5 s context, trimmed), stitched into full-length `vocals.flac` / `instrumental.flac` for the default `recombined` track. Resumable block by block.
+3. **Subtitles**: a labeled VTT from `tools/label_subtitles.py` if present, else a sidecar file, else the embedded text track (English SDH preferred; `--subtitle-stream auto|sdh|plain|<index>`). Image (PGS) tracks are not supported. Each cue is one MFA chunk (padded slightly, never into the neighboring cue).
+4. **Alignment per 10-minute block**, cached by a key over that block's chunks, dictionary and model. `--range` aligns only overlapping blocks; later ingests reuse them.
+5. **Speakers**: words take the speaker of the subtitle line they came from, matched by word order (exact for two-speaker dialogue-dash cues). `Name:` labels resolve through `config/characters/*.json` (aliases, OCR typos).
+6. **Voice checks** (`--voice-checks`, default on): WavLM-SV embeddings verify labeled lines (a line whose voice clearly matches another character is made ineligible) and label unlabeled lines only above a margin calibrated to 95% leave-one-out precision on the labeled lines.
+7. **Review**: `review-speakers` saves answers to `config/speaker_labels/<media hash>.json` (times, IDs and text hashes only, no subtitle text); they apply on the next ingest or mix without re-aligning.
+8. **Mixing**: `--range` / `--scene` restrict candidate words to that part of the movie. The timeline frame rate defaults to the source's (`--fps auto`, 23.976 for films), and `--resolution 4k` renders 3840x2160 (letterboxed scope picture), 8-bit BT.709 H.264.
+
+Copyright note: labeled VTTs, reports, screenplays, and the alignment corpus contain subtitle or script text and stay in git-ignored folders. Tracked files store only times, IDs, scores and text hashes.
+
+---
+
 ## Unit Selection Architecture: Variable-Span (`span`, Default) vs Legacy
 
 The sentence mixing toolkit defaults to **Variable-Span Unit Selection (`--selector span`)**, a global Viterbi optimization algorithm that dramatically outperforms greedy word-matching.
@@ -267,7 +305,13 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | `--burn-subtitles` | Hardcode subtitles directly into rendered video frames | `False` |
 | `--subtitle-style classic\|modern`| Subtitle styling (`classic` YTP yellow, `modern` clean white) | `classic` |
 | `--subtitle-mode phrase\|word` | Subtitle timing mode (`phrase` clauses, `word` highlights) | `phrase` |
-| `--fps <rate>` | Rational timeline framerate (e.g. `30000/1001`, `24`, `29.97`) | `30000/1001` |
+| `--fps <rate>` | Timeline framerate: `auto` (the sources' own rate) or e.g. `30000/1001`, `24` | `auto` |
+| `--resolution <size>` | Output video size: `1080p`, `1440p`, `4k` (3840x2160), `source`, or `WxH` (letterboxed) | `1080p` |
+| `--range <START-END>` | Movies: only use words inside this time range (repeatable), e.g. `01:30:00-01:35:00` | `None` |
+| `--scene <n\|keyword>` | Movies: only use words inside a scene (see `scenes` command) | `None` |
+| `--subtitle-stream <s>` | Movies: embedded subtitle track (`auto`, `sdh`, `plain`, or stream index) | labeled VTT, else `auto` |
+| `--characters <path>` | Movies: character alias list for subtitle speaker labels | `config/characters/star_wars.json` |
+| `--voice-checks` | Movies: verify labels by voice and label unlabeled lines when confident | Enabled (`True`) |
 | `--guide <audio>` | Human prosody guide audio (analysis only) | `None` |
 | `--guide-transcript <path>` | Transcript matching prosody guide target words | `None` |
 | `--target-audio <path>` | Reference audio recording for target pronunciation recognition | `None` |
@@ -291,16 +335,23 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | `--diarize auto\|off\|force` | Diarization mode | `auto` |
 | `--interactive-clusters` | Interactively review and assign unrecognized speaker clusters | `False` |
 | `--asr-fill-tails` | Opt-in Whisper tail enrichment of subtitle text before alignment (unverified words) | `False` |
+| `--range`, `--scene`, `--subtitle-stream`, `--characters`, `--voice-checks` | Movie options (see `mix`); `--range` aligns only overlapping 10-minute blocks | |
 
----
+### Movie commands
 
-## Directory Structure
+| Command | Description |
+| --- | --- |
+| `run_mixer.py speakers [movie...]` | Speakers and usable seconds per ingested movie, label and voice-check counts |
+| `run_mixer.py scenes <movie>` | Scene numbers, times and headings (from a screenplay given to `tools/label_subtitles.py`) |
+| `run_mixer.py review-speakers <movie> [--only flagged\|unlabeled\|voice\|all] [--range ...] [--limit N]` | Play and label uncertain lines; saves to `config/speaker_labels/` |
 
 ```text
 sentence_mixer/
 ├── bin/
 │   └── micromamba.exe              # Self-contained package manager for MFA / Kaldi
 ├── config/
+│   ├── characters/star_wars.json   # Character IDs, aliases, roles for subtitle speaker labels
+│   ├── speaker_labels/             # Reviewed movie line labels (times, IDs, text hashes only)
 │   └── speaker_registry.json       # Enrolled speaker acoustic profiles
 ├── dictionaries/
 │   ├── custom_pronunciations.txt   # User-defined proper nouns & custom phonetic spellings
@@ -315,15 +366,21 @@ sentence_mixer/
 │   ├── inventory_builder.py        # TextGrid parser and unit indexer
 │   ├── lexicon.py                  # ARPAbet lexicon, compound handling, and validation
 │   ├── loudness.py                 # EBU R128 loudness normalization
+│   ├── movie_commands.py           # speakers / scenes / review-speakers commands
+│   ├── movie_ingest.py             # Whole-movie block alignment, speaker labels, voice checks
+│   ├── movie_media.py              # FLAC staging, block vocal separation, embedded subtitles
+│   ├── movie_subtitles.py          # Labeled/plain subtitle cues with per-line speakers
 │   ├── oov_assistant.py            # Out-of-vocabulary pronunciation resolution
 │   ├── prosody.py                  # Prosody extraction and F0 contour matching
 │   ├── span_selector.py            # Variable-span Viterbi DP unit selection engine
+│   ├── subtitle_parsing.py         # Shared SRT/VTT cue parsing and character name resolution
 │   ├── unit_selector.py            # Legacy word-first matcher with phone fallback
 │   ├── video_assembler.py          # Frame-accurate FFmpeg cuts & audio recombination
 │   ├── vocal_isolation.py          # Demucs / UVR vocal separation
 │   └── vtt_preprocessor.py         # Subtitle parsing & optional Whisper tail enrichment
 ├── tools/
 │   ├── evaluate.py                 # Automated multi-stratum test evaluation harness
+│   ├── label_subtitles.py          # Speaker-labeled movie subtitles from transcripts/screenplays
 │   ├── listen_verify.py            # Unprimed ASR listening verification gate
 │   └── validate_mix.py             # Timing, sample count, and manifest validator
 ├── README.md                       # Comprehensive documentation & setup guide

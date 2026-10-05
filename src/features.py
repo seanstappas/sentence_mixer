@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import soundfile as sf
@@ -16,11 +16,129 @@ import librosa
 
 from contracts import FeatureRecord
 
+SPAN_FEATURES_VERSION = 1
+
+
+def span_features_path(analysis_path: Union[str, Path]) -> Path:
+    p = Path(analysis_path)
+    return p.with_name(p.stem + ".span_features.npz")
+
+
+def _span_features_worker(job: Tuple[str, float, float, int, int, int, float, float]) -> Tuple[float, float, int, Dict[str, np.ndarray]]:
+    """Computes rms/centroid/mfcc/pYIN tracks for one span (top-level for process pools)."""
+    path, start, end, sr, hop, frame_length, fmin, fmax = job
+    file_sr = sf.info(path).samplerate
+    first_frame = int(math.floor(start * sr / hop))
+    a = int(round(first_frame * hop * file_sr / sr))
+    b = int(round(end * file_sr))
+    y, ysr = sf.read(path, start=a, stop=b, dtype="float32")
+    if y.ndim > 1:
+        y = np.mean(y, axis=1)
+    if ysr != sr:
+        y = librosa.resample(y, orig_sr=ysr, target_sr=sr)
+    if len(y) < frame_length:
+        y = np.pad(y, (0, frame_length - len(y)))
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop)[0]
+    cen = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=frame_length, hop_length=hop)[0]
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, n_fft=frame_length, hop_length=hop)
+    f0, vf, vp = librosa.pyin(y, fmin=fmin, fmax=fmax, sr=sr, frame_length=frame_length, hop_length=hop, fill_na=None)
+    n = min(len(rms), len(cen), mfcc.shape[1], len(f0))
+    return start, end, first_frame, {
+        "rms": rms[:n], "centroid": cen[:n], "mfcc": mfcc[:, :n], "f0": f0[:n], "voiced_flag": vf[:n], "voiced_probs": vp[:n],
+    }
+
+
+def precompute_span_features(
+    analysis_path: Union[str, Path],
+    spans: List[Tuple[float, float]],
+    sr: int = 16000,
+    hop_length: int = 160,
+    frame_length: int = 512,
+    fmin: float = 80.0,
+    fmax: float = 500.0,
+    workers: Optional[int] = None,
+    log: Any = print,
+) -> Path:
+    """
+    Precomputes continuous feature tracks over speech spans of a long analysis file and
+    stores them as full-length frame arrays (frames outside spans: rms 0, f0 NaN,
+    unvoiced). Incremental: spans already computed are skipped.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    p = Path(analysis_path).resolve()
+    out = span_features_path(p)
+    duration = sf.info(str(p)).duration
+    n_total = int(math.ceil(duration * sr / hop_length)) + 1
+
+    arrays: Dict[str, np.ndarray]
+    done: set = set()
+    if out.exists():
+        data = np.load(str(out))
+        if int(data.get("version", 0)) == SPAN_FEATURES_VERSION and int(data["n_frames"]) == n_total:
+            arrays = {k: data[k].copy() for k in ("rms", "centroid", "mfcc", "f0", "voiced_flag", "voiced_probs")}
+            done = {(round(float(a), 3), round(float(b), 3)) for a, b in data["spans_done"]}
+        else:
+            arrays = {}
+    else:
+        arrays = {}
+    if not arrays:
+        arrays = {
+            "rms": np.zeros(n_total, dtype=np.float32),
+            "centroid": np.zeros(n_total, dtype=np.float32),
+            "mfcc": np.zeros((13, n_total), dtype=np.float32),
+            "f0": np.full(n_total, np.nan, dtype=np.float32),
+            "voiced_flag": np.zeros(n_total, dtype=bool),
+            "voiced_probs": np.zeros(n_total, dtype=np.float32),
+        }
+    todo = sorted({(round(a, 3), round(b, 3)) for a, b in spans if b > a} - done)
+    if not todo:
+        return out
+
+    workers = workers or max(1, min(12, (os.cpu_count() or 4) // 2))
+    log(f"[*] Precomputing join features for {len(todo)} speech spans ({sum(b - a for a, b in todo) / 60:.0f} min of audio, {workers} workers)")
+    jobs = [(str(p), a, b, sr, hop_length, frame_length, fmin, fmax) for a, b in todo]
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for n, (a, b, f0_frame, tr) in enumerate(pool.map(_span_features_worker, jobs, chunksize=4), 1):
+            m = min(len(tr["rms"]), n_total - f0_frame)
+            if m <= 0:
+                continue
+            sl = slice(f0_frame, f0_frame + m)
+            arrays["rms"][sl] = tr["rms"][:m]
+            arrays["centroid"][sl] = tr["centroid"][:m]
+            arrays["mfcc"][:, sl] = tr["mfcc"][:, :m]
+            arrays["f0"][sl] = tr["f0"][:m]
+            arrays["voiced_flag"][sl] = tr["voiced_flag"][:m]
+            arrays["voiced_probs"][sl] = tr["voiced_probs"][:m]
+            done.add((a, b))
+            if n % 200 == 0:
+                log(f"    {n}/{len(todo)} spans")
+    tmp = out.with_name(out.stem + ".partial.npz")
+    np.savez(
+        str(tmp),
+        version=SPAN_FEATURES_VERSION,
+        sr=sr,
+        hop_length=hop_length,
+        frame_length=frame_length,
+        n_frames=n_total,
+        times=(np.arange(n_total) * hop_length / sr).astype(np.float32),
+        spans_done=np.array(sorted(done), dtype=np.float64).reshape(-1, 2),
+        **arrays,  # type: ignore[arg-type]
+    )
+    os.replace(tmp, out)
+    return out
+
 
 class ContinuousFeatureExtractor:
     """
     Extracts continuous acoustic features across an entire analysis WAV file in one pass.
+    Files longer than LAZY_THRESHOLD_SEC are handled lazily per window.
     """
+
+    LAZY_THRESHOLD_SEC = 1200.0
+    LAZY_CONTEXT_SEC = 0.10
+
     def __init__(
         self,
         sr: int = 16000,
@@ -39,6 +157,24 @@ class ContinuousFeatureExtractor:
         p = Path(audio_path).resolve()
         if not p.exists():
             raise FileNotFoundError(f"Audio file not found: {p}")
+
+        # Long sources (whole movies): never decode or pYIN the whole file. Use tracks
+        # precomputed over speech spans at ingest (precompute_span_features) when present,
+        # else compute features per requested window (see get_window_features).
+        try:
+            info = sf.info(str(p))
+            if info.duration > self.LAZY_THRESHOLD_SEC:
+                span_cache = span_features_path(p)
+                if span_cache.exists():
+                    try:
+                        data = np.load(str(span_cache))
+                        if int(data["hop_length"]) == self.hop_length and int(data["sr"]) == self.sr:
+                            return {k: (data[k] if data[k].ndim else data[k].item()) for k in data.files if k != "spans_done"}
+                    except Exception:
+                        pass
+                return {"lazy": True, "path": str(p), "file_sr": int(info.samplerate), "n_frames": 0}
+        except Exception:
+            pass
 
         cache_path = p.with_suffix(".features.npz")
         if cache_path.exists():
@@ -141,6 +277,44 @@ class ContinuousFeatureExtractor:
         sec = float(sample_idx) / float(native_sr)
         return int(round(sec * self.sr / self.hop_length))
 
+    def _window_tracks(self, lazy: Dict[str, Any], start_sample: int, end_sample: int, native_sr: int) -> Dict[str, Any]:
+        """Computes feature tracks for a short window of a long file (memoized)."""
+        if not hasattr(self, "_lazy_cache"):
+            self._lazy_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
+        file_sr = int(lazy["file_sr"])
+        s_sec = start_sample / float(native_sr)
+        e_sec = max(end_sample / float(native_sr), s_sec + 0.01)
+        ctx = self.LAZY_CONTEXT_SEC
+        a = max(0, int((s_sec - ctx) * file_sr))
+        b = int((e_sec + ctx) * file_sr)
+        key = (lazy["path"], a, b)
+        if key not in self._lazy_cache:
+            y, sr = sf.read(lazy["path"], start=a, stop=b, dtype="float32")
+            if y.ndim > 1:
+                y = np.mean(y, axis=1)
+            if sr != self.sr:
+                y = librosa.resample(y, orig_sr=sr, target_sr=self.sr)
+            if len(y) < self.frame_length:
+                y = np.pad(y, (0, self.frame_length - len(y)))
+            rms = librosa.feature.rms(y=y, frame_length=self.frame_length, hop_length=self.hop_length)[0]
+            centroid = librosa.feature.spectral_centroid(y=y, sr=self.sr, n_fft=self.frame_length, hop_length=self.hop_length)[0]
+            mfcc = librosa.feature.mfcc(y=y, sr=self.sr, n_mfcc=13, n_fft=self.frame_length, hop_length=self.hop_length)
+            f0, vf, vp = librosa.pyin(
+                y, fmin=self.fmin, fmax=self.fmax, sr=self.sr,
+                frame_length=self.frame_length, hop_length=self.hop_length, fill_na=None,
+            )
+            n = min(len(rms), len(centroid), mfcc.shape[1], len(f0))
+            self._lazy_cache[key] = {
+                "n_frames": n, "rms": rms[:n], "centroid": centroid[:n], "mfcc": mfcc[:, :n],
+                "f0": f0[:n], "voiced_flag": vf[:n], "voiced_probs": vp[:n],
+                "origin_16k": int(round(a * self.sr / file_sr)),
+            }
+        tr = dict(self._lazy_cache[key])
+        origin = tr["origin_16k"]
+        tr["win_start"] = int(round(s_sec * self.sr)) - origin
+        tr["win_end"] = int(round(e_sec * self.sr)) - origin
+        return tr
+
     def get_window_features(
         self,
         tracks: Dict[str, Any],
@@ -150,6 +324,10 @@ class ContinuousFeatureExtractor:
         source_content_id: str = "",
     ) -> FeatureRecord:
         """Extracts aggregated features and entry/exit descriptors for an interval."""
+        orig_start, orig_end, orig_sr = start_sample, end_sample, native_sr
+        if tracks.get("lazy"):
+            tracks = self._window_tracks(tracks, start_sample, end_sample, native_sr)
+            start_sample, end_sample, native_sr = tracks["win_start"], tracks["win_end"], self.sr
         start_frame = max(0, self.sample_to_frame_index(start_sample, native_sr))
         end_frame = min(tracks["n_frames"], self.sample_to_frame_index(end_sample, native_sr))
 
@@ -186,9 +364,9 @@ class ContinuousFeatureExtractor:
 
         rec = FeatureRecord(
             source_content_id=source_content_id,
-            sample_rate=native_sr,
-            start_sample=start_sample,
-            end_sample=end_sample,
+            sample_rate=orig_sr,
+            start_sample=orig_start,
+            end_sample=orig_end,
             rms_energy=avg_rms,
             f0_hz=avg_f0,
             f0_confidence=confidence,
