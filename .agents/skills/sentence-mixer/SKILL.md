@@ -2,8 +2,9 @@
 name: sentence-mixer
 description: >-
   Operational cheatsheet and runbook for the MFA sentence mixing engine.
-  Use when running sentence mixes, ingesting video corpora, setting up continuous watch mode,
-  debugging unit selection errors, or adding custom phonetic pronunciations.
+  Use when running sentence mixes, ingesting video corpora or whole movies, labeling movie
+  subtitle speakers, setting up continuous watch mode, cleaning caches, debugging unit
+  selection errors, or adding custom phonetic pronunciations.
 ---
 
 # Sentence Mixer Operational Guide
@@ -38,8 +39,13 @@ description: >-
 
 ### 3. Whole Movies (long MKV sources)
 ```powershell
-# Ingest a whole movie (cached per 10-minute block; resumable). Labeled VTTs from
-# tools\label_subtitles.py in .build\subtitles\labeled\ are picked up automatically.
+# (Recommended, once per movie) Speaker-label the movie's own subtitles from local
+# transcripts/screenplays. Ingest picks the result up automatically from this path.
+.venv\Scripts\python.exe tools\label_subtitles.py --video "input\movie.mkv" `
+  --transcript input\movie_transcript.txt --screenplay .build\scripts\movie_screenplay.html `
+  --output ".build\subtitles\labeled\<movie file stem>.en.vtt"
+
+# Ingest a whole movie (cached per 10-minute block; resumable)
 .venv\Scripts\python.exe run_mixer.py ingest "input\movie.mkv"
 # Only part of a movie
 .venv\Scripts\python.exe run_mixer.py ingest "input\movie.mkv" --range 01:30:00-01:35:00
@@ -53,15 +59,24 @@ description: >-
 .venv\Scripts\python.exe run_mixer.py mix --all-sources --speaker obi-wan `
   --text "Your sentence" --resolution 4k --scene 12 --render "output\obiwan.mp4"
 ```
-Speaker IDs come from `config/characters/star_wars.json` (e.g. `anakin`, `obi-wan`, `padme`, `palpatine`; `sidious` and `vader` are separate voices).
+- Speaker IDs come from `config/characters/star_wars.json` (e.g. `anakin`, `obi-wan`, `padme`, `palpatine`; `sidious` and `vader` are separate voices). The labeling tool prints unrecognized names: add them as aliases there and rerun it (about 2 s).
+- Relabeling (rerunning the tool, or `review-speakers` answers) rebuilds labels and the inventory on the next ingest/mix but reuses the MFA alignment.
+- Never print or commit labeled VTT/report/transcript/screenplay text; they are copyrighted and git-ignored.
 
-### 4. Adding Proper Nouns & Custom Pronunciations
+### 4. Cleaning Caches
+```powershell
+.venv\Scripts\python.exe run_mixer.py clean "input\movie.mkv" --dry-run   # always dry-run first
+.venv\Scripts\python.exe run_mixer.py clean "input\movie.mkv" --keep-speakers
+```
+`clean` matches only the exact source (by file, stem, or source ID) and removes its alignment, inventory, vocals, and movie caches (`.build/movies/<hash>/`, about 2 GB per movie; re-ingest takes about 1.5 h). It keeps labeled VTTs and reviewed labels.
+
+### 5. Adding Proper Nouns & Custom Pronunciations
 Add custom phonetic pronunciations to `dictionaries/custom_pronunciations.txt`:
 ```text
 windu	W IH1 N D UW0
 yoda	Y OW1 D AH0
 ```
-Then invalidate affected alignment with `--force-realign`.
+The staged dictionary is rebuilt from file content, so affected sources re-align automatically on the next ingest or mix (no `--force-realign` needed). For movies this re-aligns every block (about 30 min per movie).
 
 ## Troubleshooting Common Issues
 - **`ValueError: Could not find a continuous phonetic path`**:

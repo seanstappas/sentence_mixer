@@ -382,6 +382,48 @@ def separated_ranges(stems_meta: Dict[str, Any]) -> List[Tuple[float, float]]:
     return [tuple(b) for i, b in enumerate(blocks) if i in done]  # type: ignore[misc]
 
 
+def read_stems_meta(audio: MovieAudio) -> Dict[str, Any]:
+    p = audio.root / "stems" / "stems_meta.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def ensure_vocal_analysis(audio: MovieAudio, log: Callable[[str], None] = print) -> Optional[Path]:
+    """
+    16 kHz mono analysis track from the separated vocal stem (silence in blocks not yet
+    separated). All dialogue analysis (alignment, voice checks, join features) uses it for
+    separated blocks. Rebuilt whenever the set of separated blocks changes.
+    """
+    meta = read_stems_meta(audio)
+    vocals = audio.root / "stems" / "vocals.flac"
+    done = meta.get("blocks_done") or []
+    if not done or not vocals.exists():
+        return None
+    out = audio.root / "audio" / "analysis_vocals_16k.flac"
+    marker = out.with_name(out.name + ".json")
+    want = {"blocks_done": done, "stems_version": meta.get("version"), "model": meta.get("model")}
+    if out.exists() and marker.exists():
+        try:
+            if json.loads(marker.read_text(encoding="utf-8")) == want:
+                return out
+        except Exception:
+            pass
+    log(f"[*] Building 16 kHz analysis track from separated vocals ({len(done)} blocks)")
+    if out.exists():
+        out.unlink()
+    _atomic_ffmpeg([
+        "ffmpeg", "-y", "-v", "error", "-i", str(vocals), "-ac", "1", "-ar", "16000",
+        "-sample_fmt", "s16", "-c:a", "flac",
+    ], out)
+    if out.exists():
+        marker.write_text(json.dumps(want), encoding="utf-8")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Embedded subtitles (M02)
 # ---------------------------------------------------------------------------

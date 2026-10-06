@@ -12,12 +12,17 @@
    - `src/inventory_builder.py`: Extracts word and phone intervals into `units_index.json`.
 3. **Unit Selection & Edit Planning**:
    - `src/span_selector.py`: Dynamic programming Viterbi search finds optimal candidate sequence (phrase -> word -> phone).
-   - `src/edit_plan.py`: Maps selected candidates to 48kHz project audio sample timeline and 29.97fps rational video frames.
+   - `src/edit_plan.py`: Maps selected candidates to 48kHz project audio sample timeline and rational video frames (the sources' own frame rate by default, `--fps auto`).
 4. **Assembly, Post-Processing & Loudness Normalization**:
-   - `src/video_assembler.py`: Slices PCM audio, applies crossfade ramps, performs segment leveling and two-pass EBU R128 master loudness normalization (-16 LUFS, -1.0 dBTP), extracts CFR video slices, and muxes final MP4/WAV.
+   - `src/video_assembler.py`: Slices PCM audio (ranged reads via `LazyAudio`, never whole-file decodes), applies crossfade ramps, performs segment leveling and two-pass EBU R128 master loudness normalization (-16 LUFS, -1.0 dBTP), extracts CFR video slices at `--resolution` (1080p default, up to 4K, letterboxed, BT.709), and muxes final MP4/WAV.
 5. **Acceptance Verification & ASR Gate**:
    - `tools/listen_verify.py`: Independent Whisper/faster-whisper transcription, DP Levenshtein WER/CER, insertion-based bleed detection.
    - `tools/validate_mix.py` and `tools/evaluate.py`: Container, sample count, loudness compliance, and ASR acceptance gates.
+6. **Whole-Movie Sources** (longer than 20 min or surround audio; see `plans/10_04_movie_support_plan.md`):
+   - `tools/label_subtitles.py` (offline, before ingest): aligns the movie's own subtitles to local transcripts/screenplays and writes a speaker-labeled WebVTT (`<v speaker>`) plus a report with scene time ranges. Parsing shared via `src/subtitle_parsing.py`; character aliases in `config/characters/*.json`.
+   - `src/movie_media.py`: one-time FLAC staging (stereo program; 16 kHz center channel as fallback), 10-minute block vocal separation stitched into full-length stems plus a 16 kHz separated-dialogue analysis track (dialogue is isolated before any analysis), embedded text-subtitle selection/extraction.
+   - `src/movie_subtitles.py` + `src/movie_ingest.py`: per-line speakers from `<v>` tags or `Name:` labels, per-block cached MFA alignment, word-to-line speaker assignment by token order, WavLM-SV voice checks (exclude mismatches, propagate confident labels), user overrides from `config/speaker_labels/`, precomputed join features over speech spans.
+   - `src/movie_commands.py`: `speakers`, `scenes`, `review-speakers` CLI commands; `run_mixer.py` adds `--range`/`--scene` filtering, `--resolution`, and `--fps auto`.
 
 ---
 

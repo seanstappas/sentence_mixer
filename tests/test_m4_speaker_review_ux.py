@@ -432,11 +432,6 @@ class TestDialogueSnippetExtraction:
 
         registry = SpeakerRegistry(config_path=tmp_path / "reg.json")
         diarizer = SpeakerDiarizer(registry=registry)
-        # Return distinct embeddings for the two turns so they end up in separate clusters
-        emb_map = {
-            (0.0, 1.9): np.array([1.0, 0.0], dtype=np.float32),
-            (2.1, 4.5): np.array([0.0, 1.0], dtype=np.float32),
-        }
         diarizer.extract_embedding = lambda a, sample_rate=16000: np.array([0.5, 0.5], dtype=np.float32)  # type: ignore[method-assign]
 
         # Use non-interactive diarize to inspect the assigned intervals

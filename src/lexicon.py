@@ -6,11 +6,13 @@ text normalization, and G2P fallback.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Ensure NLTK data path does not touch locked BitLocker drives
 DEFAULT_NLTK_DIR = Path(__file__).resolve().parent.parent / ".build" / "nltk"
@@ -24,7 +26,8 @@ except ImportError:
     pass
 
 _G2P_INSTANCE = None
-_STAGED_DICT_CACHE: Dict[Tuple[str, str, str], Tuple[int, int, str]] = {}
+_STAGED_DICT_CACHE: Dict[Tuple[str, str, str], Tuple[Any, str, str]] = {}
+STAGING_FORMAT_VERSION = 2
 
 
 def get_g2p():
@@ -46,7 +49,7 @@ def normalize_text_to_words(text: str) -> List[Tuple[str, str]]:
     Preserves hyphens in known compounds (e.g. OBI-WAN) and apostrophes in contractions.
     """
     # Replace curly quotes and typographic apostrophes
-    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    text = text.replace("â€™", "'").replace("â€˜", "'").replace("â€œ", '"').replace("â€", '"')
 
     # Tokenize preserving hyphenated words and words with apostrophes
     tokens = re.findall(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[.,!?;:]", text)
@@ -441,29 +444,39 @@ def stage_mfa_dictionary(
             f"Neither base dictionary ({b_path}) nor custom dictionary ({c_path}) found."
         )
 
-    b_mtime_ns = b_path.stat().st_mtime_ns if b_path.exists() else 0
-    c_mtime_ns = c_path.stat().st_mtime_ns if c_path.exists() else 0
-    cache_key = (str(b_path), str(c_path), str(out_p))
+    def _file_sha(path: Path) -> str:
+        if not path.exists():
+            return ""
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                h.update(chunk)
+        return h.hexdigest()
 
-    # Fast in-memory check
+    # Reuse is decided by input content, not timestamps: an edit made within the same
+    # filesystem timestamp tick as the last staging must still invalidate the result.
+    b_stat = (b_path.stat().st_mtime_ns, b_path.stat().st_size) if b_path.exists() else (0, 0)
+    c_sha = _file_sha(c_path)
+    cache_key = (str(b_path), str(c_path), str(out_p))
+    fast_key = (b_stat, c_sha)
+
+    # Fast in-memory check (base dictionary by size+mtime, custom file by content)
     if cache_key in _STAGED_DICT_CACHE:
-        cached_b, cached_c, cached_hash = _STAGED_DICT_CACHE[cache_key]
-        if cached_b == b_mtime_ns and cached_c == c_mtime_ns and out_p.exists() and out_p.stat().st_size > 0:
+        cached_fast, cached_fp, cached_hash = _STAGED_DICT_CACHE[cache_key]
+        if cached_fast == fast_key and out_p.exists() and out_p.stat().st_size > 0:
             return out_p, cached_hash
 
-    # Check if existing staged file is newer than both inputs
-    if out_p.exists() and out_p.stat().st_size > 0:
+    inputs_fp = hashlib.sha256(f"{_file_sha(b_path)}|{c_sha}|{STAGING_FORMAT_VERSION}".encode("utf-8")).hexdigest()
+    meta_p = out_p.with_name(out_p.name + ".inputs.json")
+
+    # Reuse the staged file on disk if it was built from identical inputs
+    if out_p.exists() and out_p.stat().st_size > 0 and meta_p.exists():
         try:
-            out_mtime_ns = out_p.stat().st_mtime_ns
-            if out_mtime_ns >= max(b_mtime_ns, c_mtime_ns):
-                h = hashlib.sha256()
-                with open(out_p, "rb") as f:
-                    while chunk := f.read(65536):
-                        h.update(chunk)
-                content_hash = h.hexdigest()
-                _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
-                return out_p, content_hash
-        except OSError:
+            meta = json.loads(meta_p.read_text(encoding="utf-8"))
+            if meta.get("inputs") == inputs_fp and meta.get("content_hash"):
+                _STAGED_DICT_CACHE[cache_key] = (fast_key, inputs_fp, meta["content_hash"])
+                return out_p, meta["content_hash"]
+        except (OSError, ValueError):
             pass
 
     out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -513,23 +526,28 @@ def stage_mfa_dictionary(
     lock_path = out_p.with_suffix(".lock")
     from filelock import FileLock
     with FileLock(str(lock_path), timeout=30):
-        if (
-            out_p.exists()
-            and out_p.stat().st_size > 0
-            and out_p.stat().st_mtime_ns >= max(b_mtime_ns, c_mtime_ns)
+        for target, data in (
+            (out_p, content_bytes),
+            (meta_p, json.dumps({"inputs": inputs_fp, "content_hash": content_hash}).encode("utf-8")),
         ):
-            _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
-            return out_p, content_hash
-        tmp_path = out_p.parent / f"{out_p.name}.tmp_{os.getpid()}_{uuid.uuid4().hex}"
-        try:
-            tmp_path.write_bytes(content_bytes)
-            tmp_path.replace(out_p)
-        finally:
-            if tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass
+            tmp_path = target.parent / f"{target.name}.tmp_{os.getpid()}_{uuid.uuid4().hex}"
+            try:
+                tmp_path.write_bytes(data)
+                # Windows refuses to replace a file another thread/process is reading; retry briefly
+                for attempt in range(20):
+                    try:
+                        tmp_path.replace(target)
+                        break
+                    except PermissionError:
+                        if attempt == 19:
+                            raise
+                        time.sleep(0.05)
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
 
-    _STAGED_DICT_CACHE[cache_key] = (b_mtime_ns, c_mtime_ns, content_hash)
+    _STAGED_DICT_CACHE[cache_key] = (fast_key, inputs_fp, content_hash)
     return out_p, content_hash

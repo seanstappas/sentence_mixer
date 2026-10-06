@@ -304,7 +304,10 @@ def clean_source_cache(
       - .build/audio_extracts/<clean_stem>*.wav
       - .build/clusters/*<clean_stem>* / *<source_id>*
       - .build/mfa/temp/*<source_id>*
+      - .build/movies/<media hash 16>/ and .build/subtitles/<media hash 16>/ (whole-movie caches)
       - Removes entry from .build/.media_hash_index.json
+    Keeps user inputs: labeled VTTs in .build/subtitles/labeled/ and reviewed labels in
+    config/speaker_labels/.
     """
     base_dir = Path(cache_dir).resolve() if cache_dir else Path(".build").resolve()
     target_str = str(source_target).strip()
@@ -313,6 +316,7 @@ def clean_source_cache(
     matched_source_ids: Set[str] = set()
     matched_stems: Set[str] = set()
     matched_media_keys: Set[str] = set()
+    matched_hashes: Set[str] = set()
 
     # 1. Direct file check
     if target_p.exists() and target_p.is_file():
@@ -324,6 +328,7 @@ def clean_source_cache(
         matched_stems.add(clean_stem)
         try:
             full_sha = compute_media_hash(abs_p, cache_dir=base_dir)
+            matched_hashes.add(full_sha)
             short_sha = full_sha[:8]
             matched_source_ids.add(f"{clean_stem}_{short_sha}")
             matched_source_ids.add(f"{clean_stem}_{full_sha[:16]}")
@@ -362,13 +367,21 @@ def clean_source_cache(
                 if matches:
                     matched_media_keys.add(k)
                     matched_stems.add(k_stem)
+                    if sha:
+                        matched_hashes.add(sha)
                     if short_sha:
                         matched_source_ids.add(sid)
                         matched_source_ids.add(f"{k_stem}_{sha[:16]}")
         except Exception:
             pass
 
-    # 3. Match against existing subdirectories in cache: sources, alignment, inventory, vocals
+    # 3. Match against existing subdirectories in cache: sources, alignment, inventory, vocals.
+    # A directory belongs to a stem only as "<stem>" or "<stem>_<content hash>"; looser prefix
+    # matching would also delete other sources sharing a prefix (e.g. "Star_Wars_Episode_II"
+    # when cleaning Episode III, or "anakin_ep2_2" when cleaning "anakin_ep2_1").
+    def _owned_by(name: str, stem: str) -> bool:
+        return bool(re.fullmatch(re.escape(stem.lower()) + r"(_[0-9a-f]{8,16})?", name.lower()))
+
     scan_subdirs = ["sources", "alignment", "inventory", "vocals"]
     for s_sub in scan_subdirs:
         sub_path = base_dir / s_sub
@@ -376,15 +389,9 @@ def clean_source_cache(
             for child in sub_path.iterdir():
                 if child.is_dir():
                     c_name = child.name
-                    c_stem = c_name.split("_")[0] if "_" in c_name else c_name
                     for stem in list(matched_stems):
-                        if (
-                            c_name.lower() == stem.lower()
-                            or c_name.lower().startswith(f"{stem.lower()}_")
-                            or c_stem.lower() == stem.lower()
-                        ):
+                        if _owned_by(c_name, stem):
                             matched_source_ids.add(c_name)
-                            matched_stems.add(c_stem)
 
     deleted_dirs: List[Path] = []
     deleted_files: List[Path] = []
@@ -400,13 +407,17 @@ def clean_source_cache(
             should_delete = False
             if child.name in matched_source_ids:
                 should_delete = True
-            elif any(child.name.startswith(f"{sid}_") for sid in matched_source_ids):
-                should_delete = True
-            elif any(child.name.startswith(f"{stem}_") for stem in matched_stems if len(stem) >= 3):
+            elif any(_owned_by(child.name, stem) for stem in matched_stems if len(stem) >= 3):
                 should_delete = True
 
             if should_delete and child not in deleted_dirs:
                 deleted_dirs.append(child)
+
+    # Whole-movie caches keyed by media hash (audio FLACs, stems, features, labels, subtitles)
+    for sha in matched_hashes:
+        for movie_cache in (base_dir / "movies" / sha[:16], base_dir / "subtitles" / sha[:16]):
+            if movie_cache.is_dir() and movie_cache not in deleted_dirs:
+                deleted_dirs.append(movie_cache)
 
     # Audio extracts
     audio_ext_dir = base_dir / "audio_extracts"
@@ -530,20 +541,28 @@ def clean_all_source_caches(
     registry_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
-    Cleans all cached sources, alignments, inventories, vocals, audio extracts,
-    and clusters from cache_dir, while preserving models, staged dictionary, and bootstrap files.
+    Cleans all cached sources, alignments, inventories, vocals, movie caches, extracted
+    subtitle tracks, audio extracts, and clusters from cache_dir, while preserving models,
+    staged dictionary, bootstrap files, and user inputs (labeled VTTs, reviewed labels).
     """
     base_dir = Path(cache_dir).resolve() if cache_dir else Path(".build").resolve()
     deleted_dirs: List[Path] = []
     deleted_files: List[Path] = []
 
-    # Clean subdirectories under sources, alignment, inventory, vocals
-    for s_sub in ["sources", "alignment", "inventory", "vocals"]:
+    # Clean subdirectories under sources, alignment, inventory, vocals, movies
+    for s_sub in ["sources", "alignment", "inventory", "vocals", "movies"]:
         sub_path = base_dir / s_sub
         if sub_path.exists():
             for child in sub_path.iterdir():
                 if child.is_dir() and child not in deleted_dirs:
                     deleted_dirs.append(child)
+
+    # Extracted embedded subtitle tracks (keep labeled VTTs and tool-extracted sources: user inputs)
+    subs_dir = base_dir / "subtitles"
+    if subs_dir.exists():
+        for child in subs_dir.iterdir():
+            if child.is_dir() and child.name not in ("labeled", "source") and child not in deleted_dirs:
+                deleted_dirs.append(child)
 
     # Audio extracts
     audio_ext_dir = base_dir / "audio_extracts"

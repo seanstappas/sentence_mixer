@@ -262,11 +262,6 @@ def test_stage_mfa_dictionary_edge_cases(tmp_path: Path):
     assert lines.count("WINDU\tW IH1 N D UW0") == 1
 
 
-@pytest.mark.xfail(
-    reason="BUG: Windows FileLock race condition — tmp_{pid} collision and out_p open outside lock causes [WinError 5] Access is denied",
-    raises=PermissionError,
-    strict=False,
-)
 def test_stage_mfa_dictionary_concurrency_filelock(tmp_path: Path):
     """
     Stress-tests concurrency: 8 concurrent workers calling stage_mfa_dictionary

@@ -1699,6 +1699,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_review.add_argument("--range", action="append", default=None, metavar="START-END", help="Only lines inside this range")
     p_review.add_argument("--limit", type=int, default=50, help="Maximum lines per session (default 50)")
     p_review.add_argument("--no-play", action="store_true", default=False, help="Do not play audio previews")
+    p_review.add_argument(
+        "--audio",
+        choices=["mix", "center", "vocals"],
+        default="mix",
+        help="What to play: mix (the film's stereo mix, default), center (raw 5.1 center channel), or vocals "
+        "(separated dialogue with music and effects removed; what alignment and voice checks analyze)",
+    )
     p_review.add_argument("--cache-dir", default=None, help="Custom cache root directory (defaults to .build)")
 
     p_clean = subparsers.add_parser(
@@ -2769,6 +2776,7 @@ def main():
                 ranges=args.range,
                 limit=args.limit,
                 play=not args.no_play,
+                audio=args.audio,
             )
         except (FileNotFoundError, ValueError) as err:
             parser.error(str(err))

@@ -11,12 +11,22 @@ Inputs:
 Output:
   - WebVTT with the subtitle's own timing and text, and a standard voice tag
     (<v speaker-id>...</v>) on each line whose speaker could be determined.
-    Unlabeled lines have no tag. Sound-only and non-English lines are omitted.
-  - A JSON report with per-line evidence, confidence, and coverage statistics.
+    Unlabeled lines have no tag. Sound-only, non-English, and zero-duration cues are
+    omitted. Write it to .build/subtitles/labeled/<movie file stem>.en.vtt and
+    `run_mixer.py ingest` picks it up automatically (no --vtt needed).
+  - A JSON report (<output>.report.json) with per-line evidence, confidence, and a text
+    hash (no text), per-speaker totals, unrecognized names, and "scenes": screenplay
+    scene headings mapped to time ranges (used by `run_mixer.py scenes` and --scene).
 
 Labels come from, in priority order: speaker labels inside the subtitles, transcript
 alignment, then screenplay alignment (fallback only). Conflicting evidence leaves a
-line unlabeled. Nothing is guessed from voice; that is a later ingest step.
+line unlabeled, except that a named character beats a generic role. Nothing is guessed
+from voice here; at ingest, voice checks exclude lines whose voice clearly belongs to
+another character and may label unlabeled lines, and `run_mixer.py review-speakers`
+records manual corrections. Relabeling does not require re-alignment.
+
+Shared parsing (cues, dialogue dashes, Name: labels, character resolution) lives in
+src/subtitle_parsing.py and is also used by the ingest pipeline.
 
 Both outputs contain or describe copyrighted subtitle text. Write them only to
 git-ignored locations and never commit them. This tool prints counts and names only.

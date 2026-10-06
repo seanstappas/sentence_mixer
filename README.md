@@ -1,6 +1,6 @@
 # Montreal Forced Aligner (MFA) Sentence Mixing Toolkit
 
-An automated, unit-selection sentence mixing engine for video and audio remixing. Uses Montreal Forced Aligner (MFA) to derive acoustic boundaries for words and phonemes from source video and WebVTT subtitle tracks. Prioritizes whole-word and phrase unit selection with automatic phonetic fallback for missing words.
+An automated, unit-selection sentence mixing engine for video and audio remixing. Uses Montreal Forced Aligner (MFA) to derive acoustic boundaries for words and phonemes from source video and subtitle tracks (WebVTT/SRT sidecars or a movie's embedded text subtitles). Prioritizes whole-word and phrase unit selection with automatic phonetic fallback for missing words. Whole feature-length movies are supported, with per-line speaker labels from subtitles, transcripts and voice checks (see [Whole Movies](#whole-movies-long-sources)).
 
 Outputs synchronized **rendered MP4 video / master WAV audio** (and optional Premiere Pro / Final Cut Pro 7 XML timelines).
 
@@ -14,7 +14,8 @@ Outputs synchronized **rendered MP4 video / master WAV audio** (and optional Pre
 The pipeline selects and edits recorded speech and video so a speaker appears to say target text as naturally as the available recordings allow. No TTS, voice cloning, generated mouth movement, or generative inpainting:
 - **Any video format**: MP4, WebM, MKV, MOV, etc.
 - **Any English speech content**: Talks, lectures, interviews, gaming streams, movies, or commentary.
-- **Any WebVTT subtitles**: Automatically parses standard WebVTT or YouTube auto-generated captions, de-duplicates rolling lines, discards non-speech bracketed markers (`[Music]`, `[Applause]`), and extracts 16kHz mono audio chunks.
+- **Any WebVTT/SRT subtitles**: Automatically parses standard WebVTT, SRT, or YouTube auto-generated captions, de-duplicates rolling lines, discards non-speech bracketed markers (`[Music]`, `[Applause]`), and extracts 16kHz mono audio chunks. Movies can use their embedded text subtitle track (SDH preferred) and speaker-labeled WebVTT (`<v speaker>` tags).
+- **Whole movies**: 2-hour 4K MKVs are processed in cached 10-minute blocks without loading the movie into memory; mixes can be restricted to a time range or named scene and rendered at up to 4K.
 - **Content-Aware Caching**: Three-layer content hashing (audio content bytes, MFA alignment, and speaker-labeled inventory) eliminates redundant computation while ensuring immediate cache invalidation on edits.
 - **Phonetic Fallback for Any Vocabulary**: If a word in your target sentence was never spoken in the source video, the engine automatically breaks the word down into ARPAbet phonemes using CMU/G2P (`g2p_en`) and splices together matching phonetic intervals from the speaker's vocal track.
 
@@ -156,7 +157,7 @@ python run_mixer.py mix \
 
 ## Corpus Ingestion & Continuous Watch Mode (`ingest`)
 
-For processing large video libraries or maintaining a continuous ingest pipeline, use the dedicated `ingest` subcommand. `ingest` performs vocal isolation, diarization, MFA alignment, and inventory indexing without requiring dummy synthesis text.
+For processing large video libraries or maintaining a continuous ingest pipeline, use the dedicated `ingest` subcommand. `ingest` performs vocal isolation, speaker identification, MFA alignment, and inventory indexing without requiring dummy synthesis text. Short clips use diarization (below); whole movies use subtitle speaker labels and voice checks instead (see [Whole Movies](#whole-movies-long-sources)). The same source is never re-aligned unless its media, subtitles, dictionary, or settings change.
 
 ### Batch Ingestion
 ```bash
@@ -178,9 +179,9 @@ python run_mixer.py ingest --folder "vids/" --watch --poll-interval 5.0
 ### Ingestion Pipeline Highlights
 1. **Vocal Stem Isolation (`--isolate-vocals`)**: Uses `audio-separator` (UVR MDX-Net / Demucs) to extract clean speech stems into `.build/vocals/`, removing orchestral scores and background noise before alignment.
 2. **Subtitle Cleaning**: De-duplicates rolling captions and strips non-speech markers. Optional Whisper tail enrichment (`--asr-fill-tails`, off by default) appends words Whisper hears after a cue ends; its output is unverified and can add hallucinated or other speakers' words, so use it only for sources whose captions are known to drop trailing words. The setting is part of the alignment cache key, so turning it on or off re-aligns affected sources automatically.
-3. **Diarization & Speaker Verification**: Identifies speech turns using WavLM speaker verification (`microsoft/wavlm-base-plus-sv`).
+3. **Diarization & Speaker Verification** (short clips): Identifies speech turns using WavLM speaker verification (`microsoft/wavlm-base-plus-sv`). Skipped for sources asserted single-speaker (`--assume-single-speaker`, manifest `speaker_intervals`) and for whole movies, whose labels come from subtitles.
 4. **Interactive Speaker Clustering (`--interactive-clusters`)**: In interactive mode, unrecognized speaker clusters generate short 2-3 second `.wav` previews (`.build/clusters/<id>_preview.wav`) and present ranked candidate profiles for quick assignment.
-5. **Dynamic Custom Dictionary Staging**: Automatically merges `dictionaries/custom_pronunciations.txt` into `dictionaries/merged_dictionary.dict` at `.build/mfa/staged_dictionary.dict` so custom proper nouns and names align as intact words rather than OOV noise (`spn`).
+5. **Dynamic Custom Dictionary Staging**: Automatically merges `dictionaries/custom_pronunciations.txt` into `dictionaries/merged_dictionary.dict` at `.build/mfa/staged_dictionary.dict` so custom proper nouns and names align as intact words rather than OOV noise (`spn`). Re-staging is decided by file content, so any edit to the custom file invalidates affected alignments on the next ingest or mix.
 
 ---
 
@@ -209,16 +210,71 @@ python run_mixer.py mix --all-sources --speaker anakin --scene 42 --text "Your s
 ```
 
 How it works:
-1. **Audio staged once as FLAC** under `.build/movies/<media hash>/audio/`: a stereo 48 kHz program downmix (raw track and separation input) and a 16 kHz analysis track taken from the **center channel** of 5.1 mixes (where film dialogue lives).
-2. **Vocal separation in 10-minute blocks** (with 5 s context, trimmed), stitched into full-length `vocals.flac` / `instrumental.flac` for the default `recombined` track. Resumable block by block.
+1. **Audio staged once as FLAC** under `.build/movies/<media hash>/audio/`: a stereo 48 kHz program downmix (raw track and separation input) and a 16 kHz **center channel** track (fallback only).
+2. **Dialogue isolated first**: vocal separation runs in 10-minute blocks (5 s context, trimmed) before any analysis, stitched into full-length `vocals.flac` / `instrumental.flac`, plus a 16 kHz `analysis_vocals_16k.flac`. Alignment, voice checks and join features all read the separated vocals (on an Episode III block, words aligned from separated vocals were recognized more often: 0.77 vs 0.72 recall for single words). A block without separated vocals (e.g. `--no-isolate-vocals`) falls back to the center channel. Lines MFA can't align from the vocals (fast or condensed lines) are retried once from the center channel. Lines whose voice the separation removed (vocals more than 15 dB quieter than usual relative to the center channel; e.g. radio-filtered or whispered lines) are marked `separation_dropped` and excluded from mixes, because their words would render silent from the vocal stem. Resumable block by block.
 3. **Subtitles**: a labeled VTT from `tools/label_subtitles.py` if present, else a sidecar file, else the embedded text track (English SDH preferred; `--subtitle-stream auto|sdh|plain|<index>`). Image (PGS) tracks are not supported. Each cue is one MFA chunk (padded slightly, never into the neighboring cue).
 4. **Alignment per 10-minute block**, cached by a key over that block's chunks, dictionary and model. `--range` aligns only overlapping blocks; later ingests reuse them.
 5. **Speakers**: words take the speaker of the subtitle line they came from, matched by word order (exact for two-speaker dialogue-dash cues). `Name:` labels resolve through `config/characters/*.json` (aliases, OCR typos).
-6. **Voice checks** (`--voice-checks`, default on): WavLM-SV embeddings verify labeled lines (a line whose voice clearly matches another character is made ineligible) and label unlabeled lines only above a margin calibrated to 95% leave-one-out precision on the labeled lines.
-7. **Review**: `review-speakers` saves answers to `config/speaker_labels/<media hash>.json` (times, IDs and text hashes only, no subtitle text); they apply on the next ingest or mix without re-aligning.
-8. **Mixing**: `--range` / `--scene` restrict candidate words to that part of the movie. The timeline frame rate defaults to the source's (`--fps auto`, 23.976 for films), and `--resolution 4k` renders 3840x2160 (letterboxed scope picture), 8-bit BT.709 H.264.
+6. **Voice checks** (`--voice-checks`, default on): WavLM-SV embeddings of each line (separated vocals) are compared with per-character voice profiles. Text labels stay authoritative: a labeled line is excluded only when the voice evidence is strong on every count. It must be clearly closer to another character (by at least 0.10), that character must lead every other candidate by a margin calibrated to 95% leave-one-out precision, and the labeled character must have at least 5 other lines to build a profile from. Otherwise the line is kept, marked `label_voice_unclear` if the voice disagrees weakly. Unlabeled lines are labeled by voice only above the same calibrated margin.
+7. **Review**: `review-speakers` plays each flagged or unlabeled line (non-blocking: type your answer while it plays; `--audio mix|center|vocals` picks the film mix, the raw center channel, or the separated dialogue that analysis uses). It shows the text label and the closest voice with its lead over the next voice (under about 0.05 means the voice model is unsure). Enter keeps the text label. Each answer is saved immediately (Ctrl+C never loses work) to `config/speaker_labels/<media hash>.json` (times, IDs and text hashes only, no subtitle text) and apply on the next ingest or mix without re-aligning.
+8. **Mixing**: `--range` / `--scene` restrict candidate words to that part of the movie. The output audio contains everything by default (`--audio-track recombined`: the cut dialogue, loudness-leveled, over the film's own music and effects); `--audio-track raw` uses the untouched film mix and `--audio-track vocals` the isolated dialogue only. The timeline frame rate defaults to the source's (`--fps auto`, 23.976 for films), and `--resolution 4k` renders 3840x2160 (letterboxed scope picture), 8-bit BT.709 H.264.
 
 Copyright note: labeled VTTs, reports, screenplays, and the alignment corpus contain subtitle or script text and stay in git-ignored folders. Tracked files store only times, IDs, scores and text hashes.
+
+### Speaker-Labeled Subtitles (`tools/label_subtitles.py`)
+
+Official movie subtitles rarely say who is speaking (only off-screen or ambiguous lines carry a `Name:` label). The labeling tool fills that in offline, before ingest, using only text:
+
+```powershell
+python tools\label_subtitles.py --video "input\movie.mkv" `
+  --transcript input\movie_transcript.txt `
+  --screenplay .build\scripts\movie_screenplay.html `
+  --output ".build\subtitles\labeled\<movie file stem>.en.vtt"
+```
+
+- **Inputs**
+  - The movie's own subtitles: the embedded English SDH text track by default (`--subtitle-stream auto|sdh|plain|<index>`), or `--subtitles <file.srt|vtt>`.
+  - Local transcripts (`--transcript`, `Name: line` format, repeatable). These are the primary source.
+  - Screenplays (`--screenplay`, HTML with bold character cues or inline `NAME: line`, repeatable). These are a fallback only, because drafts differ from the final film.
+  - The character list (`--characters`, default `config/characters/star_wars.json`).
+  - Save transcripts and screenplays yourself. The tool never downloads them.
+- **How a line gets its speaker**
+  1. Subtitle text is split into lines: dialogue-dash cues become one line per speaker, and `[SOUND]` tags and sound-only cues are dropped. `[SPEAKING <language>]` lines are dropped as non-English.
+  2. Subtitle words are aligned to each script's words using unique 4-word anchors plus local matching between them.
+  3. Each line takes a script speaker only when that speaker gets at least 80% of the line's speaker votes and enough of its words matched.
+  4. Priority is the subtitle's own `Name:` label, then transcripts, then screenplays (screenplay labels get half the confidence).
+  5. If sources disagree, the line stays unlabeled. The exception is a generic role (`Man`, `Clone Trooper`) against a named character: the named character wins.
+  6. Group labels (`All`, `Together`) give no speaker.
+- **Names**
+  - Raw names resolve through the character list. Matching is case- and accent-insensitive and tolerates OCR digit swaps (`C-3p0o` resolves to `c-3po`) and 1-2 letter typos.
+  - Names the tool can't resolve are printed at the end of the run. Add them as aliases (or add a new speaker) and rerun.
+  - In the character file:
+    - `speakers` maps an ID to a display name and aliases. IDs match the speaker registry.
+    - `roles` maps generic parts to `role-*` IDs, which are never treated as one voice.
+    - `groups` and `ignore_patterns` list labels to skip.
+- **Outputs** (both git-ignored; they contain subtitle text)
+  - The labeled WebVTT keeps the movie's own timing. Labeled lines are wrapped in `<v speaker-id>...</v>`, and unlabeled lines have no tag.
+  - The `<output>.report.json` report holds per-line times, speaker, source, confidence and evidence plus a text hash (no text). It also has per-speaker totals, unrecognized names, and `scenes`: screenplay scene headings mapped to time ranges, which `run_mixer.py scenes` and `--scene` read.
+- **Pickup:** ingest uses `.build/subtitles/labeled/<movie file stem>.en.vtt` automatically when it exists, so no `--vtt` flag is needed.
+- **Relabeling is cheap:**
+  - Rerunning the tool takes about 2 s per movie.
+  - The next ingest or mix rebuilds labels, voice checks and the inventory but reuses the MFA alignment, because the spoken text and timing are unchanged.
+- **Labels are a starting point, not ground truth.** At ingest, voice checks exclude lines whose voice clearly belongs to someone else, and `review-speakers` corrects the rest.
+
+### Cache Layout for Movies
+
+| Path | Contents |
+| --- | --- |
+| `.build/movies/<hash16>/audio/` | `program_stereo_48k.flac`, `analysis_vocals_16k.flac` (separated dialogue, used for all analysis) and its `.span_features.npz` (precomputed join features), `analysis_16k.flac` (center channel fallback) |
+| `.build/movies/<hash16>/stems/` | per-block and stitched `vocals.flac` / `instrumental.flac` |
+| `.build/movies/<hash16>/` | `speaker_labels.json` (per-line labels and voice scores, no text), `voice_embeddings.npz`, `probe.json` |
+| `.build/alignment/<source id>/blocks/` | per-block MFA corpus transcripts and TextGrids |
+| `.build/inventory/<source id>/units_index.json` | the movie's word/phone inventory |
+| `.build/subtitles/<hash16>/` | extracted embedded subtitle tracks |
+| `.build/subtitles/labeled/` | labeled VTTs and reports from the labeling tool (user input; kept by `clean`) |
+| `config/speaker_labels/<hash16>.json` | `review-speakers` answers (tracked; times, IDs, text hashes only) |
+
+`run_mixer.py clean <movie>` removes everything above for that movie except the labeled VTTs and reviewed labels.
 
 ---
 
@@ -343,7 +399,27 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | --- | --- |
 | `run_mixer.py speakers [movie...]` | Speakers and usable seconds per ingested movie, label and voice-check counts |
 | `run_mixer.py scenes <movie>` | Scene numbers, times and headings (from a screenplay given to `tools/label_subtitles.py`) |
-| `run_mixer.py review-speakers <movie> [--only flagged\|unlabeled\|voice\|all] [--range ...] [--limit N]` | Play and label uncertain lines; saves to `config/speaker_labels/` |
+| `run_mixer.py review-speakers <movie> [--only flagged\|unlabeled\|voice\|all] [--audio mix\|center\|vocals] [--range ...] [--limit N]` | Play and label uncertain lines; saves to `config/speaker_labels/` |
+
+### `run_mixer.py clean` (Cache Cleanup)
+
+```powershell
+python run_mixer.py clean "input\movie.mkv" --dry-run   # show what would be removed
+python run_mixer.py clean anakin_ep2_1                  # by file, stem, or source ID
+python run_mixer.py clean --all --keep-speakers         # every source; keep registry profiles
+```
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `source...` / `--video` | File path, file stem, or source ID; matches only that exact source (never other sources sharing a name prefix) | |
+| `--all` | Clean all sources, movie caches, and extracted subtitle tracks (keeps models, staged dictionary, labeled VTTs, reviewed labels) | `False` |
+| `--dry-run` | List what would be removed and the space freed, without deleting | `False` |
+| `--keep-speakers` | Keep speaker profiles registered from the cleaned source(s) | `False` |
+| `--speaker-registry <path>` | Speaker registry to update | `config/speaker_registry.json` |
+
+---
+
+## Directory Structure
 
 ```text
 sentence_mixer/
@@ -384,5 +460,5 @@ sentence_mixer/
 │   ├── listen_verify.py            # Unprimed ASR listening verification gate
 │   └── validate_mix.py             # Timing, sample count, and manifest validator
 ├── README.md                       # Comprehensive documentation & setup guide
-└── run_mixer.py                    # Unified CLI entry point (`mix`, `ingest`, `preprocess`)
+└── run_mixer.py                    # Unified CLI entry point (`mix`, `ingest`, `speakers`, `scenes`, `review-speakers`, `clean`, ...)
 ```

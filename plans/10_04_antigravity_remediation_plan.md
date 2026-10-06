@@ -119,6 +119,14 @@ Line numbers are approximate; inspect the current code first.
 
 ### C01. Restore a clean, trustworthy baseline
 
+**Status (2026-10-04): done.** Dictionary staging reuses the staged file only when a
+content fingerprint of both inputs matches (sidecar `<staged>.inputs.json`; custom file
+hashed every call, base file by size and mtime in memory), so same-tick edits
+invalidate correctly; replaces retry briefly on Windows sharing errors. The flaky test
+passed 15/15 runs and the concurrency test 25/25 with its `xfail` marker removed.
+Ruff (`emb_map`) and mypy (`distance_threshold: Optional[float]`) are clean repo-wide.
+Step 4 (reverse-order run) is still open.
+
 **Why:** F10-F12. The committed code fails its own checks, and a timing-dependent
 cache hides real invalidation problems.
 

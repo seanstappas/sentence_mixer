@@ -1,0 +1,31 @@
+{
+  "media_hash": "56214896cf2afcf76b1d7afe2458c7c42aaab0a6c2941ccf05262739285557fb",
+  "source_name": "Star.Wars.Episode.II.-.Attack.Of.The.Clones.2002.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX].mkv",
+  "note": "Speaker label overrides from review-speakers. Keys are cue start|segment|text hash; no subtitle text.",
+  "overrides": [
+    {
+      "key": "2865.155|0|562f135a2ce8e637",
+      "start": 2865.225,
+      "end": 2867.575,
+      "speaker_id": "lama-su"
+    },
+    {
+      "key": "4476.265|0|6d59a073add04b7e",
+      "start": 4476.115,
+      "end": 4478.551,
+      "speaker_id": "anakin"
+    },
+    {
+      "key": "4736.441|0|d6a8aea93c51128f",
+      "start": 4736.501,
+      "end": 4740.231,
+      "speaker_id": "shmi"
+    },
+    {
+      "key": "6188.016|0|54b44a49df0ab463",
+      "start": 6188.026,
+      "end": 6190.576,
+      "speaker_id": "padme"
+    }
+  ]
+}

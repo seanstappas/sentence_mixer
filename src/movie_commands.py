@@ -79,13 +79,39 @@ def _segment_texts(build_dir: Path, source_id: str) -> Dict[str, str]:
 
 
 def _play(path: Path) -> None:
+    """Starts playing a WAV without blocking, so the user can answer while it plays."""
     if sys.platform == "win32":
         try:
             import winsound
 
-            winsound.PlaySound(str(path), winsound.SND_FILENAME)
+            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
         except Exception:
             pass
+
+
+def _stop_playback() -> None:
+    if sys.platform == "win32":
+        try:
+            import winsound
+
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+
+
+REVIEW_AUDIO_CHOICES = ("mix", "center", "vocals")
+
+
+def _review_audio_path(root: Path, audio: str) -> Path:
+    """mix: the film's stereo mix; center: raw 5.1 center channel; vocals: separated dialogue
+    stem (music and effects removed; what alignment and voice checks analyze)."""
+    if audio == "center":
+        return root / "audio" / "analysis_16k.flac"
+    if audio == "vocals":
+        stem = root / "stems" / "vocals.flac"
+        if stem.exists():
+            return stem
+    return root / "audio" / "program_stereo_48k.flac"
 
 
 def cmd_review_speakers(
@@ -98,6 +124,7 @@ def cmd_review_speakers(
     input_fn: Callable[[str], str] = input,
     out: Callable[[str], None] = print,
     overrides_dir: Optional[Path] = None,
+    audio: str = "mix",
 ) -> int:
     media_hash, doc = _labels_for(video, build_dir)
     rngs = parse_ranges(ranges)
@@ -126,52 +153,68 @@ def cmd_review_speakers(
     texts = _segment_texts(build_dir, doc["source_id"])
     known = sorted(doc.get("speaker_seconds", {}).keys())
     root = movie_dir(build_dir, media_hash)
-    program = root / "audio" / "program_stereo_48k.flac"
+    source_audio = _review_audio_path(root, audio)
+    if audio == "vocals" and source_audio.name != "vocals.flac":
+        out("[!] Separated vocals not available for this movie yet; playing the stereo mix.")
     preview_dir = root / "review"
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    out(f"[*] Reviewing {len(todo)} lines of {video.name} ({only}). Known speakers: {', '.join(known)}")
-    out("    Enter = accept suggestion, <id> = set speaker, x = not usable, s = skip, r = replay, q = quit")
+    out(f"[*] Reviewing {len(todo)} lines of {video.name} ({only}), playing {audio}. Known speakers: {', '.join(known)}")
+    out("    Type while the clip plays (it stops when you answer). Enter = accept suggestion (keeps the text label "
+        "when there is one), <id> = set speaker, x = not usable, s = skip, r = replay, q = quit")
     changed = 0
-    for n, s in enumerate(todo, 1):
-        preview = preview_dir / f"{s['start']:.3f}.wav"
-        if play and program.exists():
-            a = max(0.0, s["start"] - 0.3)
-            data, sr = sf.read(str(program), start=int(a * 48000), stop=int((s["end"] + 0.3) * 48000), dtype="float32")
-            sf.write(str(preview), np.asarray(data), sr)
-        if s.get("status") == "voice_mismatch":
-            suggestion = s.get("voice_best") or s.get("speaker")
-        else:
-            suggestion = s.get("speaker") or s.get("voice_best")
-        out(f"\n[{n}/{len(todo)}] {format_time(s['start'])} ({s['end'] - s['start']:.1f}s) status={s.get('status')} "
-            f"label={s.get('label')} voice={s.get('voice_best')} (sim {s.get('voice_sim')}, margin {s.get('voice_margin')})")
-        out(f"    \"{texts.get(s['key'], '')}\"")
-        while True:
-            if play and preview.exists():
-                _play(preview)
-            ans = input_fn(f"    speaker [{suggestion or '-'}]: ").strip().lower()
-            if ans == "r":
+    saved_path: Optional[Path] = None
+    try:
+        for n, s in enumerate(todo, 1):
+            preview = preview_dir / f"{audio}_{s['start']:.3f}.wav"
+            if play and source_audio.exists() and not preview.exists():
+                sr = sf.info(str(source_audio)).samplerate
+                a = max(0.0, s["start"] - 0.3)
+                data, sr = sf.read(str(source_audio), start=int(a * sr), stop=int((s["end"] + 0.3) * sr), dtype="float32")
+                sf.write(str(preview), np.asarray(data), sr, subtype="PCM_16")
+            # Text labels (subtitles/transcripts) are more reliable than voice on short film
+            # lines, so Enter keeps an existing label; the voice match is shown for reference.
+            suggestion = s.get("label") or s.get("speaker") or s.get("voice_best")
+            voice_note = ""
+            if s.get("voice_best"):
+                voice_note = (f" | closest voice={s.get('voice_best')} (similarity {s.get('voice_sim')}, "
+                              f"lead over next voice {s.get('voice_margin')}; under ~0.05 means the voice model is unsure)")
+            out(f"\n[{n}/{len(todo)}] {format_time(s['start'])} ({s['end'] - s['start']:.1f}s) status={s.get('status')} "
+                f"text label={s.get('label')}{voice_note}")
+            out(f"    \"{texts.get(s['key'], '')}\"")
+            while True:
+                if play and preview.exists():
+                    _play(preview)
+                ans = input_fn(f"    speaker [{suggestion or '-'}]: ").strip().lower()
+                _stop_playback()
+                if ans == "r":
+                    continue
+                break
+            if ans == "q":
+                break
+            if ans == "s":
                 continue
-            break
-        if ans == "q":
-            break
-        if ans == "s":
-            continue
-        if ans == "" and not suggestion:
-            continue
-        speaker: Optional[str]
-        if ans == "x":
-            speaker = None
-        elif ans == "":
-            speaker = suggestion
-        else:
-            if not re.match(r"^[a-z0-9][a-z0-9_\-]*$", ans):
-                out("    (invalid id; skipped)")
+            if ans == "" and not suggestion:
                 continue
-            speaker = ans
-        overrides[s["key"]] = {"key": s["key"], "start": s["start"], "end": s["end"], "speaker_id": speaker}
-        changed += 1
+            speaker: Optional[str]
+            if ans == "x":
+                speaker = None
+            elif ans == "":
+                speaker = suggestion
+            else:
+                if not re.match(r"^[a-z0-9][a-z0-9_\-]*$", ans):
+                    out("    (invalid id; skipped)")
+                    continue
+                speaker = ans
+            overrides[s["key"]] = {"key": s["key"], "start": s["start"], "end": s["end"], "speaker_id": speaker}
+            # Save after every answer so Ctrl+C or a closed window never loses work
+            saved_path = save_overrides(media_hash, video.name, overrides, overrides_dir)
+            changed += 1
+            out(f"    saved ({speaker or 'not usable'})")
+    except (KeyboardInterrupt, EOFError):
+        out("\n[*] Review stopped. All answers given so far are already saved.")
+    finally:
+        _stop_playback()
     if changed:
-        p = save_overrides(media_hash, video.name, overrides, overrides_dir)
-        out(f"\n[+] Saved {changed} label(s) to {p}. They apply on the next ingest or mix of this movie (alignment is reused).")
+        out(f"\n[+] Saved {changed} label(s) to {saved_path}. They apply on the next ingest or mix of this movie (alignment is reused).")
     return 0

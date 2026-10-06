@@ -54,7 +54,7 @@ class SpeakerDiarizer:
     def __init__(
         self,
         registry: Optional[SpeakerRegistry] = None,
-        distance_threshold: float = 0.45,
+        distance_threshold: Optional[float] = 0.45,
         min_turn_duration: float = 0.35,
         wavlm_model_id: str = "microsoft/wavlm-base",
         sv_model_id: str = "microsoft/wavlm-base-plus-sv",

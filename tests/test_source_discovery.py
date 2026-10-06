@@ -436,17 +436,21 @@ def test_incremental_delta_alignment_cache_hit_performance(tmp_path: Path, monke
             assume_single_speaker=False,
         )
 
-    # Second pass: repeated folder ingestion measurement
-    t_start = time.perf_counter()
-    for item in items:
-        inv_res = ensure_source_aligned(
-            item["video"],
-            item["vtt"],
-            force_realign=False,
-            assume_single_speaker=False,
-        )
-        assert Path(inv_res).exists()
-    t_total = time.perf_counter() - t_start
+    # Repeated folder ingestion measurement: best of several passes, so a busy machine
+    # (e.g. the rest of the suite running) doesn't fail a check meant to catch real slowdowns.
+    best_total = float("inf")
+    for _ in range(5):
+        t_start = time.perf_counter()
+        for item in items:
+            inv_res = ensure_source_aligned(
+                item["video"],
+                item["vtt"],
+                force_realign=False,
+                assume_single_speaker=False,
+            )
+            assert Path(inv_res).exists()
+        best_total = min(best_total, time.perf_counter() - t_start)
+    t_total = best_total
 
     ms_per_clip = (t_total / len(items)) * 1000.0
     print(f"\n[Performance] Cache hit latency: {ms_per_clip:.3f} ms per clip (threshold: < 5.0 ms)")

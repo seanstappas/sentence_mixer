@@ -44,20 +44,24 @@ from movie_media import (
     blocks_overlapping,
     ensure_movie_audio,
     ensure_movie_stems,
+    ensure_vocal_analysis,
     extract_subtitle_stream,
     labeled_subtitle_candidates,
     list_subtitle_streams,
     plan_blocks,
+    read_stems_meta,
     select_subtitle_stream,
 )
 from movie_subtitles import assign_word_speakers, load_character_resolver, load_movie_cues
 
 MOVIE_PREPROCESSOR_VERSION = "movie-1"
-VOICE_VERSION = "voice-1"
+VOICE_VERSION = "voice-2"
 MIN_VOICE_SECONDS = 1.0
 MIN_CENTROID_SEGMENTS = 5
 TARGET_PROPAGATION_PRECISION = 0.95
 MISMATCH_MARGIN = 0.10
+SEPARATION_DROP_DB = 15.0
+MIN_CONFIDENT_MARGIN = 0.05
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CHARACTERS = REPO_ROOT / "config" / "characters" / "star_wars.json"
@@ -182,9 +186,12 @@ class SegmentRecord:
 
 
 class VoiceEmbedder:
-    def __init__(self, cache_path: Path, analysis_path: Path, log: Callable[[str], None] = print):
+    """Speaker embeddings per line, read by sample range from a mono or stereo audio file."""
+
+    def __init__(self, cache_path: Path, audio_path: Path, log: Callable[[str], None] = print):
         self.cache_path = cache_path
-        self.analysis_path = analysis_path
+        self.audio_path = audio_path
+        self.sample_rate = int(sf.info(str(audio_path)).samplerate)
         self.log = log
         self._diarizer: Any = None
         self.cache: Dict[str, np.ndarray] = {}
@@ -211,8 +218,11 @@ class VoiceEmbedder:
         key = f"{start:.3f}_{end:.3f}"
         if key in self.cache:
             return self.cache[key]
-        audio, sr = sf.read(str(self.analysis_path), start=int(start * 16000), stop=int(end * 16000), dtype="float32")
-        vec = self._diarizer.extract_embedding(audio, sample_rate=sr)
+        sr = self.sample_rate
+        audio, file_sr = sf.read(str(self.audio_path), start=int(start * sr), stop=int(end * sr), dtype="float32")
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        vec = self._diarizer.extract_embedding(audio, sample_rate=file_sr)
         self.cache[key] = vec
         self.dirty = True
         return vec
@@ -239,13 +249,39 @@ def _centroids(vectors: Dict[str, List[np.ndarray]]) -> Dict[str, np.ndarray]:
     return out
 
 
+def separation_dropped_chunks(
+    chunks: Dict[str, Dict[str, Any]],
+    vocal_analysis: Path,
+    center_analysis: Path,
+    margin_db: float = SEPARATION_DROP_DB,
+) -> Tuple[set, Dict[str, Any]]:
+    """
+    Chunks whose separated vocals are far quieter than usual relative to the center channel
+    (the separation model moved the voice into the background stem, e.g. radio-filtered or
+    whispered lines). Words from them would render silent from the vocal stem.
+    """
+    def level(path: Path, a: float, b: float) -> float:
+        sr = sf.info(str(path)).samplerate
+        y, _ = sf.read(str(path), start=int(a * sr), stop=int(b * sr), dtype="float32", always_2d=True)
+        return float(20 * np.log10(np.sqrt(np.mean(y.mean(axis=1) ** 2)) + 1e-9)) if len(y) else -120.0
+
+    diffs = {cid: level(vocal_analysis, c["start_sec"], c["end_sec"]) - level(center_analysis, c["start_sec"], c["end_sec"])
+             for cid, c in chunks.items()}
+    if not diffs:
+        return set(), {}
+    typical = float(np.median(list(diffs.values())))
+    dropped = {cid for cid, d in diffs.items() if d < typical - margin_db}
+    return dropped, {"typical_vocals_vs_center_db": round(typical, 1), "threshold_db": round(typical - margin_db, 1),
+                     "dropped_chunks": len(dropped)}
+
+
 def run_voice_checks(
     records: List[SegmentRecord],
     embedder: VoiceEmbedder,
     log: Callable[[str], None] = print,
 ) -> Dict[str, Any]:
     """Verifies labeled segments and propagates labels to unlabeled ones (see module doc)."""
-    usable = [r for r in records if (r.end - r.start) >= MIN_VOICE_SECONDS]
+    usable = [r for r in records if (r.end - r.start) >= MIN_VOICE_SECONDS and r.status != "separation_dropped"]
     t0 = time.time()
     emb: Dict[str, np.ndarray] = {}
     for n, r in enumerate(usable, 1):
@@ -262,11 +298,11 @@ def run_voice_checks(
             by_spk.setdefault(r.label, []).append(emb[r.key])
     cents = _centroids(by_spk)
 
-    # Leave-one-out nearest-centroid evaluation on labeled lines (calibration)
+    # Leave-one-out nearest-centroid scoring of labeled lines (also the calibration set)
     sums = {s: np.sum(np.stack(v), axis=0) for s, v in by_spk.items() if s in cents}
     counts = {s: len(by_spk[s]) for s in sums}
     calib: List[Tuple[float, bool]] = []
-    mismatches = 0
+    scored: List[Tuple[SegmentRecord, str, float, float, float]] = []
     for r in named:
         if r.label not in cents:
             continue
@@ -285,29 +321,47 @@ def run_voice_checks(
         r.voice_own_sim = round(sims[r.label], 4)
         r.voice_margin = round(best_sim - second, 4)
         calib.append((best_sim - second, best == r.label))
-        if best != r.label and best_sim - sims[r.label] >= MISMATCH_MARGIN:
-            r.status = "voice_mismatch"
-            r.eligible = False
-            mismatches += 1
-        elif r.status in ("label",):
-            r.status = "label_voice_ok" if best == r.label else "label_voice_unclear"
+        scored.append((r, best, best_sim, sims[r.label], best_sim - second))
 
     # Calibrate a margin threshold with leave-one-out precision >= target
     threshold = None
     if calib:
-        calib.sort(key=lambda x: x[0], reverse=True)
+        ordered = sorted(calib, key=lambda x: x[0], reverse=True)
         correct = 0
-        for i, (margin, ok) in enumerate(calib, 1):
+        for i, (margin, ok) in enumerate(ordered, 1):
             correct += int(ok)
             if i >= 20 and correct / i >= TARGET_PROPAGATION_PRECISION:
                 threshold = margin
         loo_acc = sum(ok for _, ok in calib) / len(calib)
     else:
         loo_acc = 0.0
+    if threshold is not None:
+        threshold = max(threshold, MIN_CONFIDENT_MARGIN)
+
+    # Text labels (subtitles/transcripts) agree with each other 97-99% of the time, so a
+    # voice can only overrule one when the evidence is strong on every count:
+    #   - the line is clearly closer to another speaker (gap >= MISMATCH_MARGIN),
+    #   - that speaker clearly beats every other candidate (calibrated margin), and
+    #   - the labeled speaker's profile is built from enough other lines to be trusted.
+    mismatches = 0
+    for r, best, best_sim, own_sim, margin in scored:
+        own_lines = counts.get(r.label or "", 0) - 1
+        strong = (
+            best != r.label
+            and threshold is not None
+            and best_sim - own_sim >= MISMATCH_MARGIN
+            and margin >= threshold
+            and own_lines >= MIN_CENTROID_SEGMENTS
+        )
+        if strong:
+            r.status = "voice_mismatch"
+            r.eligible = False
+            mismatches += 1
+        elif r.status in ("label",):
+            r.status = "label_voice_ok" if best == r.label else "label_voice_unclear"
 
     propagated = 0
     if threshold is not None:
-        threshold = max(threshold, 0.05)
         for r in usable:
             if r.label or r.status == "user":
                 continue
@@ -364,7 +418,10 @@ def save_overrides(media_hash: str, source_name: str, overrides: Dict[str, Dict[
         "note": "Speaker label overrides from review-speakers. Keys are cue start|segment|text hash; no subtitle text.",
         "overrides": sorted(overrides.values(), key=lambda o: o["key"]),
     }
-    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp = p.with_name(f"{p.name}.tmp_{os.getpid()}")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # Atomic replace: an interrupt mid-save never leaves a truncated label file
+    os.replace(tmp, p)
     return p
 
 
@@ -428,10 +485,26 @@ def ensure_movie_aligned(
     blocks = plan_blocks(audio.duration_sec, DEFAULT_BLOCK_SECONDS)
     wanted_blocks = blocks_overlapping(blocks, ranges)
 
-    # Stems first (needed for the default recombined audio track)
+    # Dialogue isolation comes first: every analysis step (alignment, voice checks, join
+    # features) reads the separated vocals for blocks that have them. Measured on Episode III
+    # block 4: ASR recall of aligned words 0.77 vs 0.72 (single words) and 0.77 vs 0.76
+    # (3-word windows) for separated vocals vs the raw center channel.
     stems: Dict[str, Any] = {}
+    vocal_analysis: Optional[Path] = None
+    stems_done: set = set()
     if separate_stems:
         stems = ensure_movie_stems(audio, block_indices=wanted_blocks, log=log)
+        vocal_analysis = ensure_vocal_analysis(audio, log=log)
+        if vocal_analysis is not None:
+            stems_done = set(read_stems_meta(audio).get("blocks_done") or [])
+        missing = [b for b in wanted_blocks if b not in stems_done]
+        if missing:
+            log(f"[!] Warning: {len(missing)} block(s) have no separated vocals; they are analyzed from the center channel")
+
+    def block_analysis(b: int) -> Tuple[str, Path]:
+        if vocal_analysis is not None and b in stems_done:
+            return "vocals", vocal_analysis
+        return audio.analysis_channel, audio.analysis_path
 
     sub_hash = hash_file_content(str(sub_path))
     align_root = build / "alignment" / source_id
@@ -449,7 +522,7 @@ def ensure_movie_aligned(
             "chunks": items,
             "dict_hash": dict_hash,
             "acoustic_model": acoustic_model,
-            "analysis": audio.analysis_channel,
+            "analysis": block_analysis(b)[0],
             "version": MOVIE_PREPROCESSOR_VERSION,
         })
 
@@ -476,8 +549,10 @@ def ensure_movie_aligned(
         aligned.mkdir(parents=True, exist_ok=True)
         t0 = time.time()
         chunk_list = block_cues[b]
-        log(f"[*] Aligning block {b + 1}/{len(blocks)} ({blocks[b][0] / 60:.0f}-{blocks[b][1] / 60:.0f} min): {len(chunk_list)} chunks")
-        with sf.SoundFile(str(audio.analysis_path)) as f:
+        analysis_name, analysis_file = block_analysis(b)
+        log(f"[*] Aligning block {b + 1}/{len(blocks)} ({blocks[b][0] / 60:.0f}-{blocks[b][1] / 60:.0f} min): "
+            f"{len(chunk_list)} chunks from {'separated vocals' if analysis_name == 'vocals' else 'center channel'}")
+        with sf.SoundFile(str(analysis_file)) as f:
             sr = f.samplerate
             for cid, c in chunk_list:
                 f.seek(int(c["start_sec"] * sr))
@@ -500,10 +575,65 @@ def ensure_movie_aligned(
     if not done_blocks:
         raise RuntimeError(f"No aligned blocks for {v.name}")
 
+    # Fallback: chunks MFA could not align from separated vocals (separation occasionally
+    # removes too much of a line) are retried once from the raw center channel.
+    for b in done_blocks:
+        if block_analysis(b)[0] != "vocals":
+            continue
+        bdir = blocks_root / f"block_{b:04d}"
+        meta_p = bdir / "block_meta.json"
+        bmeta = json.loads(meta_p.read_text(encoding="utf-8"))
+        if bmeta.get("fallback_tried"):
+            continue
+        aligned = bdir / "aligned"
+        missing_chunks = [(cid, c) for cid, c in block_cues[b] if not (aligned / f"{cid}.TextGrid").exists()]
+        if missing_chunks:
+            log(f"[*] Block {b + 1}: retrying {len(missing_chunks)} chunk(s) from the center channel")
+            fb_corpus = bdir / "fallback_corpus"
+            fb_aligned = bdir / "fallback_aligned"
+            shutil.rmtree(fb_corpus, ignore_errors=True)
+            shutil.rmtree(fb_aligned, ignore_errors=True)
+            fb_corpus.mkdir(parents=True)
+            fb_aligned.mkdir(parents=True)
+            with sf.SoundFile(str(audio.analysis_path)) as f:
+                sr = f.samplerate
+                for cid, c in missing_chunks:
+                    f.seek(int(c["start_sec"] * sr))
+                    data = f.read(int((c["end_sec"] - c["start_sec"]) * sr), dtype="int16")
+                    sf.write(str(fb_corpus / f"{cid}.wav"), data, sr, subtype="PCM_16")
+                    (fb_corpus / f"{cid}.txt").write_text(c["text"] + "\n", encoding="utf-8")
+            try:
+                run_mfa(str(fb_corpus), str(fb_aligned))
+            except Exception as err:
+                log(f"    fallback alignment failed: {err}")
+            recovered = []
+            for tg in fb_aligned.glob("*.TextGrid"):
+                shutil.move(str(tg), str(aligned / tg.name))
+                recovered.append(tg.stem)
+            shutil.rmtree(fb_corpus, ignore_errors=True)
+            shutil.rmtree(fb_aligned, ignore_errors=True)
+            bmeta["fallback_center_chunks"] = sorted(recovered)
+            bmeta["textgrids"] = len(list(aligned.glob("*.TextGrid")))
+            log(f"    recovered {len(recovered)}/{len(missing_chunks)}")
+        bmeta["fallback_tried"] = True
+        meta_p.write_text(json.dumps(bmeta, indent=2), encoding="utf-8")
+
+    def block_textgrids(b: int) -> int:
+        try:
+            return int(json.loads((blocks_root / f"block_{b:04d}" / "block_meta.json").read_text(encoding="utf-8")).get("textgrids", 0))
+        except Exception:
+            return 0
+
+    # Line-level analysis (join features, voice checks, selector F0 reads) uses one track for
+    # the whole movie: separated vocals when every aligned block has them, else center channel.
+    lines_on_vocals = vocal_analysis is not None and all(b in stems_done for b in done_blocks)
+    line_analysis = vocal_analysis if lines_on_vocals and vocal_analysis is not None else audio.analysis_path
+    voice_audio = "vocals" if lines_on_vocals else "center"
+
     # Join-cost features over speech spans (pYIN over a whole movie would take ~30 min per mix)
     from features import precompute_span_features
     precompute_span_features(
-        audio.analysis_path,
+        line_analysis,
         [(c["start_sec"], c["end_sec"]) for b in done_blocks for _, c in block_cues[b]],
         log=log,
     )
@@ -555,9 +685,12 @@ def ensure_movie_aligned(
     labels_path = audio.root / "speaker_labels.json"
     labels_key = hash_dict({
         "blocks": {str(b): block_key(b) for b in done_blocks},
+        "textgrids": {str(b): block_textgrids(b) for b in done_blocks},
         "overrides": sorted((k, o.get("speaker_id")) for k, o in overrides.items()),
         "voice_checks": bool(voice_checks),
         "voice_version": VOICE_VERSION,
+        "voice_audio": voice_audio,
+        "separation_check_db": SEPARATION_DROP_DB,
         "subtitles": sub_hash,
     })
     cached_doc: Optional[Dict[str, Any]] = None
@@ -570,6 +703,19 @@ def ensure_movie_aligned(
             cached_doc = None
 
     voice_stats: Dict[str, Any] = {"skipped": "disabled"}
+    separation_stats: Dict[str, Any] = {}
+    dropped_chunks: set = set()
+    if voice_audio == "vocals" and vocal_analysis is not None and cached_doc is None:
+        dropped_chunks, separation_stats = separation_dropped_chunks(
+            {cid: cm for cid, cm in chunks_meta.items()}, vocal_analysis, audio.analysis_path,
+        )
+        for r in records:
+            if r.chunk_id in dropped_chunks:
+                r.status = "separation_dropped"
+                r.eligible = False
+        if dropped_chunks:
+            log(f"[!] {len(dropped_chunks)} line(s) lost their voice in vocal separation; excluded from mixes "
+                "(their words would render silent from the vocal stem)")
     if cached_doc is not None:
         saved = {s["key"]: s for s in cached_doc.get("segments", [])}
         for r in records:
@@ -578,11 +724,15 @@ def ensure_movie_aligned(
                 for attr in ("speaker", "status", "eligible", "voice_best", "voice_sim", "voice_own_sim", "voice_margin"):
                     setattr(r, attr, s.get(attr))
         voice_stats = cached_doc.get("voice", voice_stats)
+        separation_stats = cached_doc.get("separation", {})
     elif voice_checks:
-        embedder = VoiceEmbedder(audio.root / "voice_embeddings.npz", audio.analysis_path, log=log)
+        emb_cache = audio.root / ("voice_embeddings_vocals.npz" if voice_audio == "vocals" else "voice_embeddings.npz")
+        embedder = VoiceEmbedder(emb_cache, line_analysis, log=log)
         if embedder.available():
-            log("[*] Voice checks: verifying labeled lines and propagating labels to unlabeled lines")
+            log(f"[*] Voice checks ({'separated vocals' if voice_audio == 'vocals' else 'center channel'}): "
+                "verifying labeled lines and propagating labels to unlabeled lines")
             voice_stats = run_voice_checks(records, embedder, log=log)
+            voice_stats["audio"] = voice_audio
         else:
             voice_stats = {"skipped": "speaker verification model unavailable"}
             log("[!] Warning: WavLM-SV model unavailable; skipping voice checks (labels are unverified)")
@@ -597,7 +747,9 @@ def ensure_movie_aligned(
                 "tokens": s["tokens"],
                 "speaker_id": r.speaker,
                 "is_eligible": bool(r.speaker) and r.eligible,
-                "eligibility_reason": "" if (r.speaker and r.eligible) else ("voice_mismatch" if r.status == "voice_mismatch" else "unassigned"),
+                "eligibility_reason": "" if (r.speaker and r.eligible) else (
+                    r.status if r.status in ("voice_mismatch", "separation_dropped") else "unassigned"
+                ),
                 "identity_status": r.status,
             })
         cm["segments"] = segs
@@ -618,6 +770,7 @@ def ensure_movie_aligned(
         "blocks_total": len(blocks),
         "status_counts": status_counts,
         "voice": voice_stats,
+        "separation": separation_stats,
         "speaker_seconds": {k: round(v, 1) for k, v in sorted(speaker_seconds.items(), key=lambda kv: -kv[1])},
         "segments": [r.to_dict() for r in records],
     }
@@ -659,7 +812,7 @@ def ensure_movie_aligned(
         cached_pcm_path=str(audio.program_path),
         cached_vocal_pcm_path=str(stem_dir / "vocals.flac") if stems_ok else "",
         cached_instrumental_pcm_path=str(stem_dir / "instrumental.flac") if stems_ok else "",
-        cached_analysis_pcm_path=str(audio.analysis_path),
+        cached_analysis_pcm_path=str(line_analysis),
     )
 
     inv_dir = build / "inventory" / source_id
@@ -667,8 +820,10 @@ def ensure_movie_aligned(
     inv_meta_path = inv_dir / "inventory_metadata.json"
     inv_key = hash_dict({
         "blocks": {b: block_key(b) for b in done_blocks},
+        "textgrids": {b: block_textgrids(b) for b in done_blocks},
         "labels": hash_dict({"segments": [(r.key, r.speaker, r.eligible, r.status) for r in records]}),
         "stems_ok": stems_ok,
+        "line_analysis": voice_audio,
         "version": MOVIE_PREPROCESSOR_VERSION,
     })
     hit = False

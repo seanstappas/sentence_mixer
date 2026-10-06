@@ -215,6 +215,54 @@ def test_precomputed_span_features_are_used(tmp_path: Path, monkeypatch: pytest.
     assert outside.f0_hz is None and outside.rms_energy == 0.0
 
 
+def test_separation_dropped_chunks_flags_lines_without_voice(tmp_path: Path):
+    from movie_ingest import separation_dropped_chunks
+
+    sr = 16000
+    t = np.arange(sr * 10) / sr
+    center = (0.3 * np.sin(2 * np.pi * 180 * t)).astype(np.float32)
+    vocals = center * 0.3  # separation typically keeps a bit less level than the center channel
+    vocals[int(6 * sr):int(8 * sr)] *= 0.001  # voice moved to the background stem on one line
+    sf.write(str(tmp_path / "c.flac"), center, sr)
+    sf.write(str(tmp_path / "v.flac"), vocals, sr)
+    chunks = {f"c{i}": {"start_sec": float(i * 2), "end_sec": float(i * 2 + 2)} for i in range(5)}
+    dropped, stats = separation_dropped_chunks(chunks, tmp_path / "v.flac", tmp_path / "c.flac")
+    assert dropped == {"c3"}
+    assert stats["dropped_chunks"] == 1 and stats["typical_vocals_vs_center_db"] < -9
+
+
+def test_vocal_analysis_track_follows_separated_blocks(tmp_path: Path):
+    from movie_media import MovieAudio, ensure_vocal_analysis
+
+    root = tmp_path / "movie"
+    (root / "stems").mkdir(parents=True)
+    (root / "audio").mkdir(parents=True)
+    audio = MovieAudio(root=root, probe={}, duration_sec=2.0, native_sample_rate=48000, native_channels=6,
+                       program_path=root / "audio" / "program.flac", analysis_path=root / "audio" / "center.flac",
+                       analysis_channel="center")
+    assert ensure_vocal_analysis(audio, log=lambda m: None) is None  # nothing separated yet
+
+    sr = 44100
+    stereo = np.zeros((2 * sr, 2), dtype=np.float32)
+    stereo[:, 0] = 0.2 * np.sin(2 * np.pi * 220 * np.arange(2 * sr) / sr)
+    sf.write(str(root / "stems" / "vocals.flac"), stereo, sr, subtype="PCM_16")
+    meta = {"version": "1", "model": "m", "blocks": [[0, 2]], "blocks_done": [0], "complete": True}
+    (root / "stems" / "stems_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    out = ensure_vocal_analysis(audio, log=lambda m: None)
+    info = sf.info(str(out))
+    assert out.name == "analysis_vocals_16k.flac" and info.samplerate == 16000 and info.channels == 1
+    assert abs(info.duration - 2.0) < 0.01
+    first = out.stat().st_mtime_ns
+    assert ensure_vocal_analysis(audio, log=lambda m: None) == out and out.stat().st_mtime_ns == first  # cached
+
+    meta["model"] = "other"  # different separation -> rebuilt
+    (root / "stems" / "stems_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    msgs = []
+    ensure_vocal_analysis(audio, log=msgs.append)
+    assert msgs and out.exists()
+
+
 def _textgrid(words, phones, xmax):
     def tier(name, items):
         out = [f'    item [{1 if name == "words" else 2}]:', '        class = "IntervalTier"', f'        name = "{name}"',
@@ -305,6 +353,41 @@ def test_voice_checks_flag_mismatch_and_propagate():
     assert stats["loo_accuracy"] > 0.9
 
 
+def test_voice_checks_never_overrule_text_on_weak_or_thin_evidence():
+    """A labeled line is not flagged when the voice model can't separate the top candidates,
+    or when the labeled speaker has too few lines for a trustworthy voice profile."""
+    rng = np.random.default_rng(3)
+    centers = {n: (lambda v: v / np.linalg.norm(v))(rng.normal(size=16)) for n in ("mira", "tobin", "osric", "wren")}
+    records, vectors = [], {}
+    t = 0.0
+
+    def add(label, vec):
+        nonlocal t
+        v = vec / np.linalg.norm(vec)
+        r = SegmentRecord(key=f"k{t}", chunk_id="c", seg_index=0, cue_start=t, start=round(t, 3), end=round(t + 2.0, 3),
+                          label=label, label_source="subtitle_tag", text_hash="h")
+        r.speaker, r.status, r.eligible = label, "label", True
+        vectors[round(t, 3)] = v
+        records.append(r)
+        t += 3.0
+        return r
+
+    for name in ("mira", "tobin", "osric"):
+        for _ in range(15):
+            add(name, centers[name] + 0.05 * rng.normal(size=16))
+    # wren has only 4 labeled lines: too few for a trusted voice profile
+    for _ in range(3):
+        add("wren", centers["wren"] + 0.05 * rng.normal(size=16))
+    thin = add("wren", centers["tobin"] + 0.02 * rng.normal(size=16))
+    # A noisy line equally close to tobin and osric (no clear winner)
+    ambiguous = add("mira", centers["tobin"] + centers["osric"])
+    stats = run_voice_checks(records, _FakeEmbedder(vectors), log=lambda m: None)
+    assert stats["propagation_margin_threshold"] is not None
+    assert ambiguous.voice_best in ("tobin", "osric") and ambiguous.voice_margin < stats["propagation_margin_threshold"]
+    assert thin.status != "voice_mismatch" and thin.eligible and thin.speaker == "wren"
+    assert ambiguous.status != "voice_mismatch" and ambiguous.eligible and ambiguous.speaker == "mira"
+
+
 def test_restrict_inventory_to_ranges():
     import run_mixer
     from contracts import AlignedEvent, InventoryIndex, SourceRecord, WordOccurrence
@@ -337,6 +420,39 @@ def test_scene_selection_by_number_ignores_numbers_in_headings(monkeypatch: pyte
     assert run_mixer.resolve_time_ranges(["00:00:10-00:00:20"], ["3"], ["m.mkv"]) == [(10.0, 20.0), (100.0, 200.0)]
     with pytest.raises(ValueError):
         run_mixer.resolve_time_ranges(None, ["99"], ["m.mkv"])
+
+
+def test_clean_does_not_touch_sources_sharing_a_prefix(tmp_path: Path):
+    from cache import clean_source_cache
+
+    build = tmp_path / ".build"
+    names = [
+        "anakin_ep2_1_bce006b9", "anakin_ep2_2_5623dd18", "anakin_ep3_2_0ed12f5b",
+        "Star_Wars_Episode_II_-_Attack_Of_The_Clo_56214896", "Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3",
+    ]
+    for sub in ("sources", "alignment", "inventory"):
+        for n in names:
+            (build / sub / n).mkdir(parents=True)
+    ep3_sha = "a39114e3f7ca0eae" + "0" * 48
+    ep2_sha = "56214896cf2afcf7" + "0" * 48
+    (build / "movies" / ep3_sha[:16]).mkdir(parents=True)
+    (build / "movies" / ep2_sha[:16]).mkdir(parents=True)
+    (build / "subtitles" / ep3_sha[:16]).mkdir(parents=True)
+    (build / "subtitles" / "labeled").mkdir(parents=True)
+    (build / ".media_hash_index.json").write_text(json.dumps({
+        "D:/m/Star.Wars.Episode.III.-.Revenge.Of.The.Sith.mkv": {"size": 1, "mtime_ns": 1, "sha256": ep3_sha},
+        "D:/m/Star.Wars.Episode.II.-.Attack.Of.The.Clones.mkv": {"size": 1, "mtime_ns": 1, "sha256": ep2_sha},
+    }), encoding="utf-8")
+
+    res = clean_source_cache("anakin_ep2_1", cache_dir=build, dry_run=True, clean_speakers=False)
+    removed = {Path(d).name for d in res["deleted_dirs"]}
+    assert removed == {"anakin_ep2_1_bce006b9"}
+
+    res = clean_source_cache("Star.Wars.Episode.III.-.Revenge.Of.The.Sith", cache_dir=build, dry_run=True, clean_speakers=False)
+    removed_paths = {Path(d).relative_to(build).as_posix() for d in res["deleted_dirs"]}
+    assert "movies/" + ep3_sha[:16] in removed_paths and "subtitles/" + ep3_sha[:16] in removed_paths
+    assert not any("Episode_II_-" in p or ep2_sha[:16] in p or "labeled" in p for p in removed_paths)
+    assert "sources/Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3" in removed_paths
 
 
 def test_map_scenes_orders_and_makes_ranges():
@@ -389,6 +505,24 @@ def test_overrides_roundtrip_and_review(tmp_path: Path, monkeypatch: pytest.Monk
         out=lambda m: None, overrides_dir=tmp_path,
     )
     saved = load_overrides("feedface00000000aa", base=tmp_path)
-    assert saved["k2"]["speaker_id"] == "tobin"  # voice-flagged line comes first; Enter accepts the voice match
+    assert saved["k2"]["speaker_id"] == "mira"  # voice-flagged line comes first; Enter keeps the text label
     assert saved["k1"]["speaker_id"] is None  # marked not usable
     assert "k3" not in saved
+
+    # Each answer is saved immediately: Ctrl+C after the first answer keeps it
+    other = tmp_path / "interrupt"
+    other.mkdir()
+
+    def answer_then_interrupt(prompt, _calls=[]):
+        _calls.append(prompt)
+        if len(_calls) == 1:
+            return "tobin"
+        raise KeyboardInterrupt
+
+    movie_commands.cmd_review_speakers(
+        Path("movie.mkv"), tmp_path, play=False, input_fn=answer_then_interrupt,
+        out=lambda m: None, overrides_dir=other,
+    )
+    kept = load_overrides("feedface00000000aa", base=other)
+    assert kept["k2"]["speaker_id"] == "tobin" and "k1" not in kept
+    assert not list(other.glob("*.tmp_*"))
