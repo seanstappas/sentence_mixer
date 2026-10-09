@@ -1,0 +1,37 @@
+{
+  "media_hash": "a39114e3f7ca0eae26240d21da3d937a11369956256d8347409fd0f25c018219",
+  "source_name": "Star.Wars.Episode.III.-.Revenge.Of.The.Sith.2005.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX].mkv",
+  "note": "Speaker label overrides from review-speakers. Keys are cue start|segment|text hash; no subtitle text.",
+  "overrides": [
+    {
+      "key": "1189.273|0|57596364d3c1cbf8",
+      "start": 1189.315,
+      "end": 1191.705,
+      "speaker_id": "grievous"
+    },
+    {
+      "key": "4493.532|0|8ed3f6e13df33851",
+      "start": 4493.882,
+      "end": 4496.542,
+      "speaker_id": "palpatine"
+    },
+    {
+      "key": "4586.583|0|02723791f8ccf917",
+      "start": 4587.402,
+      "end": 4588.972,
+      "speaker_id": "palpatine"
+    },
+    {
+      "key": "611.779|0|dbe3a3191588237b",
+      "start": 611.688,
+      "end": 613.848,
+      "speaker_id": "obi-wan"
+    },
+    {
+      "key": "7010.213|0|ed248d24f6450e75",
+      "start": 7010.392,
+      "end": 7012.042,
+      "speaker_id": "yoda"
+    }
+  ]
+}

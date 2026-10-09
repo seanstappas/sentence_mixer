@@ -192,6 +192,43 @@ def parse_classic_screenplay(raw_html: str) -> Tuple[List[Speech], List[str]]:
     return speeches, headings
 
 
+def parse_text_screenplay(raw: str) -> Tuple[List[Speech], List[str]]:
+    """Parses a plain-text screenplay where uppercase character cues appear on lines preceding dialogue."""
+    speeches: List[Speech] = []
+    headings: List[str] = []
+    transitions = {"CUT TO:", "FADE IN:", "FADE OUT:", "DISSOLVE TO:", "CONTINUED:", "THE END", "FADE IN", "FADE OUT", "CONTINUED"}
+    for paragraph in re.split(r"\n\s*\n", raw.replace("\r\n", "\n")):
+        lines = [ln.strip() for ln in paragraph.split("\n") if ln.strip()]
+        if not lines:
+            continue
+        first = lines[0]
+        if SCENE_HEADING_RE.match(first) or re.match(r"^\s*(\d+\s+)?(INT\b|EXT\b|INT\.|EXT\.|INT/EXT|I/E\.|SPACE\b)", first, re.IGNORECASE):
+            headings.append(first)
+            lines = lines[1:]
+            if not lines:
+                continue
+            first = lines[0]
+        clean_first = re.sub(r"[\t(].*$", "", first).strip()
+        clean_first = re.sub(r"\s*\([^)]*\)\s*$", "", clean_first).strip()
+        if (
+            clean_first.isupper()
+            and 1 <= len(clean_first) <= 30
+            and len(clean_first.split()) <= 4
+            and clean_first not in transitions
+            and len(lines) > 1
+        ):
+            name = re.sub(r"\((CONT'D|CONTD|CONTINUED|V\.O\.|O\.S\.|O\.C\.|OS|VO)\)", "", clean_first, flags=re.IGNORECASE).strip()
+            text = _strip_directions(" ".join(lines[1:]))
+            if text:
+                speeches.append(Speech(name or clean_first, text, len(headings) - 1 if headings else None))
+        else:
+            for ln in lines:
+                match = SCRIPT_LABEL_RE.match(ln)
+                if match and len(match.group(1).split()) <= 5:
+                    speeches.append(Speech(match.group(1).strip(), _strip_directions(match.group(3)), len(headings) - 1 if headings else None))
+    return [s for s in speeches if s.text], headings
+
+
 def load_script(path: Path) -> Tuple[List[Speech], List[str], str]:
     raw_bytes = path.read_bytes()
     try:
@@ -203,8 +240,13 @@ def load_script(path: Path) -> Tuple[List[Speech], List[str], str]:
             speeches, headings = parse_classic_screenplay(raw)
             return speeches, headings, "screenplay-classic"
         raw = html.unescape(re.sub(r"<[^>]+>", "", raw))
-    speeches, headings = parse_inline_script(raw)
-    return speeches, headings, "inline"
+    text_speeches, text_headings = parse_text_screenplay(raw)
+    labeled_text = sum(1 for s in text_speeches if s.speaker_raw)
+    inline_speeches, inline_headings = parse_inline_script(raw)
+    labeled_inline = sum(1 for s in inline_speeches if s.speaker_raw)
+    if labeled_text > labeled_inline and labeled_text >= 20:
+        return text_speeches, text_headings, "screenplay-text"
+    return inline_speeches, inline_headings, "inline"
 
 
 # ---------------------------------------------------------------------------

@@ -21,19 +21,46 @@ if sys.platform == "win32":
 
 
 PHONETIC_COGNATE_FALLBACKS: Dict[str, List[str]] = {
+    # Glides and high vowels
     "W": ["UW1", "UW0", "UW", "OW1"],  # Labio-velar glide -> labio-velar vowel
     "Y": ["IY1", "IY0", "IY", "IH1"],  # Palatal glide -> high front vowel
+    # Nasals
     "NG": ["N", "M"],                   # Nasals
+    "N": ["M", "NG"],
+    "M": ["N"],
+    # Plosives (voiced <-> voiceless pairs)
     "G": ["K"],                         # Velar plosive
+    "K": ["G"],
     "B": ["P"],                         # Bilabial plosive
+    "P": ["B"],
     "D": ["T"],                         # Alveolar plosive
+    "T": ["D"],
+    # Fricatives (voiced <-> voiceless and adjacent dental/alveolar)
     "V": ["F"],                         # Labiodental fricative
+    "F": ["V"],
     "Z": ["S"],                         # Alveolar fricative
+    "S": ["Z"],
     "ZH": ["SH", "JH"],                 # Post-alveolar fricative
+    "SH": ["ZH", "CH"],
     "DH": ["TH", "D"],                  # Dental fricative
-    "TH": ["T", "S"],                   # Dental fricative
-    "AW": ["AA1", "UW1"],               # Diphthong fallback
-    "OY": ["OW1", "IY1"],               # Diphthong fallback
+    "TH": ["DH", "T", "S"],             # Dental fricative
+    # Affricates
+    "JH": ["CH", "ZH", "SH", "Z"],      # Voiced post-alveolar affricate
+    "CH": ["JH", "SH"],                 # Voiceless post-alveolar affricate
+    # Diphthongs and vowel neighbors
+    "AW": ["AA1", "UW1", "AO1"],        # Diphthong fallback
+    "OY": ["OW1", "IY1", "AO1"],        # Diphthong fallback
+    "AY": ["AA1", "IH1", "AE1", "AH1"],
+    "EY": ["EH1", "AE1", "IY1", "IH1"],
+    "OW": ["AO1", "AA1", "UW1"],
+    "UH": ["UW1", "AH1", "IH1"],
+    "UW": ["UH1", "OW1"],
+    "AO": ["AA1", "OW1"],
+    "AA": ["AO1", "AH1"],
+    "AE": ["EH1", "AA1"],
+    "EH": ["AE1", "EY1", "IH1"],
+    "IH": ["IY1", "EH1", "AH0"],
+    "IY": ["IH1", "EY1"],
 }
 
 

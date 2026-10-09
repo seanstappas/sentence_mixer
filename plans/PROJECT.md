@@ -1,5 +1,7 @@
 # Project: sentence_mixer
 
+Current state and handoff notes: `plans/10_05_handoff.md`.
+
 ## Architecture
 `sentence_mixer` is an automated, video-accurate sentence mixing engine that performs phonetic and phrase-level unit selection from aligned video corpora to synthesize novel speech utterances while maintaining 1:1 audiovisual frame synchronization.
 
@@ -13,6 +15,7 @@
 3. **Unit Selection & Edit Planning**:
    - `src/span_selector.py`: Dynamic programming Viterbi search finds optimal candidate sequence (phrase -> word -> phone).
    - `src/edit_plan.py`: Maps selected candidates to 48kHz project audio sample timeline and rational video frames (the sources' own frame rate by default, `--fps auto`).
+     Extends cuts into following aligned silence (`--release-tail-ms`, default 100) and schedules punctuation pauses as frozen frames, continued source clips, or nothing (`--pause-style freeze|continue|off`).
 4. **Assembly, Post-Processing & Loudness Normalization**:
    - `src/video_assembler.py`: Slices PCM audio (ranged reads via `LazyAudio`, never whole-file decodes), applies crossfade ramps, performs segment leveling and two-pass EBU R128 master loudness normalization (-16 LUFS, -1.0 dBTP), extracts CFR video slices at `--resolution` (1080p default, up to 4K, letterboxed, BT.709), and muxes final MP4/WAV.
 5. **Acceptance Verification & ASR Gate**:
@@ -22,7 +25,10 @@
    - `tools/label_subtitles.py` (offline, before ingest): aligns the movie's own subtitles to local transcripts/screenplays and writes a speaker-labeled WebVTT (`<v speaker>`) plus a report with scene time ranges. Parsing shared via `src/subtitle_parsing.py`; character aliases in `config/characters/*.json`.
    - `src/movie_media.py`: one-time FLAC staging (stereo program; 16 kHz center channel as fallback), 10-minute block vocal separation stitched into full-length stems plus a 16 kHz separated-dialogue analysis track (dialogue is isolated before any analysis), embedded text-subtitle selection/extraction.
    - `src/movie_subtitles.py` + `src/movie_ingest.py`: per-line speakers from `<v>` tags or `Name:` labels, per-block cached MFA alignment, word-to-line speaker assignment by token order, WavLM-SV voice checks (exclude mismatches, propagate confident labels), user overrides from `config/speaker_labels/`, precomputed join features over speech spans.
-   - `src/movie_commands.py`: `speakers`, `scenes`, `review-speakers` CLI commands; `run_mixer.py` adds `--range`/`--scene` filtering, `--resolution`, and `--fps auto`.
+    - `src/movie_commands.py`: `speakers`, `scenes`, `review-speakers` CLI commands; `run_mixer.py` adds `--range`/`--scene` filtering, `--resolution`, and `--fps auto`.
+7. **Multi-Speaker Dialogue Synthesizer & Word-Highlighted Subtitles**:
+   - `src/dialogue_mixer.py`: Parses multi-character dialogue scripts (`speaker: text`), synthesizes turns via `SpanSelector`, stitches `EditPlan` timelines with natural conversational pauses, generates `.ass` word-timed subtitles where active words highlight dynamically in bright yellow, and burns subtitles via FFmpeg.
+   - `tools/render_dialogue_clips.py`: CLI runner for multi-speaker scenes with options `--clip 1|2|all` and `--resolution 1080p|4k`.
 
 ---
 
@@ -47,6 +53,8 @@
 | 16 | Legacy Sample Rate Skew Fix | Use source native sample rate rather than hardcoded 48kHz in `video_assembler.py` legacy adapter | M4 | R4 |
 | 17 | End-to-End Moxy Verification | Verify synthesis of "Anakin, I have the MOXY!" produces exact dialogue with zero "high ground" bleed | M5 | Acceptance |
 | 18 | Regression Test Suite Pass | 100% pass across all existing and new automated tests in `tests/` | M5 | Acceptance |
+| 19 | Multi-Speaker Dialogue Synthesizer | `src/dialogue_mixer.py` multi-character script parsing, timeline concatenation, and conversational pause insertion | M6 | Dialogue |
+| 20 | Word-by-Word Highlighted Subtitle Burning | Dynamic ASS subtitle card generation with active word highlighting and FFmpeg burn-in | M6 | Dialogue |
 
 ---
 

@@ -6,13 +6,14 @@ overlap crossfades, pauses, and loudness normalization into an immutable EditPla
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
 import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import soundfile as sf
@@ -29,6 +30,94 @@ from contracts import (
 )
 from media_time import cumulative_frame_ceiling, samples_to_seconds
 
+CONTINUE_SPAN_TYPE = "continue"
+PAUSE_STYLES = ("freeze", "continue", "off")
+RELEASE_GUARD_SEC = 0.030
+SEGMENT_END_FADE_SEC = 0.010
+CONTINUE_SPEECH_GUARD_SEC = 0.040
+CONTINUE_MIN_SEC = 0.080
+CONTINUE_SPEECH_DROP_DB = 12.0
+
+
+def release_tail_samples(span: SpanCandidate, inventory: InventoryIndex, tail_sec: float) -> int:
+    """
+    Native samples to extend a cut past its last aligned phone when that phone is followed
+    by aligned silence. Forced alignment tends to end word-final consonants (f, s, th, t)
+    early, so a hard cut at the boundary clips their release. The tail stays a guard short
+    of whatever follows the silence.
+    """
+    if tail_sec <= 0 or not span.event_ids:
+        return 0
+    last = inventory.events.get(span.event_ids[-1])
+    if last is None or last.kind != "phone" or span.end_sample < last.end_sample - 1:
+        return 0
+    succ = inventory.events.get(last.successor_id) if last.successor_id else None
+    if succ is None or succ.kind != "silence":
+        return 0
+    src = inventory.sources.get(span.source_content_id)
+    sr = src.native_sample_rate if src and src.native_sample_rate else 48000
+    room = succ.end_sample - max(succ.start_sample, span.end_sample) - int(round(RELEASE_GUARD_SEC * sr))
+    return max(0, min(int(round(tail_sec * sr)), room))
+
+
+class _SpeechIndex:
+    """Aligned phone intervals per source (all speakers), for finding where speech resumes."""
+
+    def __init__(self, inventory: InventoryIndex):
+        per: Dict[str, List[Tuple[int, int]]] = {}
+        for ev in inventory.events.values():
+            if ev.kind == "phone":
+                per.setdefault(ev.source_content_id, []).append((ev.start_sample, ev.end_sample))
+        self.starts: Dict[str, List[int]] = {}
+        self.ends: Dict[str, List[int]] = {}
+        for sid, items in per.items():
+            items.sort()
+            self.starts[sid] = [a for a, _ in items]
+            self.ends[sid] = [b for _, b in items]
+
+    def free_after(self, source_id: str, start: int, limit: int) -> int:
+        """Samples after `start` (up to `limit`) before the next aligned speech in the source."""
+        starts = self.starts.get(source_id)
+        if not starts:
+            return limit
+        ends = self.ends[source_id]
+        i = bisect.bisect_right(starts, start)
+        for j in range(max(0, i - 30), i):
+            if ends[j] > start:
+                return 0
+        if i < len(starts):
+            return max(0, min(limit, starts[i] - start))
+        return limit
+
+
+def _voice_free_samples(src_rec, start: int, limit: int, ref_start: int, ref_end: int) -> int:
+    """
+    Samples after `start` (up to `limit`) before the dialogue track gets loud again, relative to
+    the level of the word just spoken. Catches speech the subtitles never aligned.
+    """
+    path = getattr(src_rec, "cached_analysis_pcm_path", "") or ""
+    if not path or not Path(path).exists() or limit <= 0:
+        return limit
+    try:
+        sr_native = src_rec.native_sample_rate or 48000
+        info = sf.info(path)
+        fsr = info.samplerate
+        to_file = lambda n: int(round(n * fsr / sr_native))  # noqa: E731
+        ref, _ = sf.read(path, start=to_file(ref_start), stop=max(to_file(ref_end), to_file(ref_start) + 1), dtype="float32", always_2d=True)
+        ref_db = 20 * np.log10(np.sqrt(np.mean(ref.mean(axis=1) ** 2)) + 1e-9)
+        y, _ = sf.read(path, start=to_file(start), stop=to_file(start + limit), dtype="float32", always_2d=True)
+        y = y.mean(axis=1)
+        hop = max(1, int(0.020 * fsr))
+        for k in range(0, len(y), hop):
+            frame = y[k:k + hop]
+            if len(frame) == 0:
+                break
+            if 20 * np.log10(np.sqrt(np.mean(frame ** 2)) + 1e-9) > ref_db - CONTINUE_SPEECH_DROP_DB:
+                return int(round(k * sr_native / fsr))
+        return limit
+    except Exception:
+        return limit
+
 
 def build_edit_plan(
     selected_spans: List[SpanCandidate],
@@ -39,10 +128,20 @@ def build_edit_plan(
     rendering_mode: Literal["source-derived", "cuts-only"] = "source-derived",
     overlap_duration_ms: float = 14.0,
     lead_in_sec: float = 0.0,
+    pause_style: str = "freeze",
+    release_tail_sec: float = 0.0,
 ) -> EditPlan:
     """
     Constructs an immutable, sample-accurate EditPlan from selected spans.
+
+    pause_style controls punctuation pauses: "freeze" holds the last frame over silence,
+    "continue" lets the source clip play on (picture and its background audio) while the
+    source has no speech, then holds the frame for any remainder, "off" drops punctuation
+    pauses (explicit <gap:...> tags are kept, frozen). release_tail_sec extends a cut into
+    following aligned silence so word-final consonants are not clipped (0 disables).
     """
+    if pause_style not in PAUSE_STYLES:
+        raise ValueError(f"pause_style must be one of {PAUSE_STYLES}, got {pause_style!r}")
     if video_fps is None:
         video_fps = RationalTime(30000, 1001)
 
@@ -101,12 +200,130 @@ def build_edit_plan(
             overlap_samples=0,
         ))
 
+    speech_index: Optional[_SpeechIndex] = None
+    tail_sec = release_tail_sec if rendering_mode != "cuts-only" else 0.0
+    end_fade = int(round(SEGMENT_END_FADE_SEC * project_sample_rate))
+
+    def pause_seconds(token_index: int) -> float:
+        explicit_gaps = getattr(graph, "explicit_gaps", {})
+        if token_index in explicit_gaps:
+            return explicit_gaps[token_index]
+        if rendering_mode == "cuts-only" or pause_style == "off":
+            return 0.0
+        return graph.punctuation_pauses.get(token_index, 0.0)
+
+    def emit_pause(prev_seg: PlanSegment, pause_sec: float, explicit: bool) -> PlanSegment:
+        """Appends pause segment(s) after prev_seg; returns the last one."""
+        nonlocal seg_idx, current_output_sample, speech_index
+        pause_samples = int(round(pause_sec * project_sample_rate))
+        last_seg = prev_seg
+        freeze_pts = prev_seg.video_source_pts_sec + float(prev_seg.duration_samples) / float(project_sample_rate)
+
+        src_rec = inventory.sources.get(prev_seg.source_content_id)
+        if pause_style == "continue" and not explicit and not prev_seg.is_silence and src_rec is not None:
+            sr = src_rec.native_sample_rate or project_sample_rate
+            want = int(round(pause_sec * sr))
+            start = prev_seg.source_end_sample
+            if speech_index is None:
+                speech_index = _SpeechIndex(inventory)
+            guard = int(round(CONTINUE_SPEECH_GUARD_SEC * sr))
+            free = max(0, speech_index.free_after(prev_seg.source_content_id, start, want + guard) - guard)
+            free = min(free, _voice_free_samples(src_rec, start, want, prev_seg.source_start_sample, prev_seg.source_end_sample))
+            total_src = int(round((src_rec.audio_duration_sec or 0.0) * sr))
+            if total_src > 0:
+                free = min(free, max(0, total_src - start))
+            cont = min(free, want)
+            if cont >= int(round(CONTINUE_MIN_SEC * sr)):
+                cont_proj = int(round(cont * project_sample_rate / float(sr)))
+                c_start = current_output_sample
+                c_end = c_start + cont_proj
+                c_seg = PlanSegment(
+                    segment_index=seg_idx,
+                    source_content_id=prev_seg.source_content_id,
+                    speaker_id=prev_seg.speaker_id,
+                    source_start_sample=start,
+                    source_end_sample=start + cont,
+                    output_start_sample=c_start,
+                    output_end_sample=c_end,
+                    target_text="[pause]",
+                    target_phones=["sil"],
+                    span_type=CONTINUE_SPAN_TYPE,
+                    source_video_path=prev_seg.source_video_path,
+                    fade_out_samples=min(end_fade, cont_proj),
+                    video_start_frame=cumulative_frame_ceiling(c_start, project_sample_rate, video_fps),
+                    video_frame_count=0,
+                    video_source_pts_sec=samples_to_seconds(start, sr),
+                )
+                segments.append(c_seg)
+                transitions.append(PlanTransition(
+                    transition_index=len(transitions),
+                    from_segment_index=prev_seg.segment_index,
+                    to_segment_index=c_seg.segment_index,
+                    transition_type="continuation",
+                    overlap_samples=0,
+                ))
+                seg_idx += 1
+                current_output_sample = c_end
+                last_seg = c_seg
+                pause_samples = max(0, pause_samples - cont_proj)
+                freeze_pts = samples_to_seconds(start + cont, sr)
+
+        if pause_samples <= 0 and last_seg is not prev_seg:
+            return last_seg
+        p_start = current_output_sample
+        p_end = p_start + pause_samples
+        p_start_frame = cumulative_frame_ceiling(p_start, project_sample_rate, video_fps)
+        p_end_frame = cumulative_frame_ceiling(p_end, project_sample_rate, video_fps)
+        pause_seg = PlanSegment(
+            segment_index=seg_idx,
+            source_content_id="silence",
+            speaker_id=prev_seg.speaker_id,
+            source_start_sample=0,
+            source_end_sample=pause_samples,
+            output_start_sample=p_start,
+            output_end_sample=p_end,
+            target_text="[pause]",
+            target_phones=["sil"],
+            span_type="pause",
+            source_video_path=prev_seg.source_video_path,
+            is_silence=True,
+            freeze_video=True,
+            video_start_frame=p_start_frame,
+            video_frame_count=p_end_frame - p_start_frame,  # may be 0 for <gap:0ms>
+            video_source_pts_sec=freeze_pts,
+        )
+        segments.append(pause_seg)
+        transitions.append(PlanTransition(
+            transition_index=len(transitions),
+            from_segment_index=last_seg.segment_index,
+            to_segment_index=pause_seg.segment_index,
+            transition_type="pause",
+            overlap_samples=0,
+        ))
+        seg_idx += 1
+        current_output_sample = p_end
+        return pause_seg
+
     for i, span in enumerate(selected_spans):
         src_rec = inventory.sources[span.source_content_id]
         native_sr = src_rec.native_sample_rate
+        next_span = selected_spans[i + 1] if i < len(selected_spans) - 1 else None
+
+        # Determine if the next span is a natural continuation of this one
+        is_cont = False
+        if next_span is not None and span.source_content_id == next_span.source_content_id:
+            if span.end_sample == next_span.start_sample:
+                is_cont = True
+            elif span.event_ids and next_span.event_ids:
+                last_ev = inventory.events.get(span.event_ids[-1])
+                if last_ev and last_ev.successor_id == next_span.event_ids[0]:
+                    is_cont = True
+
+        tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec)
+        span_end = span.end_sample + tail
 
         # Duration in native samples
-        native_duration = span.end_sample - span.start_sample
+        native_duration = span_end - span.start_sample
         # Resampled duration at project sample rate
         resampled_duration = int(round(float(native_duration) * project_sample_rate / float(native_sr)))
 
@@ -141,13 +358,14 @@ def build_edit_plan(
             source_content_id=span.source_content_id,
             speaker_id=span.speaker_id,
             source_start_sample=span.start_sample,
-            source_end_sample=span.end_sample,
+            source_end_sample=span_end,
             output_start_sample=seg_start_sample,
             output_end_sample=seg_end_sample,
             target_text=target_label,
             target_phones=target_phones,
             span_type=span.span_type,
             source_video_path=src_rec.source_path,
+            fade_out_samples=min(end_fade, resampled_duration // 4) if tail > 0 else 0,
             video_start_frame=start_frame,
             video_frame_count=frame_count,
             video_source_pts_sec=source_pts,
@@ -160,75 +378,22 @@ def build_edit_plan(
         current_output_sample = seg_end_sample
 
         # Check transition to next segment
-        if i < len(selected_spans) - 1:
-            next_span = selected_spans[i + 1]
-
-            # Determine if this is a natural continuation
-            is_cont = False
-            if span.source_content_id == next_span.source_content_id:
-                if span.end_sample == next_span.start_sample:
-                    is_cont = True
-                elif span.event_ids and next_span.event_ids:
-                    last_ev = inventory.events.get(span.event_ids[-1])
-                    if last_ev and last_ev.successor_id == next_span.event_ids[0]:
-                        is_cont = True
-
+        if next_span is not None:
             # Check if there is an explicit pause between these words
             last_node = graph.nodes[span.covered_nodes[-1]]
             next_first_node = graph.nodes[next_span.covered_nodes[0]]
 
             pause_sec = 0.0
+            explicit = False
             if last_node.token_index != next_first_node.token_index and last_node.is_word_final:
-                explicit_gaps = getattr(graph, "explicit_gaps", {})
-                if last_node.token_index in explicit_gaps:
-                    pause_sec = explicit_gaps[last_node.token_index]
-                elif rendering_mode != "cuts-only":
-                    pause_sec = graph.punctuation_pauses.get(last_node.token_index, 0.0)
+                explicit = last_node.token_index in getattr(graph, "explicit_gaps", {})
+                pause_sec = pause_seconds(last_node.token_index)
 
             if pause_sec > 0.0:
-                # Insert explicit pause segment
-                pause_samples = int(round(pause_sec * project_sample_rate))
-                p_start = current_output_sample
-                p_end = p_start + pause_samples
-
-                p_start_frame = cumulative_frame_ceiling(p_start, project_sample_rate, video_fps)
-                p_end_frame = cumulative_frame_ceiling(p_end, project_sample_rate, video_fps)
-                p_source_pts = source_pts + (float(resampled_duration) / float(project_sample_rate))
-
-                pause_seg = PlanSegment(
-                    segment_index=seg_idx,
-                    source_content_id="silence",
-                    speaker_id=span.speaker_id,
-                    source_start_sample=0,
-                    source_end_sample=pause_samples,
-                    output_start_sample=p_start,
-                    output_end_sample=p_end,
-                    target_text="[pause]",
-                    target_phones=["sil"],
-                    span_type="pause",
-                    source_video_path=src_rec.source_path,
-                    is_silence=True,
-                    freeze_video=True,
-                    video_start_frame=p_start_frame,
-                    video_frame_count=p_end_frame - p_start_frame,  # may be 0 for <gap:0ms>
-                    video_source_pts_sec=p_source_pts,
-                )
-                segments.append(pause_seg)
-                seg_idx += 1
-
+                last_pause = emit_pause(seg, pause_sec, explicit)
                 transitions.append(PlanTransition(
                     transition_index=len(transitions),
-                    from_segment_index=seg.segment_index,
-                    to_segment_index=pause_seg.segment_index,
-                    transition_type="pause",
-                    overlap_samples=0,
-                ))
-
-                current_output_sample = p_end
-
-                transitions.append(PlanTransition(
-                    transition_index=len(transitions),
-                    from_segment_index=pause_seg.segment_index,
+                    from_segment_index=last_pause.segment_index,
                     to_segment_index=seg_idx,  # points to next segment
                     transition_type="hard_splice",
                     overlap_samples=0,
@@ -270,51 +435,10 @@ def build_edit_plan(
     # Check for trailing gap (boundary after last token)
     if selected_spans and segments:
         last_node = graph.nodes[selected_spans[-1].covered_nodes[-1]]
-        explicit_gaps = getattr(graph, "explicit_gaps", {})
-        if last_node.token_index in explicit_gaps:
-            trailing_gap = explicit_gaps[last_node.token_index]
-        elif rendering_mode != "cuts-only":
-            trailing_gap = graph.punctuation_pauses.get(last_node.token_index, 0.0)
-        else:
-            trailing_gap = 0.0
-
+        trailing_gap = pause_seconds(last_node.token_index)
         if trailing_gap > 0.0:
-            last_speech_seg = segments[-1]
-            pause_samples = int(round(trailing_gap * project_sample_rate))
-            p_start = current_output_sample
-            p_end = p_start + pause_samples
-
-            p_start_frame = cumulative_frame_ceiling(p_start, project_sample_rate, video_fps)
-            p_end_frame = cumulative_frame_ceiling(p_end, project_sample_rate, video_fps)
-
-            pause_seg = PlanSegment(
-                segment_index=seg_idx,
-                source_content_id="silence",
-                speaker_id=last_speech_seg.speaker_id,
-                source_start_sample=0,
-                source_end_sample=pause_samples,
-                output_start_sample=p_start,
-                output_end_sample=p_end,
-                target_text="[pause]",
-                target_phones=["sil"],
-                span_type="pause",
-                source_video_path=last_speech_seg.source_video_path,
-                is_silence=True,
-                freeze_video=True,
-                video_start_frame=p_start_frame,
-                video_frame_count=p_end_frame - p_start_frame,
-                video_source_pts_sec=last_speech_seg.video_source_pts_sec,
-            )
-            segments.append(pause_seg)
-            transitions.append(PlanTransition(
-                transition_index=len(transitions),
-                from_segment_index=last_speech_seg.segment_index,
-                to_segment_index=pause_seg.segment_index,
-                transition_type="pause",
-                overlap_samples=0,
-            ))
-            seg_idx += 1
-            current_output_sample = p_end
+            explicit = last_node.token_index in getattr(graph, "explicit_gaps", {})
+            emit_pause(segments[-1], trailing_gap, explicit)
 
     total_output_samples = current_output_sample
     total_video_frames = cumulative_frame_ceiling(total_output_samples, project_sample_rate, video_fps)
@@ -403,7 +527,9 @@ def finalize_edit_plan(
     curr_run: List[PlanSegment] = []
 
     for seg in plan.segments:
-        if seg.is_silence:
+        if seg.is_silence or seg.span_type == CONTINUE_SPAN_TYPE:
+            # Continued pauses (the clip playing on after a word) are not speech: they take
+            # the gain of the word they continue (set below), never their own leveling.
             seg.gain_db = 0.0
             if curr_run:
                 runs.append(curr_run)
@@ -509,7 +635,7 @@ def finalize_edit_plan(
     # to <= 3.0 dB to prevent jarring volume jumps between consonants and vowels, while allowing
     # full multi-clip leveling range between long independent dialogue phrases.
     if not is_cuts_only and normalize_loudness:
-        speech_indices = [idx for idx, s in enumerate(plan.segments) if not s.is_silence]
+        speech_indices = [idx for idx, s in enumerate(plan.segments) if not s.is_silence and s.span_type != CONTINUE_SPAN_TYPE]
         threshold_samples = int(round(0.250 * plan.project_sample_rate))
         if len(speech_indices) > 1:
             for i in range(len(speech_indices) - 1):
@@ -559,7 +685,7 @@ def finalize_edit_plan(
         # Step 1c: Sentence-level speech leveling anchor
         # Prevent any speech segment inside a sentence from dropping > 3.5 dB below the median
         # sentence speech level to prevent quiet words or suffixes (e.g. 'pudding') from being swallowed.
-        speech_segs = [s for s in plan.segments if not s.is_silence]
+        speech_segs = [s for s in plan.segments if not s.is_silence and s.span_type != CONTINUE_SPAN_TYPE]
         if speech_segs:
             speech_levels = [segment_rms_db.get(s.segment_index, -20.0) + (s.gain_db or 0.0) for s in speech_segs]
             median_level = float(np.median(speech_levels))
@@ -571,6 +697,11 @@ def finalize_edit_plan(
                     is_subword_or_phone = s.span_type in ("subword", "phone")
                     limit_db = 12.0 if is_subword_or_phone else 9.0
                     s.gain_db = float(min(limit_db, (s.gain_db or 0.0) + deficit))
+
+    # Continued pauses inherit the gain of the segment they continue
+    for k, s in enumerate(plan.segments):
+        if s.span_type == CONTINUE_SPAN_TYPE and k > 0:
+            s.gain_db = plan.segments[k - 1].gain_db or 0.0
 
     # Step 2: Measure loudness on an unpublished analysis master and record metadata
     if not is_cuts_only and normalize_loudness:

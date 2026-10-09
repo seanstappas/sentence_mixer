@@ -197,8 +197,8 @@ class VoiceEmbedder:
         self.cache: Dict[str, np.ndarray] = {}
         if cache_path.exists():
             try:
-                data = np.load(str(cache_path))
-                self.cache = {k: data[k] for k in data.files}
+                with np.load(str(cache_path)) as data:
+                    self.cache = {k: data[k].copy() for k in data.files}
             except Exception:
                 self.cache = {}
         self.dirty = False

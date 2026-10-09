@@ -232,6 +232,38 @@ Known limitations and next steps:
   (M06), proxy video and isolation-input options (M01), center-vs-stereo separation
   comparison.
 
+## 2C. Done on 2026-10-05: quality fixes after user testing
+
+Full handoff (state, measurements, traps, open work): [10_05_handoff.md](10_05_handoff.md).
+
+- Voice checks no longer overrule text labels on weak evidence (false Gunray-as-Mace-Windu
+  flag): flags need a >= 0.10 gap, a calibrated lead over every other voice, and >= 5 other
+  lines for the labeled speaker. Flags 21 -> 8 (Episode II), 42 -> 7 (Episode III).
+- Dialogue is isolated before any analysis (alignment, voice checks, join features read
+  `analysis_vocals_16k.flac`); center channel only as fallback, including a retry for chunks
+  MFA cannot align from vocals (14 recovered). Both movies re-aligned; 100% of cues aligned.
+- Lines whose voice was removed by separation are marked `separation_dropped` (5 lines).
+- `review-speakers`: non-blocking playback, `--audio mix|center|vocals`, every answer saved
+  immediately (atomic writes), Enter keeps the text label.
+- Rendering: `--release-tail-ms` (default 100) extends cuts into following silence so
+  word-final consonants are not clipped; `--pause-style freeze|continue|off`; per-segment
+  end fades; freeze after the last word now shows the frame after it, not its first frame.
+
+## 2D. Done on 2026-10-06: Episode VI ingest and multi-speaker dialogue scenes
+
+- **Episode VI (*Return of the Jedi*) Ingested**:
+  - Embedded English SDH subtitles extracted, transcripts and screenplays aligned.
+  - All 13 blocks (131 min) aligned via MFA, stems separated (`vocals.flac` / `instrumental.flac`), join features precomputed, voice checks calibrated.
+  - 29 speakers indexed into `.build/inventory/Star_Wars_Episode_VI_-_Return_Of_The_Jed_3d083b52/units_index.json` (5,764 words).
+- **Multi-Speaker Dialogue Synthesizer (`src/dialogue_mixer.py`)**:
+  - Script parser (`speaker: line`) with hyphen normalization and speaker aliasing (`sidious` -> `palpatine`).
+  - Concatenates multiple `EditPlan` timelines with natural conversational pauses (`concat_edit_plans`).
+  - Word-by-word highlighted ASS subtitle generation (`generate_highlighted_ass_subtitles`) with active yellow highlight (`&H0000FFFF&`) and intra-card continuity to prevent flickering during pauses.
+  - Automated FFmpeg subtitle burning into CFR MP4 deliveries with recombined master audio (-16 LUFS).
+- **CLI Scene Runner (`tools/render_dialogue_clips.py`)**:
+  - Rendered `output/episode_3_anakin_mace.mp4` (26.9s, 1080p, 14.1 MB).
+  - Rendered `output/episode_6_luke_palpatine_vader.mp4` (22.3s, 1080p, 9.8 MB).
+
 ## 3. Design overview
 
 ```text

@@ -145,7 +145,8 @@ def extract_cues_from_plan(
         curr_group = []
 
     for seg in plan.segments:
-        if seg.is_silence:
+        # Continued pauses (clip playing on after a word) end a phrase like silence does
+        if seg.is_silence or seg.span_type == "continue":
             _flush_group()
         else:
             curr_group.append(seg)

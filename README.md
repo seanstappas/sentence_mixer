@@ -153,6 +153,24 @@ python run_mixer.py mix \
   --render "output/burned_mix.mp4"
 ```
 
+### 4. Multi-Speaker Dialogue Scenes & Dynamic Word-by-Word Highlighting
+
+For conversational scenes involving multiple characters (e.g. comedic scripts or comic dubs), the toolkit provides a dedicated dialogue synthesizer (`src/dialogue_mixer.py` and `tools/render_dialogue_clips.py`):
+
+```bash
+# Render pre-configured comic dialogue scenes with burned-in word-highlighted subtitles
+python tools/render_dialogue_clips.py --clip 1      # Episode III: Anakin & Mace Windu
+python tools/render_dialogue_clips.py --clip 2      # Episode VI: Luke, Palpatine & Vader
+python tools/render_dialogue_clips.py --clip all --resolution 1080p
+```
+
+**Key Features:**
+- **Script Parsing**: Accepts multi-line `speaker: dialogue` scripts with automatic hyphen normalization and speaker alias resolution.
+- **Timeline Concatenation**: Chains each speaker's `EditPlan` into a single CFR master timeline with natural conversational pauses (`0.45s` default) between speaker turns.
+- **Active Word Highlighting**: Generates Advanced SubStation Alpha (`.ass`) subtitles where the sentence clause stays centered and stable on screen, while each spoken word dynamically highlights in bright yellow (`&H0000FFFF&` with black outline) during its exact acoustic duration.
+- **Anti-Flicker Card Continuity**: Gaps between words and trailing pauses are automatically bridged with held subtitle text so cards never flash or disappear mid-clause.
+- **Recombined Master Audio**: Mixes dialogue cuts cleanly over the source film's original background music and sound effects with EBU R128 (-16 LUFS) normalization.
+
 ---
 
 ## Corpus Ingestion & Continuous Watch Mode (`ingest`)
@@ -308,6 +326,7 @@ $$C_{\text{total}} = \sum C_{\text{target}}(u_i) + \sum C_{\text{join}}(u_{i-1},
 - **Join / Concatenation Cost**: Evaluates physical boundary compatibility using measured energy differences, spectral flux, voicing continuity, and F0 pitch steps.
 
 ### Cadence Tags & Span Markup
+- **Pause styles (`--pause-style`)**: commas pause 0.25 s and `. ! ? ; :` pause 0.45 s. `freeze` (default) holds the frame; `continue` keeps the source clip running through the pause when nobody speaks next in the source (checked against aligned speech and the dialogue level), falling back to a held frame once speech would start; `off` removes punctuation pauses.
 - **Cadence Pauses (`<gap:Xms>`)**: Insert hard timeline gaps without audio bridging (e.g. `Hello <gap:350ms> there`).
 - **Explicit Pronunciation Branches (`{...}`)**: Disambiguate homographs or force phonetic realizations (e.g. `{R EH1 D}` vs `{R IY1 D}`).
 - **Prosody Guidance (`--guide <audio>` + `--guide-transcript <path>`)**: Biases candidate selection toward a human speaker's pitch contour and rhythm without donating guide audio.
@@ -362,6 +381,8 @@ By default (`--audio-track recombined`), the rendering pipeline uses a high-fide
 | `--subtitle-style classic\|modern`| Subtitle styling (`classic` YTP yellow, `modern` clean white) | `classic` |
 | `--subtitle-mode phrase\|word` | Subtitle timing mode (`phrase` clauses, `word` highlights) | `phrase` |
 | `--fps <rate>` | Timeline framerate: `auto` (the sources' own rate) or e.g. `30000/1001`, `24` | `auto` |
+| `--pause-style freeze\|continue\|off` | Punctuation pauses: `freeze` holds the last frame over silence; `continue` lets the clip play on (picture and background audio) while the source has no speech, then holds the frame for any remainder; `off` drops punctuation pauses (`<gap:...>` tags still apply) | `freeze` |
+| `--release-tail-ms <ms>` | Extend each cut up to this far into following silence so word-final consonants (f, s, th, t) are not clipped; stops 30 ms short of any following sound and ends with a 10 ms fade (`0` disables) | `100` |
 | `--resolution <size>` | Output video size: `1080p`, `1440p`, `4k` (3840x2160), `source`, or `WxH` (letterboxed) | `1080p` |
 | `--range <START-END>` | Movies: only use words inside this time range (repeatable), e.g. `01:30:00-01:35:00` | `None` |
 | `--scene <n\|keyword>` | Movies: only use words inside a scene (see `scenes` command) | `None` |
@@ -436,6 +457,7 @@ sentence_mixer/
 │   ├── anakin_sources.json         # Evaluation source manifests
 │   └── smoke_sources.json
 ├── src/
+│   ├── dialogue_mixer.py           # Multi-character dialogue scene synthesis & highlighted subtitles
 │   ├── diarization.py              # WavLM speaker verification & turn clustering
 │   ├── fcp_xml_generator.py        # Final Cut Pro 7 / Premiere Pro XML timeline generator
 │   ├── inspect_alignment.py        # Spectrogram & terminal alignment inspector
@@ -458,6 +480,7 @@ sentence_mixer/
 │   ├── evaluate.py                 # Automated multi-stratum test evaluation harness
 │   ├── label_subtitles.py          # Speaker-labeled movie subtitles from transcripts/screenplays
 │   ├── listen_verify.py            # Unprimed ASR listening verification gate
+│   ├── render_dialogue_clips.py    # Multi-speaker dialogue scene CLI runner
 │   └── validate_mix.py             # Timing, sample count, and manifest validator
 ├── README.md                       # Comprehensive documentation & setup guide
 └── run_mixer.py                    # Unified CLI entry point (`mix`, `ingest`, `speakers`, `scenes`, `review-speakers`, `clean`, ...)

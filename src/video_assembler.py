@@ -96,6 +96,24 @@ class LazyAudio:
         return data
 
 
+def _apply_segment_fades(slice_audio: np.ndarray, seg: Any) -> np.ndarray:
+    """Applies the segment's own fade-in/out ramps (project-rate samples), e.g. the end of a
+    word release tail or a continued pause, so it never stops on a click."""
+    n = len(slice_audio)
+    fi = min(int(getattr(seg, "fade_in_samples", 0) or 0), n)
+    fo = min(int(getattr(seg, "fade_out_samples", 0) or 0), n)
+    if fi <= 0 and fo <= 0:
+        return slice_audio
+    out = np.array(slice_audio, dtype=np.float32, copy=True)
+    if fi > 0:
+        ramp = np.linspace(0.0, 1.0, fi, dtype=np.float32)
+        out[:fi] *= ramp[:, np.newaxis] if out.ndim > 1 else ramp
+    if fo > 0:
+        ramp = np.linspace(1.0, 0.0, fo, dtype=np.float32)
+        out[n - fo:] *= ramp[:, np.newaxis] if out.ndim > 1 else ramp
+    return out
+
+
 def _open_source_audio(path: Union[str, Path]) -> Tuple[Any, int]:
     """Opens an audio file for ranged reads (falls back to a full read if unsupported)."""
     try:
@@ -467,6 +485,8 @@ def render_master_pcm(
                 elif not is_stereo and slice_audio.ndim > 1:
                     slice_audio = np.mean(slice_audio, axis=1)
 
+                slice_audio = _apply_segment_fades(slice_audio, seg)
+
                 # Splice into master buffer
                 out_start = seg.output_start_sample
                 out_end = min(total_samples, out_start + expected_dur)
@@ -566,6 +586,8 @@ def render_master_pcm(
             slice_audio = np.column_stack([slice_audio, slice_audio])
         elif not is_stereo and slice_audio.ndim > 1:
             slice_audio = np.mean(slice_audio, axis=1)
+
+        slice_audio = _apply_segment_fades(slice_audio, seg)
 
         # Splice into master buffer
         out_start = seg.output_start_sample

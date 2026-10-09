@@ -543,3 +543,47 @@ def test_asymmetric_vowel_duration_preference():
     assert c_long.target_cost < c_rushed.target_cost
 
 
+def test_graded_fallback_ladder_cognate_and_manner_bridge():
+    """
+    Validates that missing phones in a limited inventory gracefully resolve
+    via acoustic cognates and manner-of-articulation bridges without breaking Viterbi DP.
+    """
+    sr = 16000
+    src = SourceRecord("s1", "vid.mp4", native_sample_rate=sr, native_channels=1)
+    events: Dict[str, AlignedEvent] = {}
+
+    # Speaker only has T (alveolar plosive) and EH1 (vowel)
+    events["ev_t"] = AlignedEvent("ev_t", "s1", "u1", "spk1", "phone", 1000, 2500, "T", "T")
+    events["ev_eh"] = AlignedEvent("ev_eh", "s1", "u2", "spk1", "phone", 3000, 5000, "EH1", "EH")
+
+    inv = InventoryIndex(
+        sources={"s1": src},
+        events=events,
+        words={},
+        phone_to_event_ids={"T": ["ev_t"], "EH1": ["ev_eh"]},
+        base_phone_to_event_ids={"T": ["ev_t"], "EH": ["ev_eh"]},
+    )
+
+    lex = Lexicon()
+    builder = TargetGraphBuilder(lex)
+    # Target requires D (cognate to T) and EY1 (diphthong cognate to EH)
+    graph = builder.build("{D} {EY1}")
+
+    selector = SpanSelector(inv, edit_penalty=0.3)
+    path = selector.select(graph, speaker_id="spk1")
+
+    assert len(path) == 2
+    assert path[0].span_type == "phone"
+    assert path[0].event_ids == ["ev_t"]  # D mapped to T cognate
+    assert path[1].span_type == "phone"
+    assert path[1].event_ids == ["ev_eh"]  # EY1 mapped to EH cognate
+
+    # When a required phone and its acoustic cognates are completely absent (e.g. G with no K),
+    # SpanSelector must strictly raise ValueError rather than synthesizing arbitrary sounds.
+    import pytest
+    graph_missing = builder.build("{EH1} {G}")
+    with pytest.raises(ValueError, match="Could not find a continuous phonetic path"):
+        selector.select(graph_missing, speaker_id="spk1")
+
+
+

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
@@ -75,11 +76,14 @@ def precompute_span_features(
     arrays: Dict[str, np.ndarray]
     done: set = set()
     if out.exists():
-        data = np.load(str(out))
-        if int(data.get("version", 0)) == SPAN_FEATURES_VERSION and int(data["n_frames"]) == n_total:
-            arrays = {k: data[k].copy() for k in ("rms", "centroid", "mfcc", "f0", "voiced_flag", "voiced_probs")}
-            done = {(round(float(a), 3), round(float(b), 3)) for a, b in data["spans_done"]}
-        else:
+        try:
+            with np.load(str(out)) as data:
+                if int(data.get("version", 0)) == SPAN_FEATURES_VERSION and int(data["n_frames"]) == n_total:
+                    arrays = {k: data[k].copy() for k in ("rms", "centroid", "mfcc", "f0", "voiced_flag", "voiced_probs")}
+                    done = {(round(float(a), 3), round(float(b), 3)) for a, b in data["spans_done"]}
+                else:
+                    arrays = {}
+        except Exception:
             arrays = {}
     else:
         arrays = {}
@@ -126,7 +130,13 @@ def precompute_span_features(
         spans_done=np.array(sorted(done), dtype=np.float64).reshape(-1, 2),
         **arrays,  # type: ignore[arg-type]
     )
-    os.replace(tmp, out)
+    try:
+        os.replace(tmp, out)
+    except PermissionError:
+        time.sleep(0.5)
+        if out.exists():
+            out.unlink(missing_ok=True)
+        os.replace(tmp, out)
     return out
 
 
@@ -167,9 +177,9 @@ class ContinuousFeatureExtractor:
                 span_cache = span_features_path(p)
                 if span_cache.exists():
                     try:
-                        data = np.load(str(span_cache))
-                        if int(data["hop_length"]) == self.hop_length and int(data["sr"]) == self.sr:
-                            return {k: (data[k] if data[k].ndim else data[k].item()) for k in data.files if k != "spans_done"}
+                        with np.load(str(span_cache)) as data:
+                            if int(data["hop_length"]) == self.hop_length and int(data["sr"]) == self.sr:
+                                return {k: (data[k].copy() if data[k].ndim else data[k].item()) for k in data.files if k != "spans_done"}
                     except Exception:
                         pass
                 return {"lazy": True, "path": str(p), "file_sr": int(info.samplerate), "n_frames": 0}
@@ -179,20 +189,20 @@ class ContinuousFeatureExtractor:
         cache_path = p.with_suffix(".features.npz")
         if cache_path.exists():
             try:
-                data = np.load(str(cache_path), allow_pickle=True)
-                return {
-                    "sr": int(data["sr"]),
-                    "hop_length": int(data["hop_length"]),
-                    "frame_length": int(data["frame_length"]),
-                    "n_frames": int(data["n_frames"]),
-                    "times": data["times"],
-                    "rms": data["rms"],
-                    "centroid": data["centroid"],
-                    "mfcc": data["mfcc"],
-                    "f0": data["f0"],
-                    "voiced_flag": data["voiced_flag"],
-                    "voiced_probs": data["voiced_probs"],
-                }
+                with np.load(str(cache_path), allow_pickle=True) as data:
+                    return {
+                        "sr": int(data["sr"]),
+                        "hop_length": int(data["hop_length"]),
+                        "frame_length": int(data["frame_length"]),
+                        "n_frames": int(data["n_frames"]),
+                        "times": data["times"].copy(),
+                        "rms": data["rms"].copy(),
+                        "centroid": data["centroid"].copy(),
+                        "mfcc": data["mfcc"].copy(),
+                        "f0": data["f0"].copy(),
+                        "voiced_flag": data["voiced_flag"].copy(),
+                        "voiced_probs": data["voiced_probs"].copy(),
+                    }
             except Exception:
                 pass
 

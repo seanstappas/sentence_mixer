@@ -154,6 +154,19 @@ def test_script_parsers():
     assert classic_headings == ["EXT. RIVER VALLEY - NIGHT"]
     assert [s.speaker_raw for s in classic] == ["TOBIN", "MIRA"]
     assert "whispering" not in classic[1].text
+    text_sp = """1   EXT. RIVER VALLEY - NIGHT
+A quiet night in the woods.
+
+TOBIN (whispering)
+Nobody you need to worry about tonight, friend.
+
+MIRA
+We cross at dawn.
+"""
+    sp_speeches, sp_headings = ls.parse_text_screenplay(text_sp)
+    assert len(sp_headings) == 1
+    assert [s.speaker_raw for s in sp_speeches] == ["TOBIN", "MIRA"]
+    assert "whispering" not in sp_speeches[0].text
 
 
 def test_end_to_end_labels_and_vtt(tmp_path):

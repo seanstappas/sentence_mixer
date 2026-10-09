@@ -342,19 +342,37 @@ def run_mfa_align(
             "-j", "1",  # Windows stability
         ]
 
-        if direct_mfa_exe:
-            cmd = [str(direct_mfa_exe)] + base_cmd[1:]
-        elif mm_exe and mamba_root:
-            cmd = [mm_exe, "run", "-r", mamba_root, "-n", "mfa_env"] + base_cmd
-        else:
-            cmd = base_cmd
+        max_attempts = 3
+        res = None
+        for attempt in range(1, max_attempts + 1):
+            temp_dir = mfa_temp_dir / f"run_{src_dir.name}_{int(time.time())}_{attempt}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            run_base_cmd = list(base_cmd)
+            if "-t" in run_base_cmd:
+                t_idx = run_base_cmd.index("-t")
+                run_base_cmd[t_idx + 1] = str(temp_dir)
+            if direct_mfa_exe:
+                cur_cmd = [str(direct_mfa_exe)] + run_base_cmd[1:]
+            elif mm_exe and mamba_root:
+                cur_cmd = [mm_exe, "run", "-r", mamba_root, "-n", "mfa_env"] + run_base_cmd
+            else:
+                cur_cmd = run_base_cmd
 
-        print("[*] Running MFA Alignment command:")
-        print("    " + " ".join(cmd))
-        res = subprocess.run(cmd, env=env)
-        if res.returncode != 0:
-            print("[!] MFA alignment returned non-zero code. Purging temp cache and retrying with clean state...")
-            time.sleep(1.0)
+            if attempt == 1:
+                print("[*] Running MFA Alignment command:")
+                print("    " + " ".join(cur_cmd))
+            else:
+                print(f"[!] Retrying MFA alignment (attempt {attempt}/{max_attempts})...")
+
+            res = subprocess.run(cur_cmd, env=env)
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+            if res.returncode == 0:
+                break
+
+            print(f"[!] MFA alignment returned exit code {res.returncode}. Purging temp cache and waiting for file locks...")
+            time.sleep(2.5)
             for stale_path in [
                 target_temp,
                 mfa_root_dir / src_dir.name,
@@ -368,26 +386,9 @@ def run_mfa_align(
                         except OSError:
                             time.sleep(0.5)
 
-            # Use a completely fresh isolated temp directory on retry to ensure no corrupted SQLite state is reused
-            retry_temp_dir = mfa_temp_dir / f"retry_{int(time.time())}"
-            retry_temp_dir.mkdir(parents=True, exist_ok=True)
-            retry_base_cmd = list(base_cmd)
-            if "-t" in retry_base_cmd:
-                t_idx = retry_base_cmd.index("-t")
-                retry_base_cmd[t_idx + 1] = str(retry_temp_dir)
-            if direct_mfa_exe:
-                retry_cmd = [str(direct_mfa_exe)] + retry_base_cmd[1:]
-            elif mm_exe and mamba_root:
-                retry_cmd = (
-                    [mm_exe, "run", "-r", mamba_root, "-n", "mfa_env"] + retry_base_cmd
-                )
-            else:
-                retry_cmd = retry_base_cmd
-            res = subprocess.run(retry_cmd, env=env)
-            if retry_temp_dir.exists():
-                shutil.rmtree(retry_temp_dir, ignore_errors=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"MFA alignment failed with exit code {res.returncode}. Check MFA logs.")
+        if res is None or res.returncode != 0:
+            err_code = res.returncode if res is not None else -1
+            raise RuntimeError(f"MFA alignment failed with exit code {err_code} after {max_attempts} attempts. Check MFA logs.")
 
         if target_temp.exists():
             shutil.rmtree(target_temp, ignore_errors=True)
@@ -1446,6 +1447,21 @@ def add_synthesis_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--speaker", default=None, help="Speaker identity filter")
     p.add_argument("--assume-single-speaker", action="store_true", help="Explicitly assume single speaker")
     p.add_argument("--mode", choices=["source-derived", "cuts-only"], default="source-derived", help="Rendering mode")
+    p.add_argument(
+        "--pause-style",
+        choices=["freeze", "continue", "off"],
+        default="freeze",
+        help="Punctuation pauses: freeze (hold the last frame over silence, default), continue (let the clip play on, "
+        "picture and background audio, while the source has no speech, then hold the frame for any remainder), "
+        "or off (no punctuation pauses; explicit <gap:...> tags still apply)",
+    )
+    p.add_argument(
+        "--release-tail-ms",
+        type=float,
+        default=100.0,
+        help="Extend each cut up to this many ms into following silence so word-final consonants (f, s, th, t) "
+        "are not clipped; stops short of any following speech (default 100, 0 disables)",
+    )
     p.add_argument("--features", choices=["basic", "wavlm"], default="basic", help="Feature extraction backend")
     p.add_argument(
         "--fps",
@@ -2212,7 +2228,11 @@ def main():
                 video_fps=fps,
                 rendering_mode=args.mode,
                 lead_in_sec=lead_in,
+                pause_style=getattr(args, "pause_style", "freeze"),
+                release_tail_sec=max(0.0, float(getattr(args, "release_tail_ms", 100.0))) / 1000.0,
             )
+            plan.metadata["pause_style"] = getattr(args, "pause_style", "freeze")
+            plan.metadata["release_tail_ms"] = float(getattr(args, "release_tail_ms", 100.0))
             plan.metadata["features"] = args.features
             plan.metadata["normalize_loudness"] = args.normalize_loudness
             plan.metadata["isolate_vocals"] = isolate_vocals_flag
