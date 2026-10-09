@@ -1,0 +1,10 @@
+major
+- (pre-process) best way to find, label, classify different speakers from source audio? (in the cases where there are multiple speakers)
+- Support for phonetical input + mic input that automatically makes the phonetical input (so proper sound is interpreted..)
+- punctuation. control gaps / spacing a bit (punctuation? special chars?). exclamation / question bias for certain sounds?
+
+minor
+- select longer vowels / sounds for start of words? or in general?
+- support for subtitles (baked into video?)
+- if possible, use same SURROUNDING source for sentences. For example: "I will use your people as fuel as I search nearby systems for war." has only 2 words swapped, but it causes completely different sources to be used because it looks for exact matches.
+- having some variety in the sources for the same output clips can be good. To not have the same source for the exact same vowel every time etc.
