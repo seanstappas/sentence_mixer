@@ -1094,7 +1094,13 @@ def ingest_sources(
                             "  3. Install diarization backend dependencies."
                         )
                     else:
-                        print("[!] Warning: Diarization backend unavailable and no speaker asserted. Proceeding with unverified identity; different voices may be mixed.")
+                        raise ValueError(
+                            "Diarization backend is unavailable and neither --speaker nor --assume-single-speaker was specified.\n"
+                            "To proceed, either:\n"
+                            "  1. Specify --speaker <id> --assume-single-speaker if the video contains only one speaker.\n"
+                            "  2. Provide verified speaker_intervals in a manifest.\n"
+                            "  3. Install diarization backend dependencies."
+                        )
                 else:
                     diarize_media_path: Union[str, Path] = v_abs
                     if isolate_vocals_flag and v_abs.exists():
@@ -2063,6 +2069,23 @@ def main():
                 None,
             )
             if matched_spk is None:
+                # Try resolving through CharacterResolver (config/characters/*.json)
+                char_dirs = list((SCRIPT_DIR / "config" / "characters").glob("*.json"))
+                for c_path in char_dirs:
+                    try:
+                        from subtitle_parsing import CharacterResolver
+                        resolver = CharacterResolver(json.loads(c_path.read_text(encoding="utf-8")))
+                        resolved_id, _ = resolver.resolve(args.speaker)
+                        if resolved_id:
+                            matched_spk = next(
+                                (s for s in unique_speakers if s.lower().replace("-", "_") == resolved_id.lower().replace("-", "_")),
+                                None,
+                            )
+                            if matched_spk is not None:
+                                break
+                    except Exception:
+                        pass
+            if matched_spk is None:
                 avail_str = ", ".join(sorted(unique_speakers)) if unique_speakers else "none"
                 parser.error(
                     f"Requested speaker '{args.speaker}' not found in inventory. "
@@ -2258,9 +2281,6 @@ def main():
                     for c in review_choices
                 ]
 
-            from edit_plan import finalize_edit_plan
-            finalize_edit_plan(plan, inventory_index, normalize_loudness=args.normalize_loudness)
-
             # Staged Publication: stage all deliverables in an attempt directory before atomic publication
             render_p = Path(out_render).resolve()
             plan_p = Path(out_plan_path).resolve()
@@ -2355,8 +2375,10 @@ def main():
                 def _artifact_key(staged_file: Path) -> str:
                     stem = staged_file.stem
                     suffix = staged_file.suffix.lower()
-                    if suffix in (".srt", ".vtt"):
-                        return "subtitles"
+                    if suffix == ".srt":
+                        return "subtitles_srt"
+                    if suffix == ".vtt":
+                        return "subtitles_vtt"
                     if "vocals" in stem:
                         return "vocals_render" if suffix == ".mp4" else "vocals_wav"
                     if "recombined" in stem:

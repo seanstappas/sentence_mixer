@@ -218,3 +218,75 @@ def test_edit_plan_timing_equation():
     plan.total_output_samples = 48000
     with pytest.raises(ValueError, match="EditPlan sample count mismatch"):
         plan.validate()
+
+
+def test_rational_time_zero_valid():
+    # 0 offset timestamps must be valid
+    r_zero = RationalTime(0, 1000)
+    r_zero.validate()
+    assert r_zero.as_float() == 0.0
+
+    # Negative numerator must still fail
+    r_neg = RationalTime(-1, 1000)
+    with pytest.raises(ValueError, match="cannot be negative"):
+        r_neg.validate()
+
+    # Non-positive denominator must fail
+    r_bad_den = RationalTime(0, 0)
+    with pytest.raises(ValueError, match="denominator must be positive"):
+        r_bad_den.validate()
+
+
+def test_edit_plan_frame_rate_strictly_positive():
+    seg = PlanSegment(
+        segment_index=0,
+        source_content_id="src_1",
+        speaker_id="spk_1",
+        source_start_sample=0,
+        source_end_sample=24000,
+        output_start_sample=0,
+        output_end_sample=24000,
+        target_text="test",
+        target_phones=["T", "EH1", "S", "T"],
+        span_type="word",
+        source_video_path="input/test.mp4",
+    )
+    # EditPlan with zero frame rate must fail validation
+    plan = EditPlan(
+        schema_version=EDIT_PLAN_SCHEMA_VERSION,
+        plan_id="plan_zero_fps",
+        target_text="test",
+        speaker_id="spk_1",
+        project_sample_rate=48000,
+        video_fps=RationalTime(0, 1),
+        total_output_samples=24000,
+        segments=[seg],
+    )
+    with pytest.raises(ValueError, match="video_fps numerator must be positive"):
+        plan.validate()
+
+
+def test_source_record_decoded_video_origin():
+    from dataclasses import asdict
+
+    rec = SourceRecord(
+        content_id="src_1",
+        source_path="video.mp4",
+        native_sample_rate=48000,
+        native_channels=2,
+    )
+    assert rec.decoded_video_origin_sec == 0.0
+    assert rec.codec_delay_samples == 0
+
+    rec.decoded_video_origin_sec = 0.042
+    rec.codec_delay_samples = 1024
+    rec.validate()
+
+    d = asdict(rec)
+    assert d["decoded_video_origin_sec"] == 0.042
+    assert d["codec_delay_samples"] == 1024
+
+    roundtrip = SourceRecord(**d)
+    assert roundtrip.decoded_video_origin_sec == 0.042
+    assert roundtrip.codec_delay_samples == 1024
+

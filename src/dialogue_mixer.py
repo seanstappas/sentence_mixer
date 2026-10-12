@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from contracts import EditPlan, PlanSegment, PlanTransition, RationalTime
 from edit_plan import build_edit_plan, finalize_edit_plan
+from features import ContinuousFeatureExtractor
 from lexicon import Lexicon
 from media_time import cumulative_frame_ceiling
 from span_selector import SpanSelector
@@ -170,8 +171,44 @@ def concat_edit_plans(
             ))
             trans_idx += 1
 
+    # Re-apply video midpoint partitioning across combined segments and transitions
+    # (matching src/edit_plan.py:454-485) to prevent double-counting video frames
+    # across audio crossfades and ensure sum(video_frame_count) == total_video_frames.
+    overlap_by_from_seg: Dict[int, int] = {}
+    for t in combined_transitions:
+        if t.transition_type == "overlap":
+            overlap_by_from_seg[t.from_segment_index] = t.overlap_samples
+
+    v_display_starts = [0] * len(combined_segments)
+    v_display_ends = [0] * len(combined_segments)
+
+    if combined_segments:
+        v_display_starts[0] = 0
+        for k in range(len(combined_segments) - 1):
+            curr_seg = combined_segments[k]
+            next_seg = combined_segments[k + 1]
+            ov = overlap_by_from_seg.get(curr_seg.segment_index, 0)
+            if ov > 0:
+                midpoint = next_seg.output_start_sample + (ov // 2)
+                v_display_ends[k] = midpoint
+                v_display_starts[k + 1] = midpoint
+            else:
+                v_display_ends[k] = curr_seg.output_end_sample
+                v_display_starts[k + 1] = next_seg.output_start_sample
+
+        v_display_ends[-1] = current_sample
+
+        for k, seg in enumerate(combined_segments):
+            v_start = v_display_starts[k]
+            v_end = v_display_ends[k]
+            start_f = cumulative_frame_ceiling(v_start, sr, fps)
+            end_f = cumulative_frame_ceiling(v_end, sr, fps)
+            seg.video_start_frame = start_f
+            seg.video_frame_count = max(0, end_f - start_f)
+
     total_frames = cumulative_frame_ceiling(current_sample, sr, fps)
     combined_target_text = "\n".join(f"{p.speaker_id}: {p.target_text}" for p in plans)
+    combined_metadata["num_cuts"] = len(combined_transitions)
 
     combined_plan = EditPlan(
         plan_id=f"plan_multi_{uuid.uuid4().hex[:12]}",
@@ -474,6 +511,7 @@ def synthesize_and_render_dialogue(
     lex = Lexicon()
     graph_builder = TargetGraphBuilder(lex)
     selector = SpanSelector(inventory_index)
+    feature_extractor = ContinuousFeatureExtractor(sr=16000)
 
     # Resolve speaker aliases against inventory if needed
     avail_speakers = set(w.speaker_id for w in inventory_index.words.values() if w.speaker_id)
@@ -498,7 +536,7 @@ def synthesize_and_render_dialogue(
     for idx, (spk, text) in enumerate(mapped_lines, 1):
         print(f"  [Turn {idx}/{len(lines)}] {spk}: \"{text}\"")
         g = graph_builder.build(text)
-        spans = selector.select(g, speaker_id=spk)
+        spans = selector.select(g, speaker_id=spk, feature_extractor=feature_extractor)
         plan = build_edit_plan(
             spans,
             g,
@@ -507,14 +545,15 @@ def synthesize_and_render_dialogue(
             video_fps=fps,
             pause_style="continue",
             release_tail_sec=0.100,
+            finalize=False,
         )
-        finalize_edit_plan(plan, inventory_index, normalize_loudness=True)
         plans.append(plan)
         turn_infos.append((spk, text, plan, curr_time_sec))
         curr_time_sec += (plan.total_output_samples / 48000.0) + pause_between_sec
 
     # Combine plans into one master timeline
     combined_plan = concat_edit_plans(plans, pause_between_sec=pause_between_sec)
+    finalize_edit_plan(combined_plan, inventory_index, normalize_loudness=True)
     print(f"[+] Combined EditPlan created: {len(combined_plan.segments)} segments, duration: {combined_plan.total_output_samples/48000:.2f}s")
 
     # Staged rendering

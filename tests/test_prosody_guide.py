@@ -124,3 +124,42 @@ def test_assert_no_guide_audio_in_plan(dummy_guide_audio: Path, tmp_path: Path):
 
     with pytest.raises(AssertionError, match="Safety Violation"):
         assert_no_guide_audio_in_plan(leaked_id_plan, dummy_guide_audio)
+
+
+def test_candidate_pitch_evaluation_and_token_progress_mapping(dummy_guide_audio: Path):
+    """
+    Fix P3.4: Tests candidate pitch level divergence evaluation
+    and word token progress mapping across target graphs.
+    """
+    from src.contracts import SpanCandidate
+    from src.lexicon import Lexicon
+    from src.target_graph import TargetGraphBuilder
+
+    lex = Lexicon()
+    lex.word_to_pronunciations["hello"] = [["HH", "AH0", "L", "OW1"]]
+    lex.word_to_pronunciations["there"] = [["DH", "EH1", "R"]]
+    builder = TargetGraphBuilder(lex)
+    graph = builder.build("hello there")
+
+    guide = ProsodyGuide(dummy_guide_audio, guide_transcript="hello there")
+
+    # Candidate 1: matching pitch (0.0 semitones relative to median)
+    cand_match = SpanCandidate(
+        candidate_id="c_match", target_node_start=0, target_node_end=3,
+        covered_nodes=[0, 1, 2, 3], source_content_id="s1", speaker_id="spk1",
+        start_sample=0, end_sample=16000, event_ids=[], span_type="word",
+        matched_word="hello", cand_f0_hz=220.0, pitch_semitones=0.0
+    )
+
+    # Candidate 2: divergent pitch (+12 semitones = 1 octave up)
+    cand_divergent = SpanCandidate(
+        candidate_id="c_div", target_node_start=0, target_node_end=3,
+        covered_nodes=[0, 1, 2, 3], source_content_id="s1", speaker_id="spk1",
+        start_sample=0, end_sample=16000, event_ids=[], span_type="word",
+        matched_word="hello", cand_f0_hz=440.0, pitch_semitones=12.0
+    )
+
+    cost_match = guide.get_candidate_cost(cand_match, graph)
+    cost_div = guide.get_candidate_cost(cand_divergent, graph)
+
+    assert cost_div > cost_match, "Divergent candidate pitch must incur higher prosody cost"

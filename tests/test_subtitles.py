@@ -233,7 +233,7 @@ def test_run_mixer_subtitles_cli_integration(tmp_path: Path):
     manifest_p = tmp_path / "mix.manifest.json"
     assert manifest_p.exists()
     data = json.loads(manifest_p.read_text(encoding="utf-8"))
-    assert "subtitles" in data["artifacts"]
+    assert "subtitles" in data["artifacts"] or "subtitles_srt" in data["artifacts"]
 
 
 def test_run_mixer_burn_subtitles_cli_integration(tmp_path: Path):

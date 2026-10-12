@@ -10,8 +10,20 @@ from dialogue_mixer import (
     concat_edit_plans,
     color_to_ass,
     resolve_speaker_color,
+    synthesize_and_render_dialogue,
 )
-from contracts import EditPlan, PlanSegment, RationalTime
+from contracts import (
+    EditPlan,
+    InventoryIndex,
+    PlanSegment,
+    PlanTransition,
+    RationalTime,
+    SourceRecord,
+    SpanCandidate,
+    WordOccurrence,
+)
+from features import ContinuousFeatureExtractor
+from span_selector import SpanSelector
 
 
 def test_format_ass_time():
@@ -130,4 +142,252 @@ def test_resolve_speaker_color():
     assert resolve_speaker_color("vader", colors) == "&H00FFB432&"
     # Unmatched fallback
     assert resolve_speaker_color("yoda", colors) == "&H0000FFFF&"
+
+
+def test_dialogue_mixer_feature_extractor_wired_and_scene_loudnorm(monkeypatch, tmp_path):
+    """
+    Validates Fix P1.1 and Fix P1.3:
+    1. ContinuousFeatureExtractor(sr=16000) is instantiated and passed to selector.select.
+    2. Per-turn build_edit_plan is invoked with finalize=False to bypass redundant loudnorm runs.
+    3. finalize_edit_plan is invoked once on combined_plan for single-pass scene loudness finalization.
+    """
+    import dialogue_mixer
+
+    src = SourceRecord(
+        content_id="src1",
+        source_path="fake.mp4",
+        native_sample_rate=48000,
+        native_channels=2,
+    )
+    wo1 = WordOccurrence(
+        word_id="w1",
+        source_content_id="src1",
+        speaker_id="anakin",
+        word_normalized="hello",
+        word_original="hello",
+        start_sample=0,
+        end_sample=24000,
+        phone_event_ids=["ev1"],
+        realized_phones=["HH"],
+    )
+    wo2 = WordOccurrence(
+        word_id="w2",
+        source_content_id="src1",
+        speaker_id="mace-windu",
+        word_normalized="there",
+        word_original="there",
+        start_sample=24000,
+        end_sample=48000,
+        phone_event_ids=["ev2"],
+        realized_phones=["DH"],
+    )
+    inv = InventoryIndex(
+        sources={"src1": src},
+        words={"w1": wo1, "w2": wo2},
+    )
+
+    passed_extractors = []
+
+    def mock_select(self, graph, speaker_id=None, feature_extractor=None, **kwargs):
+        passed_extractors.append(feature_extractor)
+        return [
+            SpanCandidate(
+                candidate_id=f"c_{speaker_id}",
+                target_node_start=0,
+                target_node_end=0,
+                covered_nodes=[0],
+                source_content_id="src1",
+                speaker_id=speaker_id or "anakin",
+                start_sample=0,
+                end_sample=24000,
+                event_ids=[],
+                span_type="word",
+                matched_word="hello",
+            )
+        ]
+
+    build_plan_finalize_flags = []
+    real_build_edit_plan = dialogue_mixer.build_edit_plan
+
+    def mock_build_edit_plan(*args, **kwargs):
+        build_plan_finalize_flags.append(kwargs.get("finalize"))
+        return real_build_edit_plan(*args, **kwargs)
+
+    finalized_plans = []
+
+    def mock_finalize_edit_plan(plan, *args, **kwargs):
+        finalized_plans.append((plan, kwargs.get("normalize_loudness")))
+        return plan
+
+    monkeypatch.setattr(SpanSelector, "select", mock_select)
+    monkeypatch.setattr(dialogue_mixer, "build_edit_plan", mock_build_edit_plan)
+    monkeypatch.setattr(dialogue_mixer, "finalize_edit_plan", mock_finalize_edit_plan)
+    def mock_render(plan, out_path, **kwargs):
+        Path(out_path).write_bytes(b"dummy_mp4_bytes")
+
+    monkeypatch.setattr(dialogue_mixer, "render_sentence_mix", mock_render)
+
+    out_video = tmp_path / "scene.mp4"
+    synthesize_and_render_dialogue(
+        lines=[("anakin", "hello"), ("mace-windu", "there")],
+        inventory_index=inv,
+        output_video_path=out_video,
+        burn_subtitles=False,
+    )
+
+    # 1. Feature extractor wired
+    assert len(passed_extractors) == 2
+    for fe in passed_extractors:
+        assert isinstance(fe, ContinuousFeatureExtractor)
+        assert fe.sr == 16000
+
+    # 2. Per-turn finalize=False
+    assert build_plan_finalize_flags == [False, False]
+
+    # 3. Scene loudnorm on combined_plan exactly once
+    assert len(finalized_plans) == 1
+    comb_plan, norm_flag = finalized_plans[0]
+    assert comb_plan.speaker_id == "multi"
+    assert norm_flag is True
+
+
+def test_concat_edit_plans_video_midpoint_partitioning_no_overcounting():
+    """
+    Validates Fix P1.3 video midpoint partitioning:
+    When plans containing internal 14ms audio crossfades are concatenated,
+    video display bounds partition at the crossfade midpoints, ensuring:
+      sum(seg.video_frame_count) == total_video_frames
+    and adjacent video frame intervals abut without overlapping or gaps.
+    """
+    fps = RationalTime(24, 1)
+    sr = 48000
+    ov_samples = 672  # 14ms at 48kHz
+
+    # Turn 1: 2 segments overlapping by 14ms
+    seg1 = PlanSegment(
+        segment_index=0,
+        source_content_id="src1",
+        speaker_id="anakin",
+        source_start_sample=0,
+        source_end_sample=48000,
+        output_start_sample=0,
+        output_end_sample=48000,
+        target_text="seg one",
+        target_phones=["S", "EH1", "G"],
+        span_type="word",
+        source_video_path="video1.mkv",
+        gain_db=0.0,
+        video_start_frame=0,
+        video_frame_count=24,
+    )
+    seg2 = PlanSegment(
+        segment_index=1,
+        source_content_id="src1",
+        speaker_id="anakin",
+        source_start_sample=48000,
+        source_end_sample=96000,
+        output_start_sample=48000 - ov_samples,  # 47328
+        output_end_sample=96000 - ov_samples,  # 95328
+        target_text="seg two",
+        target_phones=["T", "UW1"],
+        span_type="word",
+        source_video_path="video1.mkv",
+        gain_db=0.0,
+        video_start_frame=24,
+        video_frame_count=24,
+    )
+    t1 = PlanTransition(
+        transition_index=0,
+        from_segment_index=0,
+        to_segment_index=1,
+        transition_type="overlap",
+        overlap_samples=ov_samples,
+        fade_samples=ov_samples,
+    )
+    p1_total_samples = 96000 - ov_samples
+    plan1 = EditPlan(
+        plan_id="p1",
+        target_text="seg one seg two",
+        speaker_id="anakin",
+        project_sample_rate=sr,
+        video_fps=fps,
+        total_output_samples=p1_total_samples,
+        total_video_frames=48,
+        segments=[seg1, seg2],
+        transitions=[t1],
+        sources={"src1": None},
+    )
+
+    # Turn 2: 2 segments overlapping by 14ms
+    seg3 = PlanSegment(
+        segment_index=0,
+        source_content_id="src2",
+        speaker_id="mace-windu",
+        source_start_sample=0,
+        source_end_sample=48000,
+        output_start_sample=0,
+        output_end_sample=48000,
+        target_text="seg three",
+        target_phones=["TH", "R", "IY1"],
+        span_type="word",
+        source_video_path="video2.mkv",
+        gain_db=0.0,
+        video_start_frame=0,
+        video_frame_count=24,
+    )
+    seg4 = PlanSegment(
+        segment_index=1,
+        source_content_id="src2",
+        speaker_id="mace-windu",
+        source_start_sample=48000,
+        source_end_sample=96000,
+        output_start_sample=48000 - ov_samples,
+        output_end_sample=96000 - ov_samples,
+        target_text="seg four",
+        target_phones=["F", "AO1", "R"],
+        span_type="word",
+        source_video_path="video2.mkv",
+        gain_db=0.0,
+        video_start_frame=24,
+        video_frame_count=24,
+    )
+    t2 = PlanTransition(
+        transition_index=0,
+        from_segment_index=0,
+        to_segment_index=1,
+        transition_type="overlap",
+        overlap_samples=ov_samples,
+        fade_samples=ov_samples,
+    )
+    plan2 = EditPlan(
+        plan_id="p2",
+        target_text="seg three seg four",
+        speaker_id="mace-windu",
+        project_sample_rate=sr,
+        video_fps=fps,
+        total_output_samples=p1_total_samples,
+        total_video_frames=48,
+        segments=[seg3, seg4],
+        transitions=[t2],
+        sources={"src2": None},
+    )
+
+    combined = concat_edit_plans([plan1, plan2], pause_between_sec=0.5)
+    combined.validate()
+
+    # Exact video frame partitioning invariant
+    total_frames_sum = sum(s.video_frame_count for s in combined.segments)
+    assert total_frames_sum == combined.total_video_frames, (
+        f"Sum of video_frame_count ({total_frames_sum}) must strictly equal total_video_frames ({combined.total_video_frames})"
+    )
+
+    # Frame continuity: every segment's start_frame must equal the preceding segment's end_frame
+    for k in range(len(combined.segments) - 1):
+        curr_s = combined.segments[k]
+        next_s = combined.segments[k + 1]
+        assert curr_s.video_start_frame + curr_s.video_frame_count == next_s.video_start_frame, (
+            f"Segment {k} ends at frame {curr_s.video_start_frame + curr_s.video_frame_count} "
+            f"but segment {k+1} starts at frame {next_s.video_start_frame}"
+        )
+
 

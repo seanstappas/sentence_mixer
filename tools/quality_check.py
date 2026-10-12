@@ -26,6 +26,76 @@ from listen_verify import (
 )
 
 
+def detect_splice_clicks(
+    audio_path: Path,
+    plan_data: Dict[str, Any],
+    window_ms: float = 5.0,
+    sigma_threshold: float = 6.0,
+) -> Tuple[bool, List[Dict[str, Any]]]:
+    """
+    Inspects a +/- window_ms window around each EditPlan transition timestamp
+    in the audio, flagging any sample-to-sample difference spike |Delta x[n]| > 6 * sigma_local
+    as an audible splice click.
+    """
+    detected_clicks: List[Dict[str, Any]] = []
+    try:
+        import soundfile as sf
+        import numpy as np
+        if audio_path.suffix.lower() == ".wav":
+            data, sr = sf.read(str(audio_path), dtype="float32")
+        else:
+            data = extract_audio_16k(audio_path)
+            sr = 16000
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+    except Exception:
+        return True, []
+
+    if len(data) == 0:
+        return True, []
+
+    plan_sr = plan_data.get("project_sample_rate", 48000)
+    segments = plan_data.get("segments", [])
+    transitions = plan_data.get("transitions", [])
+
+    w_samples = int(round((window_ms / 1000.0) * sr))
+    local_samples = int(round(0.025 * sr))
+
+    for trans in transitions:
+        to_idx = trans.get("to_segment_index")
+        if to_idx is None or to_idx >= len(segments):
+            continue
+        seg = segments[to_idx]
+        t_sec = seg.get("output_start_sample", 0) / float(plan_sr)
+        center_sample = int(round(t_sec * sr))
+
+        s_min = max(0, center_sample - local_samples)
+        s_max = min(len(data), center_sample + local_samples)
+        if s_max - s_min < 10:
+            continue
+        local_diff = np.diff(data[s_min:s_max])
+        sigma_local = float(np.std(local_diff)) + 1e-6
+
+        w_start = max(0, center_sample - w_samples)
+        w_end = min(len(data), center_sample + w_samples)
+        if w_end - w_start < 2:
+            continue
+        w_diff = np.abs(np.diff(data[w_start:w_end]))
+        max_diff = float(np.max(w_diff))
+
+        spike_ratio = max_diff / sigma_local
+        if spike_ratio > sigma_threshold and max_diff > 0.03:
+            detected_clicks.append({
+                "transition_index": trans.get("transition_index"),
+                "time_sec": round(t_sec, 4),
+                "spike_ratio": round(spike_ratio, 2),
+                "max_diff": round(max_diff, 4),
+                "sigma_local": round(sigma_local, 5),
+            })
+
+    return len(detected_clicks) == 0, detected_clicks
+
+
 def check_render_quality(
     input_media: Path,
     expected_text: str,
@@ -148,10 +218,21 @@ def check_render_quality(
             "swallowed_words": swallowed_words,
         }
 
+    # 5. Check for splice clicks at transitions
+    if plan_data:
+        clicks_passed, clicks = detect_splice_clicks(input_media, plan_data)
+        report["checks"]["click_detection"] = {
+            "passed": clicks_passed,
+            "detected_clicks": clicks,
+        }
+        if not clicks_passed:
+            report["issues"].append(f"Detected {len(clicks)} audible splice click(s) at transition boundaries")
+
     # Overall pass criteria:
     # 1. All critical target words detected
     # 2. No critical words swallowed below duration floor
-    # 3. Assisted WER <= wer_threshold
+    # 3. No audible splice clicks at transition boundaries
+    # 4. Assisted WER <= wer_threshold
     assisted_wer = asr_res.get("assisted_wer", asr_res.get("wer", 0.0))
     wer_threshold = getattr(asr_res, "wer_threshold", 0.40) if hasattr(asr_res, "wer_threshold") else 0.40
     report["checks"]["wer_pass"] = assisted_wer <= wer_threshold
@@ -161,6 +242,7 @@ def check_render_quality(
     overall_passed = (
         critical_passed
         and report["checks"].get("duration_check", {}).get("passed", True)
+        and report["checks"].get("click_detection", {}).get("passed", True)
         and report["checks"]["wer_pass"]
     )
     report["overall_passed"] = overall_passed

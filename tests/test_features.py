@@ -102,3 +102,46 @@ def test_join_cost_invariants():
     # Invariant: missing features must NOT earn zero-cost joins
     cost_missing = compute_join_cost(feat_a, None, is_natural_continuation=False)
     assert cost_missing > cost_close
+
+
+def test_liftered_mahalanobis_mfcc_distance_and_manner_scaling():
+    """
+    Fix P3.3: Tests liftered Mahalanobis MFCC distance weighting
+    and phonetic manner jump scaling (0.25 for stop/fricative into vowel).
+    """
+    from features import compute_manner_scale, get_phone_manner
+
+    # 1. Manner classification
+    assert get_phone_manner("AA1") == "vowel"
+    assert get_phone_manner("T") == "stop"
+    assert get_phone_manner("S") == "fricative"
+    assert get_phone_manner("N") == "sonorant"
+
+    # 2. Manner scaling factors
+    assert compute_manner_scale("T", "AA1") == 0.25  # stop -> vowel natural jump
+    assert compute_manner_scale("S", "IY1") == 0.25  # fricative -> vowel natural jump
+    assert compute_manner_scale("AA1", "UW1") == 1.0  # vowel -> vowel
+    assert compute_manner_scale("T", "T") == 1.0  # matching phone
+    assert compute_manner_scale(None, "AA1") == 1.0  # fallback when unknown
+
+    # 3. Join cost with manner jump vs same manner
+    # Identical F0 and RMS so only spectral MFCC distance differs
+    feat_exit = FeatureRecord(
+        source_content_id="s1", sample_rate=16000, start_sample=0, end_sample=1600,
+        rms_energy=0.1, f0_hz=150.0, f0_confidence=0.9, voicing_state="voiced",
+        spectral_centroid=1000.0,
+        mfcc_13=[0.0] + [1.0] * 12,
+    )
+    feat_entry = FeatureRecord(
+        source_content_id="s2", sample_rate=16000, start_sample=0, end_sample=1600,
+        rms_energy=0.1, f0_hz=150.0, f0_confidence=0.9, voicing_state="voiced",
+        spectral_centroid=1000.0,
+        mfcc_13=[0.0] + [2.0] * 12,
+    )
+
+    cost_full = compute_join_cost(feat_exit, feat_entry, exit_phone="AA1", entry_phone="UW1")
+    cost_scaled = compute_join_cost(feat_exit, feat_entry, exit_phone="T", entry_phone="AA1")
+
+    # Manner jump should be scaled down significantly
+    assert cost_scaled < cost_full
+    assert cost_scaled > 0.0

@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import soundfile as sf
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -452,60 +456,98 @@ def preprocess_source(
 
     print(f"[*] Found {len(chunks)} speech intervals in {vtt_p.name}")
 
-    for idx, c in enumerate(chunks):
-        chunk_id = f"chunk_{idx:04d}"
-        wav_path = out_dir / f"{chunk_id}.wav"
-        txt_path = out_dir / f"{chunk_id}.txt"
+    audio_input = resolved_audio_src if resolved_audio_src else str(v_path)
+    sf_handle: Optional[sf.SoundFile] = None
+    try:
+        sf_handle = sf.SoundFile(audio_input)
+    except Exception:
+        sf_handle = None
 
-        # Check speaker interval filtering if provided
-        if speaker_intervals:
-            in_interval = False
-            for span in speaker_intervals:
-                if c["start_sec"] >= span["start_sec"] and c["end_sec"] <= span["end_sec"]:
-                    in_interval = True
-                    break
-            if not in_interval:
-                continue
+    try:
+        for idx, c in enumerate(chunks):
+            chunk_id = f"chunk_{idx:04d}"
+            wav_path = out_dir / f"{chunk_id}.wav"
+            txt_path = out_dir / f"{chunk_id}.txt"
 
-        # Extract 16kHz mono 16-bit PCM WAV using ffmpeg
-        start_ts = seconds_to_timestamp(c["start_sec"])
-        dur = c["duration"]
+            # Check speaker interval filtering if provided
+            if speaker_intervals:
+                in_interval = False
+                for span in speaker_intervals:
+                    if c["start_sec"] >= span["start_sec"] and c["end_sec"] <= span["end_sec"]:
+                        in_interval = True
+                        break
+                if not in_interval:
+                    continue
 
-        audio_input = resolved_audio_src if resolved_audio_src else str(v_path)
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", start_ts,
-            "-t", f"{dur:.3f}",
-            "-i", audio_input,
-            "-vn",
-            "-ar", "16000",
-            "-ac", "1",
-            "-c:a", "pcm_s16le",
-            str(wav_path)
-        ]
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode != 0:
-            print(f"[!] Warning: failed to extract audio for {chunk_id}")
+            # Extract 16kHz mono 16-bit PCM WAV using sample-accurate SoundFile read if available, else FFmpeg
+            dur = c["duration"]
+            extracted_ok = False
+            if sf_handle is not None:
+                try:
+                    sr = sf_handle.samplerate
+                    start_sample = max(0, int(round(c["start_sec"] * sr)))
+                    end_sample = min(len(sf_handle), int(round(c["end_sec"] * sr)))
+                    count = max(0, end_sample - start_sample)
+                    sf_handle.seek(start_sample)
+                    data = sf_handle.read(count, dtype="float32")
+                    if data.ndim > 1 and data.shape[1] > 1:
+                        data = data.mean(axis=1)
+                    elif data.ndim > 1:
+                        data = data[:, 0]
+                    if sr != 16000:
+                        import scipy.signal
+                        g = math.gcd(16000, sr)
+                        data_16k = scipy.signal.resample_poly(data, 16000 // g, sr // g).astype(np.float32)
+                    else:
+                        data_16k = data
+                    data_i16 = np.clip(data_16k * 32767.0, -32768.0, 32767.0).astype(np.int16)
+                    sf.write(str(wav_path), data_i16, 16000, subtype="PCM_16")
+                    extracted_ok = True
+                except Exception:
+                    extracted_ok = False
 
-        chunk_text = c["text"]
-        # Opt-in only: append trailing words Whisper hears after the caption ends
-        words_count = len(re.findall(r"[a-zA-Z0-9']+", chunk_text))
-        if asr_tail_enrichment and dur > 2.0 and (dur - words_count * 0.45) > 1.2:
-            chunk_text = enrich_chunk_transcript_with_asr(wav_path, chunk_text)
+            if not extracted_ok:
+                start_ts = seconds_to_timestamp(c["start_sec"])
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", start_ts,
+                    "-t", f"{dur:.3f}",
+                    "-i", audio_input,
+                    "-vn",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    "-c:a", "pcm_s16le",
+                    str(wav_path)
+                ]
+                res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if res.returncode != 0:
+                    print(f"[!] Warning: failed to extract audio for {chunk_id}")
 
-        # Save transcription for MFA
-        with open(txt_path, "w", encoding="utf-8") as tf:
-            tf.write(chunk_text + "\n")
+            chunk_text = c["text"]
+            # Opt-in only: append trailing words Whisper hears after the caption ends
+            words_count = len(re.findall(r"[a-zA-Z0-9']+", chunk_text))
+            if asr_tail_enrichment and dur > 2.0 and (dur - words_count * 0.45) > 1.2:
+                chunk_text = enrich_chunk_transcript_with_asr(wav_path, chunk_text)
 
-        manifest["chunks"][chunk_id] = {
-            "start_sec": c["start_sec"],
-            "end_sec": c["end_sec"],
-            "duration": c["duration"],
-            "text": chunk_text,
-            "speaker_id": effective_speaker,
-            "wav_path": str(wav_path),
-            "txt_path": str(txt_path),
-        }
+            # Save transcription for MFA
+            with open(txt_path, "w", encoding="utf-8") as tf:
+                tf.write(chunk_text + "\n")
+
+            manifest["chunks"][chunk_id] = {
+                "start_sec": c["start_sec"],
+                "end_sec": c["end_sec"],
+                "duration": c["duration"],
+                "text": chunk_text,
+                "speaker_id": effective_speaker,
+                "wav_path": str(wav_path),
+                "txt_path": str(txt_path),
+            }
+    finally:
+        if sf_handle is not None:
+            try:
+                sf_handle.close()
+            except Exception:
+                pass
 
     manifest_path = out_dir / "corpus_manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as mf:

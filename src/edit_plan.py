@@ -119,6 +119,159 @@ def _voice_free_samples(src_rec, start: int, limit: int, ref_start: int, ref_end
         return limit
 
 
+def refine_splice_boundary(
+    out_pcm: np.ndarray,
+    in_pcm: np.ndarray,
+    sr: int,
+    max_shift_ms: float = 15.0,
+    is_unvoiced: bool = False,
+) -> Tuple[int, int]:
+    """
+    Non-destructively refines boundary alignment between outgoing and incoming audio.
+
+    Voiced splices: Normalized cross-correlation lag search (+/- 15ms) maximizes pitch phase alignment.
+    Unvoiced splices / edges: Snaps cut index to nearest upward-going zero-crossing (<= 2ms)
+    inside the lowest-energy valley.
+
+    Returns: (shift_out, shift_in) in integer samples.
+    """
+    if out_pcm is None or in_pcm is None or sr <= 0:
+        return (0, 0)
+
+    out_1d = np.asarray(out_pcm, dtype=np.float32)
+    in_1d = np.asarray(in_pcm, dtype=np.float32)
+    if out_1d.ndim > 1:
+        out_1d = np.mean(out_1d, axis=-1)
+    if in_1d.ndim > 1:
+        in_1d = np.mean(in_1d, axis=-1)
+    out_1d = np.atleast_1d(np.squeeze(out_1d))
+    in_1d = np.atleast_1d(np.squeeze(in_1d))
+
+    if out_1d.size < 2 or in_1d.size < 2:
+        return (0, 0)
+
+    if float(np.max(np.abs(out_1d))) < 1e-7 or float(np.max(np.abs(in_1d))) < 1e-7:
+        return (0, 0)
+
+    if is_unvoiced:
+        # Snap cut indices to nearest upward-going zero crossing within <= 2 ms
+        max_snap = max(1, int(round(0.002 * sr)))  # <= 2 ms (96 samples at 48 kHz)
+        energy_win = max(1, int(round(0.005 * sr)))  # 5 ms valley window
+
+        # 1. Outgoing signal: nominal exit cut is at the end of out_1d
+        n_out = len(out_1d)
+        start_search_out = max(1, n_out - max_snap)
+        best_out_idx: Optional[int] = None
+        min_out_energy = float("inf")
+
+        for i in range(n_out - 1, start_search_out - 1, -1):
+            if out_1d[i - 1] <= 0.0 < out_1d[i]:
+                w_st = max(0, i - energy_win // 2)
+                w_en = min(n_out, i + energy_win // 2 + 1)
+                loc_e = float(np.mean(out_1d[w_st:w_en] ** 2))
+                dist = abs(i - (n_out - 1))
+                score = loc_e + 1e-4 * (dist / float(max_snap))
+                if score < min_out_energy:
+                    min_out_energy = score
+                    best_out_idx = i
+
+        if best_out_idx is not None:
+            shift_out = best_out_idx - n_out
+        else:
+            fallback_range = out_1d[start_search_out:n_out]
+            if len(fallback_range) > 0:
+                if np.all(np.abs(fallback_range) == np.abs(fallback_range[-1])):
+                    shift_out = 0
+                else:
+                    dists = np.arange(len(fallback_range) - 1, -1, -1)
+                    scores = np.abs(fallback_range) + 1e-4 * (dists / float(max_snap))
+                    best_sub = int(np.argmin(scores))
+                    shift_out = (start_search_out + best_sub) - n_out
+            else:
+                shift_out = 0
+
+        # 2. Incoming signal: nominal entry cut is at index 0 of in_1d
+        n_in = len(in_1d)
+        end_search_in = min(n_in - 1, max_snap)
+        best_in_idx: Optional[int] = None
+        min_in_energy = float("inf")
+
+        for j in range(1, end_search_in + 1):
+            if in_1d[j - 1] <= 0.0 < in_1d[j]:
+                w_st = max(0, j - energy_win // 2)
+                w_en = min(n_in, j + energy_win // 2 + 1)
+                loc_e = float(np.mean(in_1d[w_st:w_en] ** 2))
+                dist = j
+                score = loc_e + 1e-4 * (dist / float(max_snap))
+                if score < min_in_energy:
+                    min_in_energy = score
+                    best_in_idx = j
+
+        if best_in_idx is not None:
+            shift_in = best_in_idx
+        else:
+            fallback_range_in = in_1d[:end_search_in + 1]
+            if len(fallback_range_in) > 0:
+                if np.all(np.abs(fallback_range_in) == np.abs(fallback_range_in[0])):
+                    shift_in = 0
+                else:
+                    dists_in = np.arange(len(fallback_range_in))
+                    scores_in = np.abs(fallback_range_in) + 1e-4 * (dists_in / float(max_snap))
+                    shift_in = int(np.argmin(scores_in))
+            else:
+                shift_in = 0
+
+        shift_out = max(-max_snap, min(0, shift_out))
+        shift_in = max(0, min(max_snap, shift_in))
+        return (int(shift_out), int(shift_in))
+
+    else:
+        # Voiced mode: Normalized cross-correlation lag search on incoming audio (WSOLA-style optimal coupling)
+        # Search non-negative lag offsets tau in [0, max_lag] aligning in_1d to outgoing reference out_1d.
+        max_shift = int(round(max_shift_ms * sr / 1000.0))
+        n_out = len(out_1d)
+        n_in = len(in_1d)
+
+        max_lag = min(max_shift, max(0, n_in - 2))
+        if max_lag < 1:
+            return (0, 0)
+
+        l_eval = min(n_out, n_in - max_lag)
+        if l_eval < 16:
+            l_eval = min(n_out, n_in, max(8, min(n_out, n_in) // 2))
+            max_lag = min(max_lag, n_in - l_eval)
+
+        if max_lag < 1 or l_eval < 4:
+            return (0, 0)
+
+        ref_out = out_1d[:l_eval]
+        ref_in = in_1d[:l_eval]
+        denom_0 = float(np.sqrt((np.sum(ref_out ** 2) * np.sum(ref_in ** 2)) + 1e-12))
+        r_0 = float(np.sum(ref_out * ref_in) / denom_0) if denom_0 > 0 else 0.0
+
+        best_r = r_0
+        best_lag = 0
+
+        for lag in range(0, max_lag + 1):
+            u = out_1d[:l_eval]
+            v = in_1d[lag : lag + l_eval]
+
+            if len(u) != l_eval or len(v) != l_eval:
+                continue
+
+            dot = float(np.sum(u * v))
+            denom = float(np.sqrt((np.sum(u ** 2) * np.sum(v ** 2)) + 1e-12))
+            r = dot / denom if denom > 0 else -1.0
+
+            if r > best_r:
+                best_r = r
+                best_lag = lag
+
+        shift_out = 0
+        shift_in = best_lag
+        return (int(shift_out), int(shift_in))
+
+
 def build_edit_plan(
     selected_spans: List[SpanCandidate],
     graph: TargetGraph,
@@ -130,6 +283,7 @@ def build_edit_plan(
     lead_in_sec: float = 0.0,
     pause_style: str = "freeze",
     release_tail_sec: float = 0.0,
+    finalize: bool = True,
 ) -> EditPlan:
     """
     Constructs an immutable, sample-accurate EditPlan from selected spans.
@@ -312,12 +466,14 @@ def build_edit_plan(
         # Determine if the next span is a natural continuation of this one
         is_cont = False
         if next_span is not None and span.source_content_id == next_span.source_content_id:
-            if span.end_sample == next_span.start_sample:
+            if (
+                span.end_sample == next_span.start_sample
+                and span.event_ids
+                and next_span.event_ids
+                and inventory.events.get(span.event_ids[-1]) is not None
+                and inventory.events[span.event_ids[-1]].successor_id == next_span.event_ids[0]
+            ):
                 is_cont = True
-            elif span.event_ids and next_span.event_ids:
-                last_ev = inventory.events.get(span.event_ids[-1])
-                if last_ev and last_ev.successor_id == next_span.event_ids[0]:
-                    is_cont = True
 
         tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec)
         span_end = span.end_sample + tail
@@ -500,7 +656,8 @@ def build_edit_plan(
         metadata={"num_cuts": len(transitions)},
     )
     plan.validate()
-    finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"))
+    if finalize:
+        finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"))
     return plan
 
 

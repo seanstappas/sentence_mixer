@@ -6,14 +6,49 @@ enforces legal contiguity, and performs deterministic shortest-path sequence opt
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 
 from contracts import InventoryIndex, SpanCandidate, TargetGraph, WordOccurrence
-from features import compute_join_cost
+from features import compute_join_cost, compute_manner_scale
 from lexicon import strip_phone_stress, VOWEL_PHONES
+
+
+class AcousticMetrics(tuple):
+    """
+    Backward-compatible 2-tuple (f0_slope, rms_energy) that also exposes
+    f0_mean, cand_f0_hz, and dictionary-like / attribute access (Fix P3.4).
+    """
+    f0_slope: float
+    rms_energy: float
+    f0_mean: float
+
+    def __new__(cls, f0_slope: float, rms_energy: float, f0_mean: float = 0.0):
+        obj = super().__new__(cls, (float(f0_slope), float(rms_energy)))
+        obj.f0_slope = float(f0_slope)
+        obj.rms_energy = float(rms_energy)
+        obj.f0_mean = float(f0_mean)
+        return obj
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            if item in ("f0_slope", "slope"):
+                return self.f0_slope
+            if item in ("rms", "rms_energy"):
+                return self.rms_energy
+            if item in ("f0_mean", "cand_f0_hz", "f0"):
+                return self.f0_mean
+            raise KeyError(item)
+        return super().__getitem__(item)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
 
 def phone_edit_distance(seq1: Tuple[str, ...], seq2: Tuple[str, ...]) -> int:
@@ -33,6 +68,60 @@ def phone_edit_distance(seq1: Tuple[str, ...], seq2: Tuple[str, ...]) -> int:
     return dp[m][n]
 
 
+def apply_diphone_midpoint_transitions(
+    spans: List[SpanCandidate],
+    graph: TargetGraph,
+    inventory: InventoryIndex,
+) -> List[SpanCandidate]:
+    """
+    Applies diphone midpoint transitions for subword and phone joins inside synthesized words.
+    When two subword or phone spans join inside the same synthesized word and share a boundary phone,
+    positions the splice at the stationary formant midpoint (start_sample + end_sample) // 2.
+    """
+    if len(spans) < 2:
+        return spans
+
+    new_spans = list(spans)
+    for k in range(len(new_spans) - 1):
+        curr = new_spans[k]
+        succ = new_spans[k + 1]
+
+        if curr.target_node_end != succ.target_node_start:
+            continue
+
+        if curr.span_type not in ("subword", "phone") or succ.span_type not in ("subword", "phone"):
+            continue
+
+        node_curr = graph.nodes[curr.target_node_end] if curr.target_node_end < len(graph.nodes) else None
+        node_succ = graph.nodes[succ.target_node_start] if succ.target_node_start < len(graph.nodes) else None
+        if node_curr is None or node_succ is None:
+            continue
+        if node_curr.token_index != node_succ.token_index:
+            continue
+
+        p_curr = curr.realized_phones[-1] if curr.realized_phones else node_curr.phone
+        p_succ = succ.realized_phones[0] if succ.realized_phones else node_succ.phone
+        base_curr = strip_phone_stress(p_curr)
+        base_succ = strip_phone_stress(p_succ)
+        if base_curr != base_succ and not (base_curr in VOWEL_PHONES and base_succ in VOWEL_PHONES and base_curr == base_succ):
+            continue
+
+        ev_curr = inventory.events.get(curr.event_ids[-1]) if curr.event_ids else None
+        ev_succ = inventory.events.get(succ.event_ids[0]) if succ.event_ids else None
+
+        if ev_curr and ev_succ:
+            mid_curr = (ev_curr.start_sample + ev_curr.end_sample) // 2
+            mid_succ = (ev_succ.start_sample + ev_succ.end_sample) // 2
+
+            if curr.start_sample < mid_curr <= ev_curr.end_sample:
+                new_spans[k] = dataclasses.replace(curr, end_sample=mid_curr)
+
+            if ev_succ.start_sample <= mid_succ < succ.end_sample:
+                new_spans[k + 1] = dataclasses.replace(succ, start_sample=mid_succ)
+
+    return new_spans
+
+
 class SpanSelector:
     """
     Selects optimal variable-length units (Phrases, Words, Phones) to cover a TargetGraph.
@@ -47,7 +136,7 @@ class SpanSelector:
         self.edit_penalty = edit_penalty
         self.max_candidates_per_span = max_candidates_per_span
         self._wavlm_cache: Dict[Any, np.ndarray] = {}
-        self._acoustic_metrics_cache: Dict[Tuple[str, int, int], Tuple[float, float]] = {}
+        self._acoustic_metrics_cache: Dict[Tuple[str, int, int], AcousticMetrics] = {}
 
         # Reverse pronunciation index from realized phones to intact recorded WordOccurrences
         self.pron_to_words: Dict[Tuple[str, ...], List[WordOccurrence]] = {}
@@ -78,12 +167,97 @@ class SpanSelector:
                     self.subword_index.setdefault(sub_key, []).append((wo, start_i, end_i))
                     self.base_subword_index.setdefault(sub_base_key, []).append((wo, start_i, end_i))
 
+        # Speaker and global median duration modeling (Fix P3.2)
+        speaker_word_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
+        global_word_durations: Dict[str, List[float]] = {}
+        for wo in self.inv.words.values():
+            srec = self.inv.sources.get(wo.source_content_id)
+            sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+            dur = (wo.end_sample - wo.start_sample) / float(sr)
+            w_norm = wo.word_normalized.lower()
+            speaker_word_durations.setdefault((wo.speaker_id, w_norm), []).append(dur)
+            global_word_durations.setdefault(w_norm, []).append(dur)
+
+        self.speaker_word_median: Dict[Tuple[Optional[str], str], float] = {
+            k: float(np.median(v)) for k, v in speaker_word_durations.items() if v
+        }
+        self.global_word_median: Dict[str, float] = {
+            k: float(np.median(v)) for k, v in global_word_durations.items() if v
+        }
+
+        # Speaker and global median duration modeling for phones
+        speaker_phone_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
+        global_phone_durations: Dict[str, List[float]] = {}
+        for ev in self.inv.events.values():
+            if getattr(ev, "kind", "") != "phone":
+                continue
+            srec = self.inv.sources.get(ev.source_content_id)
+            sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+            dur = (ev.end_sample - ev.start_sample) / float(sr)
+            base_p = getattr(ev, "base_phone", "") or strip_phone_stress(ev.label)
+            speaker_phone_durations.setdefault((ev.speaker_id, ev.label), []).append(dur)
+            speaker_phone_durations.setdefault((ev.speaker_id, base_p), []).append(dur)
+            global_phone_durations.setdefault(ev.label, []).append(dur)
+            global_phone_durations.setdefault(base_p, []).append(dur)
+
+        self.speaker_phone_median: Dict[Tuple[Optional[str], str], float] = {
+            k: float(np.median(v)) for k, v in speaker_phone_durations.items() if v
+        }
+        self.global_phone_median: Dict[str, float] = {
+            k: float(np.median(v)) for k, v in global_phone_durations.items() if v
+        }
+        self.speaker_median_f0: Dict[Optional[str], float] = {}
+        self.global_median_f0: float = 150.0
+
+    @staticmethod
+    def _compute_quadratic_duration_penalty(actual_dur: float, median_dur: float) -> float:
+        """
+        Computes quadratic duration penalty (Fix P3.2):
+        If ratio < 0.75: 0.60 * ((0.75 - ratio) / 0.75) ** 2
+        If ratio > 1.50: 0.30 * min(2.0, (ratio - 1.50) / 1.0) ** 2
+        Else: 0.0
+        where ratio = actual_dur / max(median_dur, 0.04).
+        """
+        ref_dur = max(median_dur, 0.04)
+        ratio = actual_dur / ref_dur
+        if ratio < 0.75:
+            return 0.60 * ((0.75 - ratio) / 0.75) ** 2
+        elif ratio > 1.50:
+            return 0.30 * min(2.0, (ratio - 1.50) / 1.0) ** 2
+        return 0.0
+
+    def _get_speaker_median_duration(
+        self, speaker_id: Optional[str], word_norm: str, fallback: float
+    ) -> float:
+        w_norm = word_norm.lower()
+        if (speaker_id, w_norm) in self.speaker_word_median:
+            return self.speaker_word_median[(speaker_id, w_norm)]
+        if w_norm in self.global_word_median:
+            return self.global_word_median[w_norm]
+        return fallback
+
+    def _get_speaker_phone_median_duration(
+        self, speaker_id: Optional[str], phone_label: str, fallback: float
+    ) -> float:
+        base_p = strip_phone_stress(phone_label)
+        if (speaker_id, phone_label) in self.speaker_phone_median:
+            return self.speaker_phone_median[(speaker_id, phone_label)]
+        if (speaker_id, base_p) in self.speaker_phone_median:
+            return self.speaker_phone_median[(speaker_id, base_p)]
+        if phone_label in self.global_phone_median:
+            return self.global_phone_median[phone_label]
+        if base_p in self.global_phone_median:
+            return self.global_phone_median[base_p]
+        return fallback
+
     def retrieve_candidates(self, graph: TargetGraph, speaker_id: Optional[str] = None) -> List[SpanCandidate]:
         """
         Retrieves Phrase, Word, and Phone candidates covering contiguous segments of the target graph.
         """
         candidates: List[SpanCandidate] = []
         cand_id_counter = 0
+
+        span_pools: List[List[SpanCandidate]] = []
 
         # Map word_normalized to matching word occurrences in inventory
         # Filter by speaker if requested
@@ -260,6 +434,9 @@ class SpanSelector:
                         phrase_end_sample = matched_wos[-1].end_sample
                         phrase_start_sample = matched_wos[0].start_sample
 
+                        exit_variant = 0
+                        entry_variant = 0
+
                         if matched_wos[-1].phone_event_ids:
                             last_ev = self.inv.events.get(matched_wos[-1].phone_event_ids[-1])
                             if last_ev and last_ev.successor_id:
@@ -267,9 +444,7 @@ class SpanSelector:
                                 if succ_ev and succ_ev.kind == "phone":
                                     succ_base = getattr(succ_ev, "base_phone", "") or strip_phone_stress(succ_ev.label)
                                     if succ_base in ("P", "T", "K", "B", "D", "G"):
-                                        collar = int(round(0.012 * s_rate))
-                                        if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                            phrase_end_sample -= collar
+                                        exit_variant = max(exit_variant, int(round(0.012 * s_rate)))
 
                         # Guard 1: Pause / Gap & Phrase-Final Right Bleed Guard
                         phrase_right_bleed_cost = 0.0
@@ -282,47 +457,36 @@ class SpanSelector:
                                     succ_ev = self.inv.events.get(last_ev.successor_id)
                                     if succ_ev and getattr(succ_ev, "kind", "") == "phone":
                                         phrase_right_bleed_cost = 0.35
-                                        collar = int(round(0.015 * s_rate))
-                                        if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                            phrase_end_sample -= collar
+                                        exit_variant = max(exit_variant, int(round(0.015 * s_rate)))
 
                         # Guard 2: Left Boundary Consonant / Nasal / Glide Bleed Guard
                         phrase_left_bleed_cost = 0.0
                         if first_wo.phone_event_ids:
                             first_ev = self.inv.events.get(first_wo.phone_event_ids[0])
-                            if first_ev:
-                                if first_ev.predecessor_id is None and getattr(first_ev, "kind", "") == "phone":
-                                    phrase_left_bleed_cost = 0.50
-                                    collar = int(round(0.020 * s_rate))
-                                    if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                        phrase_start_sample += collar
-                                elif first_ev.predecessor_id:
-                                    pred_ev = self.inv.events.get(first_ev.predecessor_id)
-                                    if pred_ev and getattr(pred_ev, "kind", "") == "phone":
-                                        pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
-                                        first_node = graph.nodes[covered[0]]
-                                        if first_node.base_phone in VOWEL_PHONES:
-                                            if pred_base == "V":
-                                                phrase_left_bleed_cost = 0.80
-                                                collar = int(round(0.020 * s_rate))
-                                                if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                                    phrase_start_sample += collar
-                                            elif pred_base in ("Z", "ZH", "DH"):
-                                                phrase_left_bleed_cost = 0.20
-                                            elif pred_base in ("N", "M", "NG", "Y", "R", "W", "L", "ER") or pred_base in VOWEL_PHONES:
-                                                phrase_left_bleed_cost = 0.50
-                                                collar = int(round(0.020 * s_rate))
-                                                if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                                    phrase_start_sample += collar
+                            if first_ev and first_ev.predecessor_id:
+                                pred_ev = self.inv.events.get(first_ev.predecessor_id)
+                                if pred_ev and getattr(pred_ev, "kind", "") == "phone":
+                                    pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
+                                    first_node = graph.nodes[covered[0]]
+                                    if first_node.base_phone in VOWEL_PHONES:
+                                        if pred_base == "V":
+                                            phrase_left_bleed_cost = 0.80
+                                            entry_variant = max(entry_variant, int(round(0.020 * s_rate)))
+                                        elif pred_base in ("Z", "ZH", "DH"):
+                                            phrase_left_bleed_cost = 0.20
                                         elif pred_base in ("N", "M", "NG", "Y", "R", "W", "L", "ER") or pred_base in VOWEL_PHONES:
                                             phrase_left_bleed_cost = 0.50
-                                            collar = int(round(0.020 * s_rate))
-                                            if phrase_end_sample - phrase_start_sample > 2 * collar:
-                                                phrase_start_sample += collar
+                                            entry_variant = max(entry_variant, int(round(0.020 * s_rate)))
+                                    elif pred_base in ("N", "M", "NG", "Y", "R", "W", "L", "ER") or pred_base in VOWEL_PHONES:
+                                        phrase_left_bleed_cost = 0.50
+                                        entry_variant = max(entry_variant, int(round(0.020 * s_rate)))
 
                         bias_adj = self._compute_prosodic_bias_adjustment(
                             covered, first_wo.source_content_id, phrase_start_sample, phrase_end_sample, graph
                         )
+                        p_feat = self._get_candidate_acoustic_features(first_wo.source_content_id, phrase_start_sample, phrase_end_sample)
+                        p_f0 = p_feat.f0_mean if p_feat.f0_mean > 0 else None
+                        p_pitch = float(12.0 * np.log2(p_f0 / max(50.0, self.global_median_f0))) if p_f0 else None
                         c = SpanCandidate(
                             candidate_id=f"cand_phrase_{cand_id_counter:05d}",
                             target_node_start=covered[0],
@@ -335,9 +499,13 @@ class SpanSelector:
                             event_ids=all_events,
                             span_type="phrase",
                             matched_word=" ".join(phrase_tokens),
+                            entry_variant_samples=entry_variant,
+                            exit_variant_samples=exit_variant,
                             target_cost=0.0 + bias_adj + phrase_realization_cost + enunciation_guard_cost + rush_penalty + swallowed_penalty + phrase_right_bleed_cost + phrase_left_bleed_cost,
                             quality_cost=0.0,
                             realized_phones=total_realized_phones,
+                            cand_f0_hz=p_f0,
+                            pitch_semitones=p_pitch,
                         )
                         candidates.append(c)
                         cand_id_counter += 1
@@ -405,22 +573,22 @@ class SpanSelector:
 
                     valid_branch_candidates_and_costs.append((wo, realization_cost, list(wo_phones)))
 
-                # Compute expected word duration from duration priors of constituent phone nodes
-                expected_dur = sum(
+                priors_sum = sum(
                     graph.nodes[nid].duration_prior_sec or 0.10
                     for nid in branch_nodes if nid < len(graph.nodes)
                 )
-
                 target_word_text = graph.nodes[branch_nodes[0]].word_text.lower()
                 target_word_in_inv = target_word_text in self.inv.word_to_word_ids
+                expected_dur = self._get_speaker_median_duration(speaker_id, target_word_text, priors_sum)
 
                 end_node = graph.nodes[branch_nodes[-1]]
                 start_node = graph.nodes[branch_nodes[0]]
+                end_r_phones = getattr(end_node, "right_context_phones", None) or {end_node.right_context_phone}
 
                 def _compute_word_bleed(wo_it: WordOccurrence, srate: int) -> Tuple[float, float]:
                     r_bleed = 0.0
                     l_bleed = 0.0
-                    if (end_node.is_phrase_final or end_node.right_context_phone == "sil") and wo_it.phone_event_ids:
+                    if (end_node.is_phrase_final or "sil" in end_r_phones or end_node.right_context_phone == "sil") and wo_it.phone_event_ids:
                         l_ev = self.inv.events.get(wo_it.phone_event_ids[-1])
                         if l_ev and l_ev.successor_id:
                             s_ev = self.inv.events.get(l_ev.successor_id)
@@ -448,34 +616,62 @@ class SpanSelector:
                     srec = self.inv.sources.get(wo_it.source_content_id)
                     srate = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
                     w_dur = (wo_it.end_sample - wo_it.start_sample) / float(srate)
-                    d_ratio = abs(w_dur - expected_dur) / max(expected_dur, 0.05)
+                    d_cost = self._compute_quadratic_duration_penalty(w_dur, expected_dur)
                     swallow_c = self._compute_swallowed_penalty(wo_it.phone_event_ids, srate)
                     lex_c = 0.0
                     if wo_it.word_normalized.lower() != target_word_text:
                         lex_c = 0.35 if target_word_in_inv else 0.05
                     r_bl, l_bl = _compute_word_bleed(wo_it, srate)
-                    return r_c + 0.35 * min(d_ratio, 2.0) + swallow_c + lex_c + r_bl + l_bl
+                    heur_c = min(0.50, r_bl + l_bl + swallow_c)
+                    return r_c + d_cost + heur_c + lex_c
 
                 valid_branch_candidates_and_costs.sort(key=_word_candidate_sort_key)
-
-                for wo, r_cost, r_phones in valid_branch_candidates_and_costs[:self.max_candidates_per_span]:
-                    src_rec = self.inv.sources.get(wo.source_content_id)
-                    s_rate = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 44100
-                    actual_dur = (wo.end_sample - wo.start_sample) / float(s_rate)
-                    dur_cost = 0.35 * min(abs(actual_dur - expected_dur) / max(expected_dur, 0.05), 2.0)
-                    swallow_cost = self._compute_swallowed_penalty(wo.phone_event_ids, s_rate)
-
-                    lexical_sub_cost = 0.0
+                word_branch_cands: List[SpanCandidate] = []
+                target_l_phone = start_node.left_context_phone
+                for wo, r_c, r_phones in valid_branch_candidates_and_costs:
+                    srec = self.inv.sources.get(wo.source_content_id)
+                    srate = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+                    w_dur = (wo.end_sample - wo.start_sample) / float(srate)
+                    d_cost = self._compute_quadratic_duration_penalty(w_dur, expected_dur)
+                    swallow_c = self._compute_swallowed_penalty(wo.phone_event_ids, srate)
+                    lex_c = 0.0
                     if wo.word_normalized.lower() != target_word_text:
-                        lexical_sub_cost = 0.35 if target_word_in_inv else 0.05
-
+                        lex_c = 0.35 if target_word_in_inv else 0.05
                     w_end_sample = wo.end_sample
                     w_start_sample = wo.start_sample
-                    r_bleed_cost, l_bleed_cost = _compute_word_bleed(wo, s_rate)
+                    r_bl, l_bl = _compute_word_bleed(wo, srate)
+                    heur_c = min(0.50, r_bl + l_bl + swallow_c)
+
+                    exit_variant = 0
+                    entry_variant = 0
+                    if wo.phone_event_ids:
+                        last_ev = self.inv.events.get(wo.phone_event_ids[-1])
+                        if last_ev and last_ev.successor_id:
+                            succ_ev = self.inv.events.get(last_ev.successor_id)
+                            if succ_ev and getattr(succ_ev, "kind", "") == "phone":
+                                succ_base = getattr(succ_ev, "base_phone", "") or strip_phone_stress(succ_ev.label)
+                                if succ_base in ("P", "T", "K", "B", "D", "G"):
+                                    exit_variant = max(exit_variant, int(round(0.012 * srate)))
+                    if r_bl > 0.0:
+                        exit_variant = max(exit_variant, int(round(0.015 * srate)))
+
+                    if wo.phone_event_ids:
+                        first_ev = self.inv.events.get(wo.phone_event_ids[0])
+                        if first_ev and first_ev.predecessor_id:
+                            pred_ev = self.inv.events.get(first_ev.predecessor_id)
+                            if pred_ev and getattr(pred_ev, "kind", "") == "phone":
+                                pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
+                                target_l_base = strip_phone_stress(target_l_phone) if target_l_phone else ""
+                                if pred_base in ("P", "T", "K", "B", "D", "G") and target_l_base not in ("P", "T", "K", "B", "D", "G"):
+                                    entry_variant = max(entry_variant, int(round(0.012 * srate)))
+                    if l_bl > 0.0:
+                        collar_sec = 0.045 if l_bl >= 0.80 else 0.020
+                        entry_variant = max(entry_variant, int(round(collar_sec * srate)))
 
                     bias_adj = self._compute_prosodic_bias_adjustment(
                         branch_nodes, wo.source_content_id, w_start_sample, w_end_sample, graph
                     )
+
                     c = SpanCandidate(
                         candidate_id=f"cand_word_{cand_id_counter:05d}",
                         target_node_start=branch_nodes[0],
@@ -488,12 +684,17 @@ class SpanSelector:
                         event_ids=wo.phone_event_ids,
                         span_type="word",
                         matched_word=wo.word_normalized,
-                        target_cost=0.05 + bias_adj + r_cost + dur_cost + swallow_cost + lexical_sub_cost + r_bleed_cost + l_bleed_cost,
+                        entry_variant_samples=entry_variant,
+                        exit_variant_samples=exit_variant,
+                        target_cost=0.05 + bias_adj + r_c + d_cost + heur_c + lex_c,
                         quality_cost=0.0,
                         realized_phones=r_phones,
                     )
-                    candidates.append(c)
                     cand_id_counter += 1
+                    word_branch_cands.append(c)
+
+                if word_branch_cands:
+                    span_pools.append(word_branch_cands)
 
         # 2.5 Sub-word multi-phone candidates (Level 2.5 - diphones, triphones, syllables)
         for t_idx, branches in token_branches.items():
@@ -602,7 +803,7 @@ class SpanSelector:
                             sr_it = src_it.native_sample_rate if src_it and src_it.native_sample_rate > 0 else 44100
                             evs_it = [self.inv.events[eid] for eid in wo_it.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone"]
                             dur_it = (evs_it[e_i - 1].end_sample - evs_it[s_i].start_sample) / float(sr_it)
-                            d_ratio = abs(dur_it - expected_dur) / max(expected_dur, 0.05)
+                            d_cost = self._compute_quadratic_duration_penalty(dur_it, expected_dur)
                             first_ev = evs_it[s_i]
                             last_ev = evs_it[e_i - 1]
                             l_ev = self.inv.events.get(first_ev.predecessor_id) if first_ev.predecessor_id else None
@@ -618,17 +819,18 @@ class SpanSelector:
                                     if prev_base in VOWEL_PHONES:
                                         flap_c = 0.35
                             r_bl, l_bl, coda_p, franken_p = _compute_subword_bleed_and_guards(wo_it, s_i, e_i, sr_it)
-                            return r_c + 0.25 * min(d_ratio, 2.0) + ctx_c + swallow_c + floor_pen + flap_c + r_bl + l_bl + coda_p + franken_p
+                            return r_c + d_cost + ctx_c + swallow_c + floor_pen + flap_c + r_bl + l_bl + coda_p + franken_p
 
                         all_matches.sort(key=_subword_sort_key)
 
-                        for (wo, s_i, e_i), r_cost in all_matches[:self.max_candidates_per_span]:
+                        subword_slice_cands: List[SpanCandidate] = []
+                        for (wo, s_i, e_i), r_cost in all_matches:
                             evs = [self.inv.events[eid] for eid in wo.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone"]
                             sub_evs = evs[s_i:e_i]
                             src_rec = self.inv.sources.get(wo.source_content_id)
                             s_rate = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 44100
                             actual_dur = (sub_evs[-1].end_sample - sub_evs[0].start_sample) / float(s_rate)
-                            dur_cost = 0.25 * min(abs(actual_dur - expected_dur) / max(expected_dur, 0.05), 2.0)
+                            dur_cost = self._compute_quadratic_duration_penalty(actual_dur, expected_dur)
                             if actual_dur < 0.040:
                                 dur_cost += 3.0 * (0.040 - actual_dur) / 0.040
 
@@ -643,14 +845,15 @@ class SpanSelector:
                             sub_end_sample = sub_evs[-1].end_sample
                             r_bl_cost, l_bl_cost, coda_penalty, franken_penalty = _compute_subword_bleed_and_guards(wo, s_i, e_i, s_rate)
 
+                            exit_variant = 0
+                            entry_variant = 0
+
                             if sub_evs[-1].successor_id:
                                 succ_ev = self.inv.events.get(sub_evs[-1].successor_id)
                                 if succ_ev and succ_ev.kind == "phone":
                                     succ_base = getattr(succ_ev, "base_phone", "") or strip_phone_stress(succ_ev.label)
                                     if succ_base in ("P", "T", "K", "B", "D", "G"):
-                                        collar = int(round(0.012 * s_rate))
-                                        if sub_end_sample - sub_start_sample > 2 * collar:
-                                            sub_end_sample -= collar
+                                        exit_variant = max(exit_variant, int(round(0.012 * s_rate)))
 
                             if sub_evs[0].predecessor_id:
                                 pred_ev = self.inv.events.get(sub_evs[0].predecessor_id)
@@ -658,20 +861,14 @@ class SpanSelector:
                                     pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
                                     target_l_base = strip_phone_stress(target_l_phone) if target_l_phone else ""
                                     if pred_base in ("P", "T", "K", "B", "D", "G") and target_l_base not in ("P", "T", "K", "B", "D", "G"):
-                                        collar = int(round(0.012 * s_rate))
-                                        if sub_end_sample - sub_start_sample > 2 * collar:
-                                            sub_start_sample += collar
+                                        entry_variant = max(entry_variant, int(round(0.012 * s_rate)))
 
                             if r_bl_cost > 0.0:
-                                collar = int(round(0.015 * s_rate))
-                                if sub_end_sample - sub_start_sample > 2 * collar:
-                                    sub_end_sample -= collar
+                                exit_variant = max(exit_variant, int(round(0.015 * s_rate)))
 
                             if l_bl_cost > 0.0:
                                 collar_sec = 0.045 if l_bl_cost >= 0.80 else 0.020
-                                collar = int(round(collar_sec * s_rate))
-                                if sub_end_sample - sub_start_sample > 2 * collar:
-                                    sub_start_sample += collar
+                                entry_variant = max(entry_variant, int(round(collar_sec * s_rate)))
 
                             bias_adj = self._compute_prosodic_bias_adjustment(
                                 sub_nodes, wo.source_content_id, sub_start_sample, sub_end_sample, graph
@@ -701,12 +898,17 @@ class SpanSelector:
                                 event_ids=[e.event_id for e in sub_evs],
                                 span_type="subword",
                                 matched_word=f"{wo.word_normalized}[{matched_phones_str}]",
+                                entry_variant_samples=entry_variant,
+                                exit_variant_samples=exit_variant,
                                 target_cost=base_target_cost + bias_adj + r_cost + dur_cost + ctx_cost + swallow_cost + flap_penalty + r_bl_cost + l_bl_cost + coda_penalty + franken_penalty,
                                 quality_cost=0.0,
                                 realized_phones=[e.label for e in sub_evs],
                             )
-                            candidates.append(c)
                             cand_id_counter += 1
+                            subword_slice_cands.append(c)
+
+                        if subword_slice_cands:
+                            span_pools.append(subword_slice_cands)
 
 
         # 3. Whole phone candidates (Level 3 - fallback)
@@ -792,21 +994,13 @@ class SpanSelector:
 
                 return coda_pen, r_bleed, l_bleed
 
+            phone_median = self._get_speaker_phone_median_duration(speaker_id, node.base_phone, node.duration_prior_sec or 0.10)
+
             def _phone_sort_key(item: Tuple[Any, float]) -> float:
                 ev_it, stress_c = item
                 sr_it = self.inv.sources[ev_it.source_content_id].native_sample_rate
                 dur_it = (ev_it.end_sample - ev_it.start_sample) / float(sr_it)
-                prior = node.duration_prior_sec or 0.10
-                if node.base_phone in vowel_set:
-                    if dur_it >= prior:
-                        if dur_it <= 1.35 * prior:
-                            d_cost = -0.05 if node.is_word_initial else 0.0
-                        else:
-                            d_cost = 0.5 * (dur_it - 1.35 * prior) / prior
-                    else:
-                        d_cost = 1.2 * (prior - dur_it) / prior
-                else:
-                    d_cost = abs(dur_it - prior) / prior
+                d_cost = self._compute_quadratic_duration_penalty(dur_it, phone_median)
                 l_ev = self.inv.events.get(ev_it.predecessor_id) if ev_it.predecessor_id else None
                 r_ev = self.inv.events.get(ev_it.successor_id) if ev_it.successor_id else None
                 ctx_c = self._compute_context_affinity(target_l_phone, target_r_phone, l_ev, r_ev)
@@ -829,38 +1023,28 @@ class SpanSelector:
             # Rank by context affinity + duration closeness to prior and take top candidates
             ranked = sorted(valid_events_and_costs, key=_phone_sort_key)
 
-            for ev, stress_cost in ranked[:self.max_candidates_per_span]:
+            phone_node_cands: List[SpanCandidate] = []
+            for ev, stress_cost in ranked:
                 sr = self.inv.sources[ev.source_content_id].native_sample_rate
                 dur = (ev.end_sample - ev.start_sample) / float(sr)
-                prior = node.duration_prior_sec or 0.10
-                if node.base_phone in vowel_set:
-                    if dur >= prior:
-                        if dur <= 1.35 * prior:
-                            dur_cost = -0.05 if node.is_word_initial else 0.0
-                        else:
-                            dur_cost = 0.15 * min((dur - 1.35 * prior) / prior, 2.0)
-                    else:
-                        dur_cost = 0.30 * min((prior - dur) / prior, 3.0)
-                else:
-                    dur_cost = 0.2 * min(abs(dur - prior) / prior, 3.0)
+                dur_cost = self._compute_quadratic_duration_penalty(dur, phone_median)
 
                 p_start_sample = ev.start_sample
                 p_end_sample = ev.end_sample
                 coda_penalty, r_bleed_cost, l_bleed_cost = _compute_phone_guards(ev, sr)
+
+                exit_variant = 0
+                entry_variant = 0
 
                 if ev.successor_id:
                     succ_ev = self.inv.events.get(ev.successor_id)
                     if succ_ev and succ_ev.kind == "phone":
                         succ_base = getattr(succ_ev, "base_phone", "") or strip_phone_stress(succ_ev.label)
                         if succ_base in ("P", "T", "K", "B", "D", "G"):
-                            collar = int(round(0.012 * sr))
-                            if p_end_sample - p_start_sample > 2 * collar:
-                                p_end_sample -= collar
+                            exit_variant = max(exit_variant, int(round(0.012 * sr)))
 
                 if r_bleed_cost > 0.0:
-                    collar = int(round(0.015 * sr))
-                    if p_end_sample - p_start_sample > 2 * collar:
-                        p_end_sample -= collar
+                    exit_variant = max(exit_variant, int(round(0.015 * sr)))
 
                 if ev.predecessor_id:
                     pred_ev = self.inv.events.get(ev.predecessor_id)
@@ -868,9 +1052,11 @@ class SpanSelector:
                         pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
                         target_l_base = strip_phone_stress(target_l_phone) if target_l_phone else ""
                         if pred_base in ("P", "T", "K", "B", "D", "G") and target_l_base not in ("P", "T", "K", "B", "D", "G"):
-                            collar = int(round(0.012 * sr))
-                            if p_end_sample - p_start_sample > 2 * collar:
-                                p_start_sample += collar
+                            entry_variant = max(entry_variant, int(round(0.012 * sr)))
+
+                if l_bleed_cost > 0.0:
+                    collar_sec = 0.045 if l_bleed_cost >= 0.80 else 0.020
+                    entry_variant = max(entry_variant, int(round(collar_sec * sr)))
 
                 bias_adj = self._compute_prosodic_bias_adjustment(
                     [node.node_id], ev.source_content_id, p_start_sample, p_end_sample, graph
@@ -895,15 +1081,6 @@ class SpanSelector:
                     if dur < 0.035:
                         swallow_cost = 2.5 * (0.035 - dur) / 0.035
 
-                # Check phone audibility floor for voiced sounds and fricatives
-                _, p_rms = self._get_candidate_acoustic_features(ev.source_content_id, p_start_sample, p_end_sample)
-                p_energy_penalty = 0.0
-                base_p = node.base_phone
-                min_rms = 0.016
-                if base_p in ("Z", "S", "SH", "ZH", "V", "F", "TH", "DH", "CH", "JH") or base_p in vowel_set:
-                    if 0.0 < p_rms < min_rms:
-                        p_energy_penalty = 0.6 * (min_rms - p_rms) / min_rms
-
                 c = SpanCandidate(
                     candidate_id=f"cand_phone_{cand_id_counter:05d}",
                     target_node_start=node.node_id,
@@ -916,12 +1093,102 @@ class SpanSelector:
                     event_ids=[ev.event_id],
                     span_type="phone",
                     matched_word=node.word_text,
-                    target_cost=0.15 + dur_cost + bias_adj + p_energy_penalty + ctx_cost + stress_cost + swallow_cost + flap_penalty + coda_penalty + r_bleed_cost + l_bleed_cost,
+                    entry_variant_samples=entry_variant,
+                    exit_variant_samples=exit_variant,
+                    target_cost=0.15 + dur_cost + bias_adj + ctx_cost + stress_cost + swallow_cost + flap_penalty + coda_penalty + r_bleed_cost + l_bleed_cost,
                     quality_cost=0.0,
                     realized_phones=[ev.label],
                 )
-                candidates.append(c)
                 cand_id_counter += 1
+                phone_node_cands.append(c)
+
+            if phone_node_cands:
+                span_pools.append(phone_node_cands)
+
+        # Fix P3.1: Pre-DP Continuation Linkage Audit across adjacent graph spans
+        node_succs: Dict[int, List[int]] = {}
+        for u, v in graph.edges:
+            node_succs.setdefault(u, []).append(v)
+
+        node_preds: Dict[int, List[int]] = {}
+        for u, v in graph.edges:
+            node_preds.setdefault(v, []).append(u)
+
+        all_pre_dp_candidates = list(candidates)
+        for pool in span_pools:
+            all_pre_dp_candidates.extend(pool)
+
+        exit_sample_map: Dict[Tuple[int, str, int], List[SpanCandidate]] = {}
+        exit_event_map: Dict[Tuple[int, str, str], List[SpanCandidate]] = {}
+
+        for c in all_pre_dp_candidates:
+            u = c.target_node_end
+            exit_sample_map.setdefault((u, c.source_content_id, c.end_sample), []).append(c)
+            if c.event_ids:
+                last_ev = self.inv.events.get(c.event_ids[-1])
+                if last_ev and last_ev.successor_id:
+                    exit_event_map.setdefault((u, c.source_content_id, last_ev.successor_id), []).append(c)
+
+        continuation_candidates: Set[str] = set()
+        for succ in all_pre_dp_candidates:
+            v = succ.target_node_start
+            possible_preds = list(node_preds.get(v, []))
+            if succ.span_type in ("subword", "phone"):
+                # Diphone joins allow transitions on identical boundary node
+                possible_preds.append(v)
+
+            for u in possible_preds:
+                matching_preds = list(exit_sample_map.get((u, succ.source_content_id, succ.start_sample), []))
+                if succ.event_ids:
+                    matching_preds.extend(exit_event_map.get((u, succ.source_content_id, succ.event_ids[0]), []))
+
+                for pred in matching_preds:
+                    if pred.candidate_id == succ.candidate_id:
+                        continue
+                    if pred.start_sample == succ.start_sample and pred.end_sample == succ.end_sample:
+                        continue
+
+                    # Intra-word fragmentation guard: subwords/phones carved from same donor word
+                    # are penalized in DP rather than treated as 0-cost continuations
+                    if (
+                        pred.event_ids
+                        and succ.event_ids
+                        and (pred.span_type != "word" or succ.span_type != "word")
+                    ):
+                        p_last_ev = self.inv.events.get(pred.event_ids[-1])
+                        s_first_ev = self.inv.events.get(succ.event_ids[0])
+                        if (
+                            p_last_ev
+                            and s_first_ev
+                            and p_last_ev.word_occurrence_id is not None
+                            and p_last_ev.word_occurrence_id == s_first_ev.word_occurrence_id
+                        ):
+                            continue
+
+                    continuation_candidates.add(pred.candidate_id)
+                    continuation_candidates.add(succ.candidate_id)
+
+        # For each span pool: keep all continuations, and top max_candidates_per_span of non-continuations
+        for pool in span_pools:
+            continuations = [c for c in pool if c.candidate_id in continuation_candidates]
+            others = [c for c in pool if c.candidate_id not in continuation_candidates]
+            surviving = continuations + others[:self.max_candidates_per_span]
+
+            for c in surviving:
+                feat = self._get_candidate_acoustic_features(c.source_content_id, c.start_sample, c.end_sample)
+                if feat.f0_mean > 0:
+                    c.cand_f0_hz = feat.f0_mean
+                    c.pitch_semitones = float(12.0 * np.log2(feat.f0_mean / max(50.0, self.global_median_f0)))
+
+                if c.span_type == "phone":
+                    node = graph.nodes[c.target_node_start]
+                    base_p = node.base_phone
+                    if base_p in ("Z", "S", "SH", "ZH", "V", "F", "TH", "DH", "CH", "JH") or base_p in vowel_set:
+                        min_rms = 0.016
+                        if 0.0 < feat.rms_energy < min_rms:
+                            c.target_cost += 0.6 * (min_rms - feat.rms_energy) / min_rms
+
+                candidates.append(c)
 
         return candidates
 
@@ -930,10 +1197,12 @@ class SpanSelector:
         source_content_id: str,
         start_sample: int,
         end_sample: int,
-    ) -> Tuple[float, float]:
+    ) -> AcousticMetrics:
         """
-        Returns (f0_slope, rms_energy) for the audio interval.
+        Returns AcousticMetrics (f0_slope, rms_energy, f0_mean) for the audio interval.
         Caches results by (source_content_id, start_sample, end_sample).
+        Computes voiced F0 slope via degree-1 polynomial regression (np.polyfit)
+        over voiced frames with >= 3 valid frames (confidence > 0.5); else 0.0 (Fix P3.4).
         """
         cache_key = (source_content_id, start_sample, end_sample)
         if cache_key in self._acoustic_metrics_cache:
@@ -941,7 +1210,7 @@ class SpanSelector:
 
         src_rec = self.inv.sources.get(source_content_id)
         if not src_rec:
-            return 0.0, 0.0
+            return AcousticMetrics(0.0, 0.0, 0.0)
 
         pcm_path = None
         for cand_path in [src_rec.cached_analysis_pcm_path, src_rec.cached_pcm_path, src_rec.source_path]:
@@ -950,7 +1219,7 @@ class SpanSelector:
                 break
 
         if not pcm_path:
-            return 0.0, 0.0
+            return AcousticMetrics(0.0, 0.0, 0.0)
 
         try:
             import soundfile as sf
@@ -969,14 +1238,14 @@ class SpanSelector:
             s_file = max(0, min(info.frames, s_file))
             e_file = max(0, min(info.frames, e_file))
             if e_file <= s_file:
-                return 0.0, 0.0
+                return AcousticMetrics(0.0, 0.0, 0.0)
 
             audio_slice, file_sr = sf.read(str(pcm_path), start=s_file, stop=e_file, dtype="float32")
             if audio_slice.ndim > 1:
                 audio_slice = np.mean(audio_slice, axis=1)
 
             if len(audio_slice) == 0:
-                return 0.0, 0.0
+                return AcousticMetrics(0.0, 0.0, 0.0)
 
             rms = float(np.sqrt(np.mean(audio_slice ** 2)))
 
@@ -984,18 +1253,40 @@ class SpanSelector:
                 audio_slice = librosa.resample(audio_slice, orig_sr=file_sr, target_sr=16000)
 
             f0_slope = 0.0
+            f0_mean = 0.0
             if len(audio_slice) >= 320:
-                f0 = librosa.yin(audio_slice, fmin=80, fmax=500, sr=16000)
-                valid = [float(f) for f in f0 if f is not None and not np.isnan(f) and 80 <= f <= 500]
-                if len(valid) >= 2:
-                    dt = len(valid) * (len(audio_slice) / (16000.0 * len(f0)))
-                    if dt > 0:
-                        f0_slope = (valid[-1] - valid[0]) / dt
+                try:
+                    f0, voiced_flag, voiced_probs = librosa.pyin(
+                        audio_slice, fmin=80, fmax=500, sr=16000, hop_length=160
+                    )
+                except Exception:
+                    f0_yin = librosa.yin(audio_slice, fmin=80, fmax=500, sr=16000, hop_length=160)
+                    voiced_flag = np.array([80 <= f <= 500 for f in f0_yin], dtype=bool)
+                    voiced_probs = np.where(voiced_flag, 1.0, 0.0)
+                    f0 = f0_yin
 
-            self._acoustic_metrics_cache[cache_key] = (f0_slope, rms)
-            return f0_slope, rms
+                valid_indices = [
+                    i for i, (vf, vp, f) in enumerate(zip(voiced_flag, voiced_probs, f0))
+                    if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80 <= f <= 500
+                ]
+
+                if len(valid_indices) >= 3:
+                    t_voiced = np.array([i * (160.0 / 16000.0) for i in valid_indices], dtype=float)
+                    f0_voiced = np.array([float(f0[i]) for i in valid_indices], dtype=float)
+                    f0_slope = float(np.polyfit(t_voiced, f0_voiced, 1)[0])
+                    f0_mean = float(np.mean(f0_voiced))
+                elif len(valid_indices) > 0:
+                    f0_slope = 0.0
+                    f0_mean = float(np.mean([float(f0[i]) for i in valid_indices]))
+                else:
+                    f0_slope = 0.0
+                    f0_mean = 0.0
+
+            res = AcousticMetrics(f0_slope, rms, f0_mean)
+            self._acoustic_metrics_cache[cache_key] = res
+            return res
         except Exception:
-            return 0.0, 0.0
+            return AcousticMetrics(0.0, 0.0, 0.0)
 
     def _compute_prosodic_bias_adjustment(
         self,
@@ -1060,58 +1351,61 @@ class SpanSelector:
 
     def _compute_context_affinity(
         self,
-        target_left_phone: str,
-        target_right_phone: str,
+        target_left_phone: Union[str, Set[str], Sequence[str]],
+        target_right_phone: Union[str, Set[str], Sequence[str]],
         donor_left_ev: Optional[Any],
         donor_right_ev: Optional[Any],
     ) -> float:
         """
         Computes coarticulation context affinity between target phonetic environment and donor unit environment.
+        Accepts strings, sets, or sequences of valid context phones across multi-branch lattices (Fix P3.4).
         Returns cost adjustment:
           - Negative (discount) if left and/or right phonetic context matches (triphone / diphone match).
           - Positive (penalty) if contexts are non-empty and mismatch.
         """
+        target_left_set = {target_left_phone} if isinstance(target_left_phone, str) else set(target_left_phone)
+        target_left_bases = {strip_phone_stress(p) for p in target_left_set if p}
+        target_right_set = {target_right_phone} if isinstance(target_right_phone, str) else set(target_right_phone)
+        target_right_bases = {strip_phone_stress(p) for p in target_right_set if p}
+
         left_match = False
-        if target_left_phone:
-            t_left_base = strip_phone_stress(target_left_phone)
-            if donor_left_ev is not None:
-                if getattr(donor_left_ev, "kind", "") == "phone":
-                    d_left_base = getattr(donor_left_ev, "base_phone", "") or strip_phone_stress(getattr(donor_left_ev, "label", ""))
-                    left_match = (t_left_base == d_left_base)
-                elif getattr(donor_left_ev, "kind", "") == "silence":
-                    left_match = (t_left_base in ("sil", "sp", ""))
+        if target_left_bases and donor_left_ev is not None:
+            if getattr(donor_left_ev, "kind", "") == "phone":
+                d_left_base = getattr(donor_left_ev, "base_phone", "") or strip_phone_stress(getattr(donor_left_ev, "label", ""))
+                left_match = (d_left_base in target_left_bases)
+            elif getattr(donor_left_ev, "kind", "") == "silence":
+                left_match = any(b in ("sil", "sp", "") for b in target_left_bases)
 
         right_match = False
-        if target_right_phone:
-            t_right_base = strip_phone_stress(target_right_phone)
-            if donor_right_ev is not None:
-                if getattr(donor_right_ev, "kind", "") == "phone":
-                    d_right_base = getattr(donor_right_ev, "base_phone", "") or strip_phone_stress(getattr(donor_right_ev, "label", ""))
-                    right_match = (t_right_base == d_right_base)
-                elif getattr(donor_right_ev, "kind", "") == "silence":
-                    right_match = (t_right_base in ("sil", "sp", ""))
+        if target_right_bases and donor_right_ev is not None:
+            if getattr(donor_right_ev, "kind", "") == "phone":
+                d_right_base = getattr(donor_right_ev, "base_phone", "") or strip_phone_stress(getattr(donor_right_ev, "label", ""))
+                right_match = (d_right_base in target_right_bases)
+            elif getattr(donor_right_ev, "kind", "") == "silence":
+                right_match = any(b in ("sil", "sp", "") for b in target_right_bases)
 
         stop_consonants = {"P", "T", "K", "B", "D", "G"}
         d_l_base = getattr(donor_left_ev, "base_phone", "") if donor_left_ev else ""
-        t_l_base = strip_phone_stress(target_left_phone) if target_left_phone else ""
-        severe_l_mismatch = (d_l_base in stop_consonants and t_l_base not in stop_consonants)
+        severe_l_mismatch = (d_l_base in stop_consonants and not any(b in stop_consonants for b in target_left_bases))
 
         d_r_base = getattr(donor_right_ev, "base_phone", "") if donor_right_ev else ""
-        t_r_base = strip_phone_stress(target_right_phone) if target_right_phone else ""
-        severe_r_mismatch = (d_r_base in stop_consonants and t_r_base not in stop_consonants)
+        severe_r_mismatch = (d_r_base in stop_consonants and not any(b in stop_consonants for b in target_right_bases))
 
-        if target_left_phone and target_right_phone:
+        has_left = bool(target_left_bases)
+        has_right = bool(target_right_bases)
+
+        if has_left and has_right:
             if left_match and right_match:
                 return -0.08  # Triphone match
             elif left_match or right_match:
                 return -0.04  # Diphone match
             else:
                 return 0.35 if (severe_r_mismatch or severe_l_mismatch) else 0.10   # Context mismatch
-        elif target_left_phone:
+        elif has_left:
             if severe_l_mismatch:
                 return 0.35
             return -0.04 if left_match else 0.05
-        elif target_right_phone:
+        elif has_right:
             if severe_r_mismatch:
                 return 0.35
             return -0.04 if right_match else 0.05
@@ -1247,7 +1541,7 @@ class SpanSelector:
             tracks = self._feature_tracks.get(cand.source_content_id)
             if not tracks:
                 return None
-            window_samples = int(round(0.050 * src_rec.native_sample_rate))
+            window_samples = int(round(0.020 * src_rec.native_sample_rate))
             if is_exit:
                 w_start = max(cand.start_sample, cand.end_sample - window_samples)
                 w_end = cand.end_sample
@@ -1378,75 +1672,111 @@ class SpanSelector:
             for curr in reachable:
                 curr_cost = dp[curr.candidate_id]
                 next_target_nodes = node_succs.get(curr.target_node_end, [])
+                candidates_to_eval: List[Tuple[SpanCandidate, bool]] = []
                 for nxt_node in next_target_nodes:
                     for succ in cands_by_start.get(nxt_node, []):
-                        if self.is_source_continuation(curr, succ):
-                            # Intra-word fragmentation guard: if curr and succ are subwords or phones
-                            # carved from the same donor word, charging 0 transition cost rewards
-                            # artificial fragmentation over keeping the multi-phone unit intact.
-                            same_donor_word = (
-                                bool(curr.event_ids and succ.event_ids)
-                                and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id is not None)
-                                and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id == self.inv.events.get(succ.event_ids[0]).word_occurrence_id)
-                            )
-                            if same_donor_word and (curr.span_type != "word" or succ.span_type != "word"):
-                                trans_cost = max(0.40, self.edit_penalty)
-                            else:
-                                trans_cost = 0.0
+                        candidates_to_eval.append((succ, False))
+
+                # Fix P2.2: Diphone joins inside synthesized words
+                if curr.span_type in ("subword", "phone"):
+                    curr_node = graph.nodes[curr.target_node_end] if curr.target_node_end < len(graph.nodes) else None
+                    p_curr_last = strip_phone_stress(curr.realized_phones[-1]) if curr.realized_phones else (curr_node.base_phone if curr_node else "")
+                    for d_succ in cands_by_start.get(curr.target_node_end, []):
+                        if (
+                            d_succ.target_node_end > d_succ.target_node_start
+                            and d_succ.span_type in ("subword", "phone")
+                        ):
+                            d_node = graph.nodes[d_succ.target_node_start] if d_succ.target_node_start < len(graph.nodes) else None
+                            if (
+                                curr_node is not None
+                                and d_node is not None
+                                and curr_node.token_index == d_node.token_index
+                            ):
+                                p_succ_first = strip_phone_stress(d_succ.realized_phones[0]) if d_succ.realized_phones else d_node.base_phone
+                                if p_curr_last and (p_curr_last == p_succ_first or (p_curr_last in VOWEL_PHONES and p_succ_first in VOWEL_PHONES and p_curr_last == p_succ_first)):
+                                    candidates_to_eval.append((d_succ, True))
+
+                for succ, is_diphone in candidates_to_eval:
+                    if self.is_source_continuation(curr, succ):
+                        # Intra-word fragmentation guard: if curr and succ are subwords or phones
+                        # carved from the same donor word, charging 0 transition cost rewards
+                        # artificial fragmentation over keeping the multi-phone unit intact.
+                        same_donor_word = (
+                            bool(curr.event_ids and succ.event_ids)
+                            and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id is not None)
+                            and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id == self.inv.events.get(succ.event_ids[0]).word_occurrence_id)
+                        )
+                        if same_donor_word and (curr.span_type != "word" or succ.span_type != "word"):
+                            trans_cost = max(0.40, self.edit_penalty)
                         else:
-                            feat_exit = _get_exit_feat(curr)
-                            feat_entry = _get_entry_feat(succ)
-                            join_cost = compute_join_cost(feat_exit, feat_entry, is_natural_continuation=False)
+                            trans_cost = 0.0
+                    else:
+                        feat_exit = _get_exit_feat(curr)
+                        feat_entry = _get_entry_feat(succ)
+                        curr_exit_p = curr.realized_phones[-1] if curr.realized_phones else (graph.nodes[curr.target_node_end].phone if curr.target_node_end < len(graph.nodes) else None)
+                        succ_entry_p = succ.realized_phones[0] if succ.realized_phones else (graph.nodes[succ.target_node_start].phone if succ.target_node_start < len(graph.nodes) else None)
+                        manner_scale = compute_manner_scale(curr_exit_p, succ_entry_p)
+                        join_cost = compute_join_cost(
+                            feat_exit,
+                            feat_entry,
+                            is_natural_continuation=False,
+                            exit_phone=curr_exit_p,
+                            entry_phone=succ_entry_p,
+                            manner_scale=manner_scale,
+                        )
+                        if is_diphone:
+                            trans_cost = (0.5 * self.edit_penalty) + (0.5 * join_cost)
+                        else:
                             trans_cost = self.edit_penalty + join_cost
-                            if wavlm_backend is not None:
-                                tail_emb = _get_tail_emb(curr)
-                                head_emb = _get_head_emb(succ)
-                                if tail_emb is not None and head_emb is not None:
-                                    dist = wavlm_backend.compute_cosine_distance(tail_emb, head_emb)
-                                    trans_cost += 0.5 * dist
+                        if wavlm_backend is not None:
+                            tail_emb = _get_tail_emb(curr)
+                            head_emb = _get_head_emb(succ)
+                            if tail_emb is not None and head_emb is not None:
+                                dist = wavlm_backend.compute_cosine_distance(tail_emb, head_emb)
+                                trans_cost += 0.5 * manner_scale * dist
 
-                            # Source continuity and surrounding scene coherence
-                            src_bonus = 0.0
-                            if curr.source_content_id == succ.source_content_id:
-                                # Both cuts from same source video: background room acoustics,
-                                # lighting, and microphone are continuous
-                                src_bonus = 0.15
-                                s_rec = self.inv.sources.get(curr.source_content_id)
+                        # Source continuity and surrounding scene coherence
+                        src_bonus = 0.0
+                        if curr.source_content_id == succ.source_content_id:
+                            # Both cuts from same source video: background room acoustics,
+                            # lighting, and microphone are continuous
+                            src_bonus = 0.15
+                            s_rec = self.inv.sources.get(curr.source_content_id)
+                            s_rate = s_rec.native_sample_rate if s_rec and s_rec.native_sample_rate > 0 else 44100
+                            if 0 <= succ.start_sample - curr.end_sample <= int(5.0 * s_rate):
+                                src_bonus = 0.25
+                        else:
+                            # Sandwich splice: curr came from a different source,
+                            # but predecessor was in succ's source in the same scene
+                            prev_cand = parent.get(curr.candidate_id)
+                            if prev_cand is not None and prev_cand.source_content_id == succ.source_content_id:
+                                s_rec = self.inv.sources.get(succ.source_content_id)
                                 s_rate = s_rec.native_sample_rate if s_rec and s_rec.native_sample_rate > 0 else 44100
-                                if 0 <= succ.start_sample - curr.end_sample <= int(5.0 * s_rate):
+                                if 0 <= succ.start_sample - prev_cand.end_sample <= int(5.0 * s_rate):
                                     src_bonus = 0.25
-                            else:
-                                # Sandwich splice: curr came from a different source,
-                                # but predecessor was in succ's source in the same scene
-                                prev_cand = parent.get(curr.candidate_id)
-                                if prev_cand is not None and prev_cand.source_content_id == succ.source_content_id:
-                                    s_rec = self.inv.sources.get(succ.source_content_id)
-                                    s_rate = s_rec.native_sample_rate if s_rec and s_rec.native_sample_rate > 0 else 44100
-                                    if 0 <= succ.start_sample - prev_cand.end_sample <= int(5.0 * s_rate):
-                                        src_bonus = 0.25
 
-                            trans_cost = max(0.0, trans_cost - src_bonus)
+                        trans_cost = max(0.0, trans_cost - src_bonus)
 
-                        # Unit reuse / source fatigue penalty: penalize repeating the exact same phone slice
-                        reuse_penalty = 0.0
-                        if succ.event_ids and (succ.span_type in ("phone", "subword")):
-                            succ_eids = set(succ.event_ids)
-                            p: Optional[SpanCandidate] = curr
-                            depth = 0
-                            while p is not None and depth < 6:
-                                if p.event_ids and any(eid in succ_eids for eid in p.event_ids):
-                                    reuse_penalty += 0.25
-                                    break
-                                p = parent.get(p.candidate_id)
-                                depth += 1
+                    # Unit reuse / source fatigue penalty: penalize repeating the exact same phone slice
+                    reuse_penalty = 0.0
+                    if succ.event_ids and (succ.span_type in ("phone", "subword")):
+                        succ_eids = set(succ.event_ids)
+                        p: Optional[SpanCandidate] = curr
+                        depth = 0
+                        while p is not None and depth < 6:
+                            if p.event_ids and any(eid in succ_eids for eid in p.event_ids):
+                                reuse_penalty += 0.25
+                                break
+                            p = parent.get(p.candidate_id)
+                            depth += 1
 
-                        guide_cost = self._compute_guide_prosody_cost(succ, graph, prosody_guide)
-                        cand_cost = succ.target_cost + succ.quality_cost + guide_cost + reuse_penalty
-                        new_cost = curr_cost + trans_cost + cand_cost
+                    guide_cost = self._compute_guide_prosody_cost(succ, graph, prosody_guide)
+                    cand_cost = succ.target_cost + succ.quality_cost + guide_cost + reuse_penalty
+                    new_cost = curr_cost + trans_cost + cand_cost
 
-                        if succ.candidate_id not in dp or new_cost < dp[succ.candidate_id]:
-                            dp[succ.candidate_id] = new_cost
-                            parent[succ.candidate_id] = curr
+                    if succ.candidate_id not in dp or new_cost < dp[succ.candidate_id]:
+                        dp[succ.candidate_id] = new_cost
+                        parent[succ.candidate_id] = curr
 
         end_set = set(graph.end_nodes)
         terminal_candidates = [c for c in candidates if c.target_node_end in end_set and c.candidate_id in dp]
@@ -1463,4 +1793,5 @@ class SpanSelector:
             curr_step = parent[curr_step.candidate_id]
 
         path.reverse()
+        path = apply_diphone_midpoint_transitions(path, graph, self.inv)
         return path

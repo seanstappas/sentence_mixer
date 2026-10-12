@@ -291,19 +291,23 @@ class TargetGraphBuilder:
             succs = edge_dict_fwd.get(node.node_id, [])
             if succs:
                 node.right_context_phone = nodes[succs[0]].phone
+                node.right_context_phones = {nodes[s].phone for s in succs}
             preds = edge_dict_bwd.get(node.node_id, [])
             if preds:
                 node.left_context_phone = nodes[preds[0]].phone
+                node.left_context_phones = {nodes[p].phone for p in preds}
 
         start_nodes = [b[0] for b in word_branches[0]]
         end_nodes = [b[1] for b in word_branches[-1]]
 
         for nid in start_nodes:
             nodes[nid].left_context_phone = "sil"
+            nodes[nid].left_context_phones = {"sil"}
 
         for nid in end_nodes:
             nodes[nid].is_phrase_final = True
             nodes[nid].right_context_phone = "sil"
+            nodes[nid].right_context_phones = {"sil"}
 
         # Apply pause/gap context: tokens followed by punctuation or explicit gaps
         for node in nodes:
@@ -311,9 +315,11 @@ class TargetGraphBuilder:
                 if node.is_word_final:
                     node.is_phrase_final = True
                     node.right_context_phone = "sil"
+                    node.right_context_phones = {"sil"}
             if (node.token_index - 1) in punctuation_pauses or (node.token_index - 1) in explicit_gaps:
                 if node.is_word_initial:
                     node.left_context_phone = "sil"
+                    node.left_context_phones = {"sil"}
 
         graph = TargetGraph(
             raw_text=target_text,

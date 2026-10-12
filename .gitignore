@@ -20,3 +20,4 @@ requirements-dev.lock
 requirements-wavlm.lock
 /corpus
 /aligned
+.aider*

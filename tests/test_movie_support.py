@@ -388,6 +388,45 @@ def test_voice_checks_never_overrule_text_on_weak_or_thin_evidence():
     assert ambiguous.status != "voice_mismatch" and ambiguous.eligible and ambiguous.speaker == "mira"
 
 
+def test_minor_character_voice_protection():
+    """Verify that a minor character (< 5 lines, e.g. 2 lines) whose lines are
+    consistently spoken by a major character's voice is flagged voice_mismatch,
+    protecting the minor character's inventory from subtitle misattribution."""
+    rng = np.random.default_rng(42)
+    centers = {n: (lambda v: v / np.linalg.norm(v))(rng.normal(size=16)) for n in ("mira", "tobin", "osric")}
+    records, vectors = [], {}
+    t = 0.0
+
+    def add(label, vec):
+        nonlocal t
+        v = vec / np.linalg.norm(vec)
+        r = SegmentRecord(key=f"k{t}", chunk_id="c", seg_index=0, cue_start=t, start=round(t, 3), end=round(t + 2.0, 3),
+                          label=label, label_source="subtitle_tag", text_hash="h")
+        r.speaker, r.status, r.eligible = label, "label", True
+        vectors[round(t, 3)] = v
+        records.append(r)
+        t += 3.0
+        return r
+
+    # Major characters with >= 5 lines establishing trusted centroids
+    for name in ("mira", "tobin", "osric"):
+        for _ in range(15):
+            add(name, centers[name] + 0.05 * rng.normal(size=16))
+
+    # Minor character 'guard' with 2 lines, but both are spoken by major character 'tobin'
+    g1 = add("guard", centers["tobin"] + 0.02 * rng.normal(size=16))
+    g2 = add("guard", centers["tobin"] + 0.02 * rng.normal(size=16))
+
+    stats = run_voice_checks(records, _FakeEmbedder(vectors), log=lambda m: None)
+    assert stats["propagation_margin_threshold"] is not None
+
+    # Both lines must be detected as mismatches against Tobin's major centroid and excluded
+    assert g1.voice_best == "tobin"
+    assert g1.status == "voice_mismatch" and not g1.eligible
+    assert g2.voice_best == "tobin"
+    assert g2.status == "voice_mismatch" and not g2.eligible
+
+
 def test_restrict_inventory_to_ranges():
     import run_mixer
     from contracts import AlignedEvent, InventoryIndex, SourceRecord, WordOccurrence
@@ -526,3 +565,55 @@ def test_overrides_roundtrip_and_review(tmp_path: Path, monkeypatch: pytest.Monk
     kept = load_overrides("feedface00000000aa", base=other)
     assert kept["k2"]["speaker_id"] == "tobin" and "k1" not in kept
     assert not list(other.glob("*.tmp_*"))
+
+
+def test_vtt_preprocessor_sample_accurate_soundfile_slicing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify that preprocess_source reads decoded WAV/FLAC audio sample-accurately via
+    SoundFile seeking without spawning FFmpeg subprocesses."""
+    from vtt_preprocessor import preprocess_source
+    import subprocess
+
+    sr = 16000
+    # 4 seconds of test audio with a continuous ramp signal
+    total_samples = 4 * sr
+    ramp = np.linspace(-0.8, 0.8, total_samples, dtype=np.float32)
+
+    audio_wav = tmp_path / "audio.wav"
+    sf.write(str(audio_wav), ramp, sr, subtype="PCM_16")
+
+    vtt_content = """WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+Sample accurate cue
+"""
+    vtt_path = tmp_path / "sub.vtt"
+    vtt_path.write_text(vtt_content, encoding="utf-8")
+
+    # Fail if ffmpeg subprocess is spawned (proving SoundFile slice was used)
+    def fail_on_ffmpeg(*args, **kwargs):
+        raise AssertionError("FFmpeg was spawned instead of sample-accurate SoundFile seeking!")
+
+    monkeypatch.setattr(subprocess, "run", fail_on_ffmpeg)
+
+    corpus_out = tmp_path / "corpus"
+    manifest_str = preprocess_source(
+        video_path=str(audio_wav),
+        vtt_path=str(vtt_path),
+        output_corpus_dir=str(corpus_out),
+    )
+
+    manifest = json.loads(Path(manifest_str).read_text(encoding="utf-8"))
+    assert "chunk_0000" in manifest["chunks"]
+    chunk_wav = corpus_out / "chunk_0000.wav"
+    assert chunk_wav.exists()
+
+    data, read_sr = sf.read(str(chunk_wav))
+    assert read_sr == 16000
+    # Expected samples = 1.5 seconds * 16000 = 24000 samples exactly
+    expected_samples = int(1.5 * sr)
+    assert len(data) == expected_samples
+
+    # Check signal correlation with the expected slice of the ramp
+    expected_slice = ramp[int(1.0 * sr) : int(2.5 * sr)]
+    assert np.allclose(data, expected_slice, atol=1e-3)
+

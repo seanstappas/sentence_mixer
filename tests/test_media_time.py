@@ -80,3 +80,79 @@ def test_t13_two_audio_streams_and_rational_time_mapping(tmp_path):
     assert sr == 44100
     assert len(data) >= 44000
 
+
+def test_prefer_avg_frame_rate_over_r_frame_rate(tmp_path, monkeypatch):
+    import media_time
+    from media_time import extract_source_record
+
+    dummy_media = tmp_path / "dummy.mp4"
+    dummy_media.write_bytes(b"dummy")
+
+    mock_probe = {
+        "streams": [
+            {
+                "codec_type": "video",
+                "index": 0,
+                "r_frame_rate": "1000/1",
+                "avg_frame_rate": "24/1",
+                "duration": "1.0",
+                "start_time": "0.040",
+            },
+            {
+                "codec_type": "audio",
+                "index": 1,
+                "sample_rate": "48000",
+                "channels": 2,
+                "duration": "1.0",
+                "start_time": "0.020",
+                "initial_padding": "1024",
+            },
+        ],
+        "format": {"duration": "1.0"},
+    }
+
+    monkeypatch.setattr(media_time, "probe_media_file", lambda p: mock_probe)
+    # Mock subprocess so ffmpeg decoding is bypassed
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+
+    rec = extract_source_record(dummy_media, build_dir=tmp_path / "build")
+    # Video fps must prefer avg_frame_rate (24/1) over r_frame_rate (1000/1)
+    assert rec.video_fps["numerator"] == 24
+    assert rec.video_fps["denominator"] == 1
+    # Codec delay and origins must be extracted
+    assert rec.codec_delay_samples == 1024
+    assert rec.decoded_audio_origin_sec == 0.020
+    assert rec.decoded_video_origin_sec == 0.040
+
+
+def test_codec_delay_start_pad_fallback(tmp_path, monkeypatch):
+    import media_time
+    from media_time import extract_source_record
+    import subprocess
+
+    dummy_media = tmp_path / "dummy.mp4"
+    dummy_media.write_bytes(b"dummy")
+
+    mock_probe = {
+        "streams": [
+            {
+                "codec_type": "audio",
+                "index": 0,
+                "sample_rate": "48000",
+                "channels": 1,
+                "duration": "1.0",
+                "start_pad": 512,
+            },
+        ],
+        "format": {"duration": "1.0"},
+    }
+
+    monkeypatch.setattr(media_time, "probe_media_file", lambda p: mock_probe)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+
+    rec = extract_source_record(dummy_media, build_dir=tmp_path / "build")
+    assert rec.codec_delay_samples == 512
+    assert rec.decoded_video_origin_sec == 0.0
+
+

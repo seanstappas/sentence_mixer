@@ -523,3 +523,36 @@ def test_diarize_and_wavlm_resampling_44100_audio(tmp_path: Path):
     assert len(emb) > 0
     assert abs(np.linalg.norm(emb) - 1.0) < 1e-4
 
+
+def test_diarization_turn_padding_cap(tmp_path: Path):
+    """Verify that trailing turn padding is capped at 0.15s (down from 1.50s)."""
+    sr = 16000
+    # 6 seconds audio with tones at [0.5, 1.5] and [3.0, 4.0]
+    total_audio = np.zeros(6 * sr, dtype=np.float32)
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    total_audio[int(0.5 * sr) : int(1.5 * sr)] = (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    total_audio[int(3.0 * sr) : int(4.0 * sr)] = (0.3 * np.sin(2 * np.pi * 880 * t)).astype(np.float32)
+
+    wav_path = tmp_path / "padded_turns.wav"
+    sf.write(str(wav_path), total_audio, sr)
+
+    reg = SpeakerRegistry(config_path=tmp_path / "speaker_reg.json")
+    diarizer = SpeakerDiarizer(registry=reg)
+
+    # Supply 2 candidate turns separated by 1.5s gap in a 6.0s audio file
+    intervals = diarizer.diarize(
+        audio_path=wav_path,
+        candidate_turns=[(0.5, 1.5), (3.0, 4.0)],
+        interactive=False,
+    )
+
+    assert len(intervals) == 2
+    # Turn 0: gap to next_s (3.0) is 1.46s; trailing padding must be capped to 0.15s -> end_sec = 1.65
+    assert abs(intervals[0].end_sec - 1.65) < 1e-3
+    assert (intervals[0].end_sec - 1.5) <= 0.1501
+
+    # Turn 1: gap to end of audio (6.0) is 1.96s; trailing padding must be capped to 0.15s -> end_sec = 4.15
+    assert abs(intervals[1].end_sec - 4.15) < 1e-3
+    assert (intervals[1].end_sec - 4.0) <= 0.1501
+
+

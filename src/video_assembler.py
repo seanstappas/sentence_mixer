@@ -29,6 +29,7 @@ if sys.platform == "win32":
         pass
 
 from contracts import EditPlan, PlanSegment, RationalTime
+from edit_plan import refine_splice_boundary
 
 COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
 OUTPUT_RESOLUTIONS = {"1080p": (1920, 1080), "1440p": (2560, 1440), "4k": (3840, 2160), "2160p": (3840, 2160)}
@@ -610,18 +611,69 @@ def render_master_pcm(
                 prev_slice = segment_slices.get(trans.from_segment_index)
                 next_slice = segment_slices.get(trans.to_segment_index)
                 if prev_slice is not None and next_slice is not None:
-                    if is_stereo:
-                        prev_tail = prev_slice[-fade_len:] if len(prev_slice) >= fade_len else np.pad(prev_slice, ((fade_len - len(prev_slice), 0), (0, 0)))
-                        next_head = next_slice[:fade_len] if len(next_slice) >= fade_len else np.pad(next_slice, ((0, fade_len - len(next_slice)), (0, 0)))
+                    # Fix P2.1: Non-destructive Optimal Coupling and upward zero-crossing snapping
+                    is_unv = False
+                    stop_fric = ("P", "T", "K", "B", "D", "G", "S", "SH", "F", "TH", "CH")
+                    if from_seg.realized_phones:
+                        last_p = from_seg.realized_phones[-1].rstrip("012")
+                        if last_p in stop_fric or last_p == "sil":
+                            is_unv = True
+                    if to_seg.realized_phones:
+                        first_p = to_seg.realized_phones[0].rstrip("012")
+                        if first_p in stop_fric or first_p == "sil":
+                            is_unv = True
+
+                    margin = min(int(round(0.015 * sr)), max(0, len(next_slice) - fade_len))
+                    search_tail = prev_slice[-fade_len:]
+                    search_head = next_slice[:fade_len + margin] if margin > 0 else next_slice[:fade_len]
+                    _s_out, shift_in = refine_splice_boundary(
+                        search_tail, search_head, sr=sr, max_shift_ms=15.0, is_unvoiced=is_unv
+                    )
+
+                    # Outgoing crossfade slice is strictly anchored to the terminal window of prev_slice
+                    # (shift_out == 0) to ensure continuous sample playback across fade_start without step discontinuity.
+                    p_tail = prev_slice[-fade_len:]
+
+                    # Incoming crossfade slice is aligned by shift_in
+                    head_idx_start = max(0, shift_in)
+                    head_idx_end = head_idx_start + fade_len
+                    if head_idx_end <= len(next_slice):
+                        n_head = next_slice[head_idx_start:head_idx_end]
                     else:
-                        prev_tail = prev_slice[-fade_len:] if len(prev_slice) >= fade_len else np.pad(prev_slice, (fade_len - len(prev_slice), 0))
-                        next_head = next_slice[:fade_len] if len(next_slice) >= fade_len else np.pad(next_slice, (0, fade_len - len(next_slice)))
+                        n_head = next_slice[:fade_len]
+                        head_idx_start = 0
+
+                    if is_stereo:
+                        prev_tail = p_tail if len(p_tail) >= fade_len else np.pad(p_tail, ((fade_len - len(p_tail), 0), (0, 0)))
+                        next_head = n_head if len(n_head) >= fade_len else np.pad(n_head, ((0, fade_len - len(n_head)), (0, 0)))
+                    else:
+                        prev_tail = p_tail if len(p_tail) >= fade_len else np.pad(p_tail, (fade_len - len(p_tail), 0))
+                        next_head = n_head if len(n_head) >= fade_len else np.pad(n_head, (0, fade_len - len(n_head)))
                     fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
                     fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
                     if is_stereo:
                         fade_out = fade_out[:, np.newaxis]
                         fade_in = fade_in[:, np.newaxis]
                     master_audio[fade_start:fade_end] = (prev_tail * fade_out) + (next_head * fade_in)
+
+                    # Ensure to_seg in master_audio maintains continuous playback after fade_end:
+                    # When shift_in > 0, update segment_slices and adjust master_audio after fade_end
+                    # so next_slice continues seamlessly from index shift_in + fade_len without step jump.
+                    if head_idx_start > 0:
+                        aligned_slice = next_slice[head_idx_start:]
+                        if len(aligned_slice) < len(next_slice):
+                            pad_len = len(next_slice) - len(aligned_slice)
+                            pad_spec = ((0, pad_len), (0, 0)) if is_stereo else (0, pad_len)
+                            aligned_slice = np.pad(aligned_slice, pad_spec, mode="edge")
+                        segment_slices[trans.to_segment_index] = aligned_slice
+
+                        needed_len = len(next_slice) - fade_len
+                        if needed_len > 0:
+                            end_update = min(total_samples, fade_end + needed_len)
+                            up_len = end_update - fade_end
+                            old_body = next_slice[fade_len : fade_len + up_len]
+                            new_body = aligned_slice[fade_len : fade_len + up_len]
+                            master_audio[fade_end:end_update] += (new_body - old_body)
 
     # Normalize audio to prevent clipping if summed overlaps peak (disabled in cuts-only mode)
     is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
@@ -653,8 +705,27 @@ def render_master_pcm(
         silence_segs = [seg for seg in plan.segments if seg.is_silence]
         if silence_segs:
             data, out_sr = sf.read(str(out_wav), dtype="float32")
+            ramp_len = int(round(0.003 * out_sr))
             for sil_seg in silence_segs:
-                data[sil_seg.output_start_sample:sil_seg.output_end_sample] = 0.0
+                s_start = sil_seg.output_start_sample
+                s_end = sil_seg.output_end_sample
+                if s_start > 0 and ramp_len > 0:
+                    r_start = max(0, s_start - ramp_len)
+                    l_in = s_start - r_start
+                    if l_in > 0:
+                        fade = 0.5 * (1.0 + np.cos(np.linspace(0, np.pi, l_in, dtype=np.float32)))
+                        if data.ndim > 1:
+                            fade = fade[:, np.newaxis]
+                        data[r_start:s_start] *= fade
+                data[s_start:s_end] = 0.0
+                if s_end < len(data) and ramp_len > 0:
+                    r_end = min(len(data), s_end + ramp_len)
+                    l_out = r_end - s_end
+                    if l_out > 0:
+                        fade = 0.5 * (1.0 - np.cos(np.linspace(0, np.pi, l_out, dtype=np.float32)))
+                        if data.ndim > 1:
+                            fade = fade[:, np.newaxis]
+                        data[s_end:r_end] *= fade
             sf.write(str(out_wav), data, out_sr, subtype="PCM_16")
 
     # Assert exact sample count
@@ -890,105 +961,185 @@ def render_sentence_mix(
     temp_dir = Path(tempfile.mkdtemp(prefix="sm_render_"))
     slice_files: List[Path] = []
     concat_txt_path = temp_dir / "concat.txt"
+    temp_concat_video = temp_dir / "concat_video.mp4"
 
-    print(f"[*] Cutting {len(plan.segments)} CFR video slices (-crf 18) to {to_file_uri(temp_dir)}...")
     try:
-        for idx, seg in enumerate(plan.segments):
-            slice_mp4 = temp_dir / f"slice_{idx:04d}.mp4"
-            frame_count = seg.video_frame_count
+        batched_success = False
+        active_segments = [(idx, seg) for idx, seg in enumerate(plan.segments) if seg.video_frame_count > 0]
 
-            # Skip zero-frame segments (e.g. <gap:0ms> pauses shorter than one video frame)
-            if frame_count <= 0:
-                continue
+        if active_segments:
+            try:
+                input_args: List[str] = []
+                filter_chains: List[str] = []
+                out_labels: List[str] = []
+                source_input_map: Dict[str, int] = {}
+                current_in_idx = 0
+                can_batch = True
 
-            # Check if this segment is a pause/freeze-frame cut
-            is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
-            if is_freeze:
-                holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
-                holds_dir.mkdir(parents=True, exist_ok=True)
-                freeze_img = holds_dir / f"hold_{idx:04d}.png"
-                extracted = False
+                for k, (idx, seg) in enumerate(active_segments):
+                    frame_count = seg.video_frame_count
+                    dur_sec = frame_count * (fps.denominator / float(fps.numerator))
+                    is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
+                    has_valid_source = bool(
+                        seg.source_video_path
+                        and Path(seg.source_video_path).exists()
+                        and _has_video_stream(seg.source_video_path)
+                    )
 
-                if freeze_img.exists() and freeze_img.stat().st_size > 0:
-                    extracted = True
-                elif seg.source_video_path and Path(seg.source_video_path).exists() and _has_video_stream(seg.source_video_path):
-                    cmd_extract = [
+                    if is_freeze:
+                        holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
+                        holds_dir.mkdir(parents=True, exist_ok=True)
+                        freeze_img = holds_dir / f"hold_{idx:04d}.png"
+                        extracted = False
+                        if freeze_img.exists() and freeze_img.stat().st_size > 0:
+                            extracted = True
+                        elif has_valid_source:
+                            cmd_extract = [
+                                "ffmpeg", "-y",
+                                "-ss", f"{seg.video_source_pts_sec:.6f}",
+                                "-i", str(seg.source_video_path),
+                                "-frames:v", "1",
+                                "-q:v", "1",
+                                str(freeze_img),
+                            ]
+                            res = subprocess.run(cmd_extract, capture_output=True)
+                            if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                                extracted = True
+                        if not extracted:
+                            can_batch = False
+                            break
+                        input_args.extend(["-loop", "1", "-framerate", fps_str, "-t", f"{dur_sec:.6f}", "-i", str(freeze_img)])
+                        filter_chains.append(f"[{current_in_idx}:v]fps={fps_str},{scale_pad},format=yuv420p[v{k}]")
+                        out_labels.append(f"[v{k}]")
+                        current_in_idx += 1
+                    elif has_valid_source:
+                        src_str = str(Path(seg.source_video_path).resolve())
+                        if src_str not in source_input_map:
+                            source_input_map[src_str] = current_in_idx
+                            input_args.extend(["-i", str(seg.source_video_path)])
+                            current_in_idx += 1
+                        s_idx = source_input_map[src_str]
+                        start_pts = seg.video_source_pts_sec
+                        filter_chains.append(
+                            f"[{s_idx}:v]trim=start={start_pts:.6f}:duration={dur_sec:.6f},"
+                            f"setpts=PTS-STARTPTS,fps={fps_str},{scale_pad},format=yuv420p[v{k}]"
+                        )
+                        out_labels.append(f"[v{k}]")
+                    else:
+                        is_audio_only = (
+                            not seg.source_video_path
+                            or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                        )
+                        if is_audio_only:
+                            input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])
+                            filter_chains.append(f"[{current_in_idx}:v]format=yuv420p[v{k}]")
+                            out_labels.append(f"[v{k}]")
+                            current_in_idx += 1
+                        else:
+                            can_batch = False
+                            break
+
+                if can_batch and out_labels:
+                    print(f"[*] Rendering {len(active_segments)} video cuts in single-pass FFmpeg filtergraph...")
+                    concat_filter = "".join(out_labels) + f"concat=n={len(out_labels)}:v=1:a=0[outv]"
+                    full_filtergraph = ";".join(filter_chains) + ";" + concat_filter
+                    cmd_batch = [
                         "ffmpeg", "-y",
-                        "-ss", f"{seg.video_source_pts_sec:.6f}",
-                        "-i", str(seg.source_video_path),
-                        "-frames:v", "1",
-                        "-q:v", "1",
-                        str(freeze_img),
-                    ]
-                    res = subprocess.run(cmd_extract, capture_output=True)
-                    if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
-                        extracted = True
-                elif idx > 0 and len(slice_files) > 0:
-                    cmd_extract = [
-                        "ffmpeg", "-y",
-                        "-sseof", "-0.05",
-                        "-i", str(slice_files[-1]),
-                        "-update", "1",
-                        "-q:v", "1",
-                        str(freeze_img),
-                    ]
-                    res = subprocess.run(cmd_extract, capture_output=True)
-                    if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
-                        extracted = True
-
-                if extracted:
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-loop", "1",
-                        "-framerate", fps_str,
-                        "-i", str(freeze_img),
-                        "-frames:v", str(frame_count),
-                        "-vf", f"fps={fps_str},{scale_pad},format=yuv420p",
+                        *input_args,
+                        "-filter_complex", full_filtergraph,
+                        "-map", "[outv]",
                         "-c:v", "libx264",
                         "-preset", "veryfast",
                         "-crf", "18",
                         *COLOR_TAGS,
                         "-r", fps_str,
                         "-an",
-                        str(slice_mp4),
+                        str(temp_concat_video),
                     ]
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    slice_files.append(slice_mp4)
+                    res_batch = subprocess.run(cmd_batch, capture_output=True)
+                    if res_batch.returncode == 0 and temp_concat_video.exists() and temp_concat_video.stat().st_size > 0:
+                        batched_success = True
+            except Exception:
+                batched_success = False
+
+        if not batched_success:
+            print(f"[*] Cutting {len(plan.segments)} CFR video slices (-crf 18) to {to_file_uri(temp_dir)}...")
+            for idx, seg in enumerate(plan.segments):
+                slice_mp4 = temp_dir / f"slice_{idx:04d}.mp4"
+                frame_count = seg.video_frame_count
+
+                # Skip zero-frame segments (e.g. <gap:0ms> pauses shorter than one video frame)
+                if frame_count <= 0:
                     continue
 
-            has_valid_source = bool(
-                seg.source_video_path
-                and Path(seg.source_video_path).exists()
-                and _has_video_stream(seg.source_video_path)
-            )
-            if has_valid_source:
-                start_pts = seg.video_source_pts_sec
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", f"{start_pts:.6f}",
-                    "-i", str(seg.source_video_path),
-                    "-frames:v", str(frame_count),
-                    "-vf", f"fps={fps_str},{scale_pad},tpad=stop_mode=clone:stop=-1,format=yuv420p",
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "18",
-                    *COLOR_TAGS,
-                    "-r", fps_str,
-                    "-an",
-                    str(slice_mp4)
-                ]
-            else:
-                is_audio_only = (
-                    not seg.source_video_path
-                    or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                # Check if this segment is a pause/freeze-frame cut
+                is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
+                if is_freeze:
+                    holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
+                    holds_dir.mkdir(parents=True, exist_ok=True)
+                    freeze_img = holds_dir / f"hold_{idx:04d}.png"
+                    extracted = False
+
+                    if freeze_img.exists() and freeze_img.stat().st_size > 0:
+                        extracted = True
+                    elif seg.source_video_path and Path(seg.source_video_path).exists() and _has_video_stream(seg.source_video_path):
+                        cmd_extract = [
+                            "ffmpeg", "-y",
+                            "-ss", f"{seg.video_source_pts_sec:.6f}",
+                            "-i", str(seg.source_video_path),
+                            "-frames:v", "1",
+                            "-q:v", "1",
+                            str(freeze_img),
+                        ]
+                        res = subprocess.run(cmd_extract, capture_output=True)
+                        if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                            extracted = True
+                    elif idx > 0 and len(slice_files) > 0:
+                        cmd_extract = [
+                            "ffmpeg", "-y",
+                            "-sseof", "-0.05",
+                            "-i", str(slice_files[-1]),
+                            "-update", "1",
+                            "-q:v", "1",
+                            str(freeze_img),
+                        ]
+                        res = subprocess.run(cmd_extract, capture_output=True)
+                        if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                            extracted = True
+
+                    if extracted:
+                        cmd = [
+                            "ffmpeg", "-y",
+                            "-loop", "1",
+                            "-framerate", fps_str,
+                            "-i", str(freeze_img),
+                            "-frames:v", str(frame_count),
+                            "-vf", f"fps={fps_str},{scale_pad},format=yuv420p",
+                            "-c:v", "libx264",
+                            "-preset", "veryfast",
+                            "-crf", "18",
+                            *COLOR_TAGS,
+                            "-r", fps_str,
+                            "-an",
+                            str(slice_mp4),
+                        ]
+                        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        slice_files.append(slice_mp4)
+                        continue
+
+                has_valid_source = bool(
+                    seg.source_video_path
+                    and Path(seg.source_video_path).exists()
+                    and _has_video_stream(seg.source_video_path)
                 )
-                if is_audio_only:
-                    # Fallback to color frame if source video does not exist or has no video stream only when explicit audio-only visual policy requested
+                if has_valid_source:
+                    start_pts = seg.video_source_pts_sec
                     cmd = [
                         "ffmpeg", "-y",
-                        "-f", "lavfi",
-                        "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}",
+                        "-ss", f"{start_pts:.6f}",
+                        "-i", str(seg.source_video_path),
                         "-frames:v", str(frame_count),
+                        "-vf", f"fps={fps_str},{scale_pad},tpad=stop_mode=clone:stop=-1,format=yuv420p",
                         "-c:v", "libx264",
                         "-preset", "veryfast",
                         "-crf", "18",
@@ -998,36 +1149,55 @@ def render_sentence_mix(
                         str(slice_mp4)
                     ]
                 else:
-                    if not Path(seg.source_video_path).exists():
-                        raise FileNotFoundError(
-                            f"Missing source video for segment {seg.segment_index}: '{seg.source_video_path}'. "
-                            "Audio-only visual policy not requested."
-                        )
+                    is_audio_only = (
+                        not seg.source_video_path
+                        or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                    )
+                    if is_audio_only:
+                        # Fallback to color frame if source video does not exist or has no video stream only when explicit audio-only visual policy requested
+                        cmd = [
+                            "ffmpeg", "-y",
+                            "-f", "lavfi",
+                            "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}",
+                            "-frames:v", str(frame_count),
+                            "-c:v", "libx264",
+                            "-preset", "veryfast",
+                            "-crf", "18",
+                            *COLOR_TAGS,
+                            "-r", fps_str,
+                            "-an",
+                            str(slice_mp4)
+                        ]
                     else:
-                        raise ValueError(
-                            f"Unreadable source video (no video stream found) for segment {seg.segment_index}: '{seg.source_video_path}'. "
-                            "Audio-only visual policy not requested."
-                        )
+                        if not Path(seg.source_video_path).exists():
+                            raise FileNotFoundError(
+                                f"Missing source video for segment {seg.segment_index}: '{seg.source_video_path}'. "
+                                "Audio-only visual policy not requested."
+                            )
+                        else:
+                            raise ValueError(
+                                f"Unreadable source video (no video stream found) for segment {seg.segment_index}: '{seg.source_video_path}'. "
+                                "Audio-only visual policy not requested."
+                            )
 
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            slice_files.append(slice_mp4)
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                slice_files.append(slice_mp4)
 
-        # 3. Concatenate video slices
-        with open(concat_txt_path, "w", encoding="utf-8") as cf:
-            for sf in slice_files:
-                escaped = str(sf).replace("\\", "/")
-                cf.write(f"file '{escaped}'\n")
+            # 3. Concatenate video slices
+            with open(concat_txt_path, "w", encoding="utf-8") as cf:
+                for sf in slice_files:
+                    escaped = str(sf).replace("\\", "/")
+                    cf.write(f"file '{escaped}'\n")
 
-        temp_concat_video = temp_dir / "concat_video.mp4"
-        concat_cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(concat_txt_path),
-            "-c", "copy",
-            str(temp_concat_video)
-        ]
-        subprocess.run(concat_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            concat_cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_txt_path),
+                "-c", "copy",
+                str(temp_concat_video)
+            ]
+            subprocess.run(concat_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # 4. Final multiplexing of concatenated video with master PCM WAV
         print(f"[*] Multiplexing video with master WAV into final delivery MP4: {to_file_uri(out_mp4)}")

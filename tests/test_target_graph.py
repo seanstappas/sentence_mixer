@@ -78,3 +78,33 @@ def test_punctuation_pause():
     assert graph.punctuation_pauses[0] == 0.25
     assert 1 in graph.punctuation_pauses
     assert graph.punctuation_pauses[1] == 0.45
+
+
+def test_multibranch_context_set_preservation():
+    """
+    Fix P3.4: TargetPhoneNode preserves right_context_phones: Set[str]
+    and left_context_phones: Set[str] across multiple pronunciation branches.
+    """
+    lex = Lexicon()
+    # Word 1: 'either' with two branches: [IY1, DH, ER0] and [AY1, DH, ER0]
+    lex.word_to_pronunciations["either"] = [["IY1", "DH", "ER0"], ["AY1", "DH", "ER0"]]
+    # Word 2: 'way' [W, EY1]
+    lex.word_to_pronunciations["way"] = [["W", "EY1"]]
+
+    builder = TargetGraphBuilder(lex)
+    graph = builder.build("either way")
+
+    # Final nodes of 'either' across both branches should point to 'W' in both single and set context
+    er_nodes = [n for n in graph.nodes if n.word_text == "either" and n.base_phone == "ER"]
+    assert len(er_nodes) == 2
+    for er_node in er_nodes:
+        assert er_node.right_context_phone == "W"
+        assert "W" in er_node.right_context_phones
+        assert isinstance(er_node.right_context_phones, set)
+
+    # Initial node of 'way' should have left_context_phones matching both branches
+    w_nodes = [n for n in graph.nodes if n.word_text == "way" and n.base_phone == "W"]
+    assert len(w_nodes) == 1
+    w_node = w_nodes[0]
+    assert "ER0" in w_node.left_context_phones
+    assert isinstance(w_node.left_context_phones, set)

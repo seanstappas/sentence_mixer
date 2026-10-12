@@ -11,7 +11,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 INVENTORY_SCHEMA_VERSION = "2.0.0"
 FEATURE_SCHEMA_VERSION = "2.0.0"
@@ -61,8 +61,8 @@ class RationalTime:
     def validate(self) -> None:
         if self.denominator <= 0:
             raise ValueError(f"RationalTime denominator must be positive: {self.denominator}")
-        if self.numerator <= 0:
-            raise ValueError(f"RationalTime numerator must be positive: {self.numerator}")
+        if self.numerator < 0:
+            raise ValueError(f"RationalTime numerator cannot be negative: {self.numerator}")
 
 
 @dataclass
@@ -75,6 +75,7 @@ class SourceRecord:
     selected_audio_stream: int = 0
     selected_video_stream: int = 0
     decoded_audio_origin_sec: float = 0.0
+    decoded_video_origin_sec: float = 0.0
     rational_time_base: Dict[str, int] = field(default_factory=lambda: {"numerator": 1, "denominator": 1000})
     video_fps: Dict[str, int] = field(default_factory=lambda: {"numerator": 30000, "denominator": 1001})
     video_duration_sec: float = 0.0
@@ -250,6 +251,8 @@ class TargetPhoneNode:
     stress: Optional[int]
     left_context_phone: str = ""
     right_context_phone: str = ""
+    left_context_phones: Set[str] = field(default_factory=set)
+    right_context_phones: Set[str] = field(default_factory=set)
     is_word_initial: bool = False
     is_word_final: bool = False
     is_phrase_final: bool = False
@@ -299,6 +302,8 @@ class SpanCandidate:
     target_cost: float = 0.0
     quality_cost: float = 0.0
     realized_phones: List[str] = field(default_factory=list)
+    cand_f0_hz: Optional[float] = None
+    pitch_semitones: Optional[float] = None
 
     def validate(self) -> None:
         if self.start_sample < 0 or self.end_sample <= self.start_sample:
@@ -416,6 +421,8 @@ class EditPlan:
 
         if isinstance(self.video_fps, RationalTime):
             self.video_fps.validate()
+            if self.video_fps.numerator <= 0:
+                raise ValueError(f"video_fps numerator must be positive: {self.video_fps.numerator}")
         else:
             raise ValueError("video_fps must be an instance of RationalTime")
 

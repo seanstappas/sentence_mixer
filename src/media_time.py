@@ -85,15 +85,37 @@ def extract_source_record(
 
     # Determine rational frame rate
     if video_stream:
-        r_fps_str = video_stream.get("r_frame_rate", "30000/1001")
-        fps = RationalTime.from_str(r_fps_str)
+        fps = None
+        avg_fps_str = video_stream.get("avg_frame_rate", "")
+        if avg_fps_str and avg_fps_str != "0/0":
+            try:
+                candidate_fps = RationalTime.from_str(avg_fps_str)
+                if candidate_fps.numerator > 0 and candidate_fps.denominator > 0:
+                    fps = candidate_fps
+            except Exception:
+                pass
+        if fps is None:
+            r_fps_str = video_stream.get("r_frame_rate", "30000/1001")
+            fps = RationalTime.from_str(r_fps_str)
         video_duration = float(video_stream.get("duration", format_info.get("duration", 0.0)))
+        video_origin_sec = float(video_stream.get("start_time", 0.0))
     else:
         fps = RationalTime(30000, 1001)
         video_duration = 0.0
+        video_origin_sec = 0.0
 
     audio_duration = float(audio_stream.get("duration", format_info.get("duration", 0.0)))
     audio_origin_sec = float(audio_stream.get("start_time", 0.0))
+
+    codec_delay_samples = 0
+    pad_val = audio_stream.get("initial_padding")
+    if pad_val is None:
+        pad_val = audio_stream.get("start_pad")
+    if pad_val is not None:
+        try:
+            codec_delay_samples = int(pad_val)
+        except (ValueError, TypeError):
+            codec_delay_samples = 0
 
     # Stage decoded audio
     sources_dir = Path(build_dir) / "sources" / content_id
@@ -186,6 +208,8 @@ def extract_source_record(
         selected_audio_stream=int(audio_stream.get("index", 0)),
         selected_video_stream=int(video_stream.get("index", 0)) if video_stream else 0,
         decoded_audio_origin_sec=audio_origin_sec,
+        decoded_video_origin_sec=video_origin_sec,
+        codec_delay_samples=codec_delay_samples,
         video_fps=fps.to_dict(),
         video_duration_sec=video_duration,
         audio_duration_sec=audio_duration,

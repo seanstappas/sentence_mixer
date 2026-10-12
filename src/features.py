@@ -388,15 +388,61 @@ class ContinuousFeatureExtractor:
         return rec
 
 
+STOP_PHONES = {"B", "D", "G", "P", "T", "K", "CH", "JH"}
+FRICATIVE_PHONES = {"DH", "F", "S", "SH", "TH", "V", "Z", "ZH", "HH"}
+SONORANT_PHONES = {"M", "N", "NG", "L", "R", "W", "Y"}
+VOWEL_PHONES_SET = {"AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"}
+
+
+def get_phone_manner(phone: Optional[str]) -> str:
+    if not phone:
+        return "unknown"
+    p = phone.strip().upper()
+    p = "".join(c for c in p if not c.isdigit())
+    if p in VOWEL_PHONES_SET:
+        return "vowel"
+    if p in STOP_PHONES:
+        return "stop"
+    if p in FRICATIVE_PHONES:
+        return "fricative"
+    if p in SONORANT_PHONES:
+        return "sonorant"
+    return "other"
+
+
+def compute_manner_scale(exit_phone: Optional[str], entry_phone: Optional[str]) -> float:
+    """
+    Computes phonetic manner scaling for join costs (Fix P3.3).
+    Returns 1.0 for matching phones, vowel-to-vowel, or matching manner transitions.
+    Returns 0.25 when crossing natural phonetic manner jumps (e.g. stop/fricative into vowel).
+    """
+    if not exit_phone or not entry_phone:
+        return 1.0
+    p1 = "".join(c for c in exit_phone.strip().upper() if not c.isdigit())
+    p2 = "".join(c for c in entry_phone.strip().upper() if not c.isdigit())
+    if p1 == p2:
+        return 1.0
+    m1 = get_phone_manner(p1)
+    m2 = get_phone_manner(p2)
+    if m1 == m2 and m1 != "unknown":
+        return 1.0
+    # Natural phonetic manner jump (e.g. stop/fricative into vowel, vowel into stop/fricative)
+    return 0.25
+
+
 def compute_join_cost(
     feat_exit: Optional[FeatureRecord],
     feat_entry: Optional[FeatureRecord],
     is_natural_continuation: bool = False,
+    exit_phone: Optional[str] = None,
+    entry_phone: Optional[str] = None,
+    manner_scale: Optional[float] = None,
 ) -> float:
     """
     Computes acoustic concatenation cost between candidate exit and candidate entry.
     Natural original continuations receive zero join cost.
     Handles unvoiced F0 without fabricating 120 Hz.
+    Applies liftered Mahalanobis MFCC distance and phonetic manner scaling (Fix P3.3).
     """
     if is_natural_continuation:
         return 0.0
@@ -404,6 +450,9 @@ def compute_join_cost(
     if feat_exit is None or feat_entry is None:
         # Penalize unavailable features rather than treating as zero-cost
         return 1.5
+
+    if manner_scale is None:
+        manner_scale = compute_manner_scale(exit_phone, entry_phone)
 
     cost = 0.0
 
@@ -413,12 +462,17 @@ def compute_join_cost(
     energy_diff = abs(math.log(e1) - math.log(e2))
     cost += 0.15 * min(energy_diff, 3.0)
 
-    # 2. Spectral (MFCC) distance
+    # 2. Spectral (MFCC) distance with liftered Mahalanobis weighting (Fix P3.3)
     if feat_exit.mfcc_13 and feat_entry.mfcc_13:
-        m1 = np.array(feat_exit.mfcc_13[1:])  # drop C0 (energy)
-        m2 = np.array(feat_entry.mfcc_13[1:])
-        dist = float(np.linalg.norm(m1 - m2) / (np.linalg.norm(m1) + np.linalg.norm(m2) + 1e-6))
-        cost += 0.5 * dist
+        m1 = np.array(feat_exit.mfcc_13[1:], dtype=float)  # drop C0 (energy)
+        m2 = np.array(feat_entry.mfcc_13[1:], dtype=float)
+        # Lifter weights w_k = 1 + 6 * sin(pi * k / 12) for k=1..12
+        weights = np.array([1.0 + 6.0 * math.sin(math.pi * k / 12.0) for k in range(1, 13)])
+        diff_weighted = (m1 - m2) * weights
+        norm1 = np.linalg.norm(m1 * weights)
+        norm2 = np.linalg.norm(m2 * weights)
+        dist = float(np.linalg.norm(diff_weighted) / (norm1 + norm2 + 1e-6))
+        cost += 0.5 * manner_scale * dist
 
     # 3. Pitch (F0) continuity
     if feat_exit.f0_hz is not None and feat_entry.f0_hz is not None:

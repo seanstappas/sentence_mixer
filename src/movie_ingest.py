@@ -62,6 +62,7 @@ TARGET_PROPAGATION_PRECISION = 0.95
 MISMATCH_MARGIN = 0.10
 SEPARATION_DROP_DB = 15.0
 MIN_CONFIDENT_MARGIN = 0.05
+MIN_CONFIDENT_SIMILARITY = 0.50
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CHARACTERS = REPO_ROOT / "config" / "characters" / "star_wars.json"
@@ -304,24 +305,43 @@ def run_voice_checks(
     calib: List[Tuple[float, bool]] = []
     scored: List[Tuple[SegmentRecord, str, float, float, float]] = []
     for r in named:
-        if r.label not in cents:
+        if not cents:
             continue
         e = emb[r.key]
-        sims = {}
-        for s, c in cents.items():
-            if s == r.label and counts[s] > 1:
-                loo = sums[s] - e
-                c = loo / (np.linalg.norm(loo) + 1e-9)
-            sims[s] = float(e @ c)
-        ranked = sorted(sims.items(), key=lambda kv: kv[1], reverse=True)
-        best, best_sim = ranked[0]
-        second = ranked[1][1] if len(ranked) > 1 else -1.0
-        r.voice_best = best
-        r.voice_sim = round(best_sim, 4)
-        r.voice_own_sim = round(sims[r.label], 4)
-        r.voice_margin = round(best_sim - second, 4)
-        calib.append((best_sim - second, best == r.label))
-        scored.append((r, best, best_sim, sims[r.label], best_sim - second))
+        if r.label in cents:
+            sims = {}
+            for s, c in cents.items():
+                if s == r.label and counts[s] > 1:
+                    loo = sums[s] - e
+                    c = loo / (np.linalg.norm(loo) + 1e-9)
+                sims[s] = float(e @ c)
+            ranked = sorted(sims.items(), key=lambda kv: kv[1], reverse=True)
+            best, best_sim = ranked[0]
+            second = ranked[1][1] if len(ranked) > 1 else -1.0
+            r.voice_best = best
+            r.voice_sim = round(best_sim, 4)
+            r.voice_own_sim = round(sims[r.label], 4)
+            r.voice_margin = round(best_sim - second, 4)
+            calib.append((best_sim - second, best == r.label))
+            scored.append((r, best, best_sim, sims[r.label], best_sim - second))
+        else:
+            # Minor character (< MIN_CENTROID_SEGMENTS lines): evaluate against major-character centroids
+            sims = {s: float(e @ c) for s, c in cents.items()}
+            ranked = sorted(sims.items(), key=lambda kv: kv[1], reverse=True)
+            best, best_sim = ranked[0]
+            second = ranked[1][1] if len(ranked) > 1 else -1.0
+            r.voice_best = best
+            r.voice_sim = round(best_sim, 4)
+            r.voice_margin = round(best_sim - second, 4)
+            spk_vecs = by_spk.get(r.label or "", [])
+            other_vecs = [v for v in spk_vecs if not np.array_equal(v, e)]
+            if other_vecs:
+                m_other = np.mean(np.stack(other_vecs), axis=0)
+                own_sim = float(e @ (m_other / (np.linalg.norm(m_other) + 1e-9)))
+            else:
+                own_sim = 0.0
+            r.voice_own_sim = round(own_sim, 4)
+            scored.append((r, best, best_sim, own_sim, best_sim - second))
 
     # Calibrate a margin threshold with leave-one-out precision >= target
     threshold = None
@@ -345,14 +365,33 @@ def run_voice_checks(
     #   - the labeled speaker's profile is built from enough other lines to be trusted.
     mismatches = 0
     for r, best, best_sim, own_sim, margin in scored:
-        own_lines = counts.get(r.label or "", 0) - 1
-        strong = (
-            best != r.label
-            and threshold is not None
-            and best_sim - own_sim >= MISMATCH_MARGIN
-            and margin >= threshold
-            and own_lines >= MIN_CENTROID_SEGMENTS
-        )
+        if r.label in cents:
+            own_lines = counts.get(r.label or "", 0) - 1
+            strong = (
+                best != r.label
+                and threshold is not None
+                and best_sim - own_sim >= MISMATCH_MARGIN
+                and margin >= threshold
+                and own_lines >= MIN_CENTROID_SEGMENTS
+            )
+        else:
+            # Minor character (< MIN_CENTROID_SEGMENTS lines) evaluated against major-character centroids
+            spk_lines = [rec for rec in named if rec.label == r.label]
+            req_margin = min(threshold, MIN_CONFIDENT_MARGIN) if threshold is not None else MIN_CONFIDENT_MARGIN
+            spk_matches_best = [
+                rec for rec in spk_lines
+                if getattr(rec, "voice_best", None) == best
+                and getattr(rec, "voice_sim", 0.0) >= MIN_CONFIDENT_SIMILARITY
+                and getattr(rec, "voice_margin", 0.0) >= req_margin
+            ]
+            all_match = len(spk_matches_best) == len(spk_lines) and len(spk_lines) >= 1
+            strong = (
+                best != r.label
+                and threshold is not None
+                and best_sim >= MIN_CONFIDENT_SIMILARITY
+                and margin >= req_margin
+                and all_match
+            )
         if strong:
             r.status = "voice_mismatch"
             r.eligible = False
@@ -798,7 +837,17 @@ def ensure_movie_aligned(
     stem_dir = audio.root / "stems"
     video: Dict[str, Any] = next((s for s in audio.probe.get("streams", []) if s.get("codec_type") == "video"), {})
     audio_stream: Dict[str, Any] = next((s for s in audio.probe.get("streams", []) if s.get("codec_type") == "audio"), {})
-    fps = RationalTime.from_str(video.get("r_frame_rate", "24000/1001"))
+    fps = None
+    avg_fps_str = video.get("avg_frame_rate", "")
+    if avg_fps_str and avg_fps_str != "0/0":
+        try:
+            cand_fps = RationalTime.from_str(avg_fps_str)
+            if cand_fps.numerator > 0 and cand_fps.denominator > 0:
+                fps = cand_fps
+        except Exception:
+            pass
+    if fps is None:
+        fps = RationalTime.from_str(video.get("r_frame_rate", "24000/1001"))
     src_rec = SourceRecord(
         content_id=source_id,
         source_path=str(v),

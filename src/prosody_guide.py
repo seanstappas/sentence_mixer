@@ -88,12 +88,29 @@ class ProsodyGuide:
         if not contour:
             return 0.0
 
-        # Determine target progress window for this candidate
-        if graph and getattr(graph, "nodes", None) and len(graph.nodes) > 1:
+        # Determine target progress window for this candidate (Fix P3.4)
+        if graph and getattr(graph, "nodes", None) and len(graph.nodes) > 0:
             start_nid = getattr(cand, "target_node_start", 0)
             end_nid = getattr(cand, "target_node_end", start_nid)
-            prog_start = start_nid / float(len(graph.nodes))
-            prog_end = (end_nid + 1) / float(len(graph.nodes))
+            s_node = graph.nodes[start_nid] if start_nid < len(graph.nodes) else graph.nodes[0]
+            e_node = graph.nodes[end_nid] if end_nid < len(graph.nodes) else graph.nodes[-1]
+
+            total_tokens = len(graph.normalized_words) if getattr(graph, "normalized_words", None) else (max(n.token_index for n in graph.nodes) + 1)
+            total_tokens = max(1, total_tokens)
+
+            # Map progress by word token index + intra-word phone fraction
+            s_branch = [n for n in graph.nodes if n.token_index == s_node.token_index and n.branch_id == s_node.branch_id]
+            e_branch = [n for n in graph.nodes if n.token_index == e_node.token_index and n.branch_id == e_node.branch_id]
+            s_idx = s_branch.index(s_node) if s_node in s_branch else 0
+            e_idx = e_branch.index(e_node) if e_node in e_branch else (len(e_branch) - 1)
+
+            s_frac = s_idx / float(max(1, len(s_branch)))
+            e_frac = (e_idx + 1) / float(max(1, len(e_branch)))
+
+            prog_start = (s_node.token_index + s_frac) / float(total_tokens)
+            prog_end = (e_node.token_index + e_frac) / float(total_tokens)
+            prog_start = max(0.0, min(1.0, prog_start))
+            prog_end = max(prog_start, min(1.0, prog_end))
         else:
             prog_start, prog_end = 0.0, 1.0
 
@@ -114,16 +131,44 @@ class ProsodyGuide:
         cand_slope = getattr(cand, "f0_slope", None)
         if cand_slope is None and selector is not None and hasattr(selector, "_get_candidate_acoustic_features"):
             try:
-                s_feat, _ = selector._get_candidate_acoustic_features(
+                s_feat = selector._get_candidate_acoustic_features(
                     cand.source_content_id, cand.start_sample, cand.end_sample
                 )
-                cand_slope = float(s_feat)
+                if hasattr(s_feat, "f0_slope"):
+                    cand_slope = float(s_feat.f0_slope)
+                elif isinstance(s_feat, (tuple, list)) and len(s_feat) >= 1:
+                    cand_slope = float(s_feat[0])
+                else:
+                    cand_slope = 0.0
             except Exception:
                 cand_slope = 0.0
         elif cand_slope is None:
             cand_slope = 0.0
 
         cand_pitch = getattr(cand, "pitch_semitones", None)
+        if cand_pitch is None:
+            cand_f0 = getattr(cand, "cand_f0_hz", None)
+            if cand_f0 is None and selector is not None and hasattr(selector, "_get_candidate_acoustic_features"):
+                try:
+                    feat = selector._get_candidate_acoustic_features(
+                        cand.source_content_id, cand.start_sample, cand.end_sample
+                    )
+                    if hasattr(feat, "f0_mean"):
+                        cand_f0 = feat.f0_mean
+                    elif isinstance(feat, dict) and "f0_mean" in feat:
+                        cand_f0 = feat["f0_mean"]
+                    elif isinstance(feat, (tuple, list)) and len(feat) >= 3:
+                        cand_f0 = feat[2]
+                except Exception:
+                    cand_f0 = None
+            if cand_f0 is not None and cand_f0 > 0:
+                spk_id = getattr(cand, "speaker_id", None)
+                spk_f0: float = 150.0
+                if selector is not None:
+                    spk_map = getattr(selector, "speaker_median_f0", {})
+                    val = spk_map.get(spk_id) or getattr(selector, "global_median_f0", 150.0)
+                    spk_f0 = float(val) if val else 150.0
+                cand_pitch = float(12.0 * np.log2(cand_f0 / max(50.0, spk_f0)))
 
         # Slope divergence cost
         # Sigmoid-shaped cost penalizing opposing slope directions
