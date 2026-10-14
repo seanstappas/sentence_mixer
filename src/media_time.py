@@ -43,6 +43,17 @@ def probe_media_file(file_path: Union[str, Path]) -> Dict[str, Any]:
     return json.loads(res.stdout)
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None or val == "N/A" or val == "":
+        return default
+    try:
+        import math
+        res = float(val)
+        return res if math.isfinite(res) else default
+    except (ValueError, TypeError):
+        return default
+
+
 def extract_source_record(
     video_path: Union[str, Path],
     build_dir: Union[str, Path] = ".build",
@@ -96,16 +107,24 @@ def extract_source_record(
                 pass
         if fps is None:
             r_fps_str = video_stream.get("r_frame_rate", "30000/1001")
-            fps = RationalTime.from_str(r_fps_str)
-        video_duration = float(video_stream.get("duration", format_info.get("duration", 0.0)))
-        video_origin_sec = float(video_stream.get("start_time", 0.0))
+            try:
+                cand_r = RationalTime.from_str(r_fps_str)
+                if cand_r.numerator > 0 and cand_r.denominator > 0:
+                    fps = cand_r
+            except Exception:
+                pass
+        if fps is None:
+            fps = RationalTime(30000, 1001)
+
+        video_duration = _safe_float(video_stream.get("duration", format_info.get("duration", 0.0)))
+        video_origin_sec = _safe_float(video_stream.get("start_time", 0.0))
     else:
         fps = RationalTime(30000, 1001)
         video_duration = 0.0
         video_origin_sec = 0.0
 
-    audio_duration = float(audio_stream.get("duration", format_info.get("duration", 0.0)))
-    audio_origin_sec = float(audio_stream.get("start_time", 0.0))
+    audio_duration = _safe_float(audio_stream.get("duration", format_info.get("duration", 0.0)))
+    audio_origin_sec = _safe_float(audio_stream.get("start_time", 0.0))
 
     codec_delay_samples = 0
     pad_val = audio_stream.get("initial_padding")
@@ -252,6 +271,8 @@ def samples_to_frame_index(samples: int, sample_rate: int, fps: RationalTime) ->
 
 def frame_index_to_samples(frame_index: int, fps: RationalTime, sample_rate: int) -> int:
     # samples = frame_index * (fps_den / fps_num) * sample_rate
+    if fps.numerator <= 0:
+        return 0
     num = frame_index * fps.denominator * sample_rate
     den = fps.numerator
     return (num + den // 2) // den

@@ -258,6 +258,62 @@ class SpeakerDiarizer:
 
         return intervals
 
+    def _split_turns_by_embedding_change(
+        self,
+        data: np.ndarray,
+        sr: int,
+        turns: List[Tuple[float, float]],
+        win_sec: float = 1.2,
+        hop_sec: float = 0.4,
+        split_cos_dist: float = 0.35,
+    ) -> List[Tuple[float, float]]:
+        """
+        Splits long candidate speech turns (>= 2.4s) at local cosine distance peaks of sliding-window embeddings.
+        """
+        refined_turns: List[Tuple[float, float]] = []
+        for t_start, t_end in turns:
+            dur = t_end - t_start
+            if dur < 2.4:
+                refined_turns.append((t_start, t_end))
+                continue
+
+            # Slide window pair [t - win, t] and [t, t + win]
+            curr_split_start = t_start
+            best_t = None
+            max_dist = 0.0
+
+            t_cur = t_start + win_sec
+            while t_cur <= t_end - win_sec:
+                s_left = int(round((t_cur - win_sec) * sr))
+                e_left = int(round(t_cur * sr))
+                s_right = int(round(t_cur * sr))
+                e_right = int(round((t_cur + win_sec) * sr))
+
+                if e_right <= len(data):
+                    v_l = self.extract_embedding(data[s_left:e_left], sr)
+                    v_r = self.extract_embedding(data[s_right:e_right], sr)
+                    norm_l = float(np.linalg.norm(v_l))
+                    norm_r = float(np.linalg.norm(v_r))
+                    if norm_l > 1e-6 and norm_r > 1e-6:
+                        sim = float(np.dot(v_l, v_r) / (norm_l * norm_r))
+                    else:
+                        sim = 1.0
+                    dist = 1.0 - max(-1.0, min(1.0, sim))
+                    if dist > split_cos_dist and dist > max_dist:
+                        if (t_cur - curr_split_start) >= self.min_turn_duration and (t_end - t_cur) >= self.min_turn_duration:
+                            max_dist = dist
+                            best_t = t_cur
+
+                t_cur += hop_sec
+
+            if best_t is not None:
+                refined_turns.append((t_start, best_t))
+                refined_turns.append((best_t, t_end))
+            else:
+                refined_turns.append((t_start, t_end))
+
+        return refined_turns
+
     def diarize(
         self,
         audio_path: Union[str, Path],
@@ -469,6 +525,8 @@ class SpeakerDiarizer:
             turns = self.detect_speech_turns(data, sr)
         if not turns:
             return []
+
+        turns = self._split_turns_by_embedding_change(data, sr, turns)
 
         # 2. Extract embeddings per turn
         turn_embeddings: List[np.ndarray] = []

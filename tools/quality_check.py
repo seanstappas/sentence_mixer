@@ -35,17 +35,23 @@ def detect_splice_clicks(
     """
     Inspects a +/- window_ms window around each EditPlan transition timestamp
     in the audio, flagging any sample-to-sample difference spike |Delta x[n]| > 6 * sigma_local
-    as an audible splice click.
+    or >4kHz spectral energy surge as an audible splice click.
     """
     detected_clicks: List[Dict[str, Any]] = []
     try:
         import soundfile as sf
         import numpy as np
+        import scipy.signal
+
         if audio_path.suffix.lower() == ".wav":
             data, sr = sf.read(str(audio_path), dtype="float32")
         else:
-            data = extract_audio_16k(audio_path)
-            sr = 16000
+            cand_wav = audio_path.with_suffix(".wav")
+            if cand_wav.exists():
+                data, sr = sf.read(str(cand_wav), dtype="float32")
+            else:
+                data = extract_audio_16k(audio_path)
+                sr = 16000
         if data.ndim > 1:
             data = data.mean(axis=1)
     except Exception:
@@ -63,35 +69,69 @@ def detect_splice_clicks(
 
     for trans in transitions:
         to_idx = trans.get("to_segment_index")
-        if to_idx is None or to_idx >= len(segments):
-            continue
-        seg = segments[to_idx]
-        t_sec = seg.get("output_start_sample", 0) / float(plan_sr)
-        center_sample = int(round(t_sec * sr))
+        from_idx = trans.get("from_segment_index")
+        overlap = trans.get("overlap_samples", 0)
 
-        s_min = max(0, center_sample - local_samples)
-        s_max = min(len(data), center_sample + local_samples)
-        if s_max - s_min < 10:
-            continue
-        local_diff = np.diff(data[s_min:s_max])
-        sigma_local = float(np.std(local_diff)) + 1e-6
+        pts_to_check: List[Tuple[str, float]] = []
+        if to_idx is not None and to_idx < len(segments):
+            to_seg = segments[to_idx]
+            pts_to_check.append(("fade_start", to_seg.get("output_start_sample", 0) / float(plan_sr)))
+        if overlap > 0 and from_idx is not None and from_idx < len(segments):
+            from_seg = segments[from_idx]
+            pts_to_check.append(("fade_end", from_seg.get("output_end_sample", 0) / float(plan_sr)))
 
-        w_start = max(0, center_sample - w_samples)
-        w_end = min(len(data), center_sample + w_samples)
-        if w_end - w_start < 2:
-            continue
-        w_diff = np.abs(np.diff(data[w_start:w_end]))
-        max_diff = float(np.max(w_diff))
+        for boundary_type, t_sec in pts_to_check:
+            center_sample = int(round(t_sec * sr))
 
-        spike_ratio = max_diff / sigma_local
-        if spike_ratio > sigma_threshold and max_diff > 0.03:
-            detected_clicks.append({
-                "transition_index": trans.get("transition_index"),
-                "time_sec": round(t_sec, 4),
-                "spike_ratio": round(spike_ratio, 2),
-                "max_diff": round(max_diff, 4),
-                "sigma_local": round(sigma_local, 5),
-            })
+            s_min = max(0, center_sample - local_samples)
+            s_max = min(len(data), center_sample + local_samples)
+            if s_max - s_min < 10:
+                continue
+
+            w_start = max(0, center_sample - w_samples)
+            w_end = min(len(data), center_sample + w_samples)
+            if w_end - w_start < 2:
+                continue
+
+            bg_left = np.diff(data[s_min:w_start]) if w_start - s_min >= 2 else np.zeros(0, dtype=np.float32)
+            bg_right = np.diff(data[w_end:s_max]) if s_max - w_end >= 2 else np.zeros(0, dtype=np.float32)
+            bg_diff = np.concatenate([bg_left, bg_right])
+            sigma_local = float(np.std(bg_diff)) + 1e-6 if len(bg_diff) >= 4 else float(np.std(np.diff(data[s_min:s_max]))) + 1e-6
+
+            w_diff = np.abs(np.diff(data[w_start:w_end]))
+            max_diff = float(np.max(w_diff))
+
+            spike_ratio = max_diff / sigma_local
+
+            hp_click = False
+            if sr > 10000 and (s_max - s_min) > 20:
+                try:
+                    sos = scipy.signal.butter(4, 4000.0 / (0.5 * sr), btype="high", output="sos")
+                    chunk_hp = scipy.signal.sosfiltfilt(sos, data[s_min:s_max])
+                    rw_start = w_start - s_min
+                    rw_end = w_end - s_min
+                    win_hp = chunk_hp[rw_start:rw_end]
+                    bg_hp_left = chunk_hp[:rw_start] if rw_start > 0 else np.zeros(0, dtype=np.float32)
+                    bg_hp_right = chunk_hp[rw_end:] if rw_end < len(chunk_hp) else np.zeros(0, dtype=np.float32)
+                    bg_hp = np.concatenate([bg_hp_left, bg_hp_right])
+                    win_rms = float(np.sqrt(np.mean(win_hp ** 2))) if len(win_hp) > 0 else 0.0
+                    bg_rms = float(np.sqrt(np.mean(bg_hp ** 2))) + 1e-6 if len(bg_hp) > 0 else 1e-6
+                    win_peak = float(np.max(np.abs(win_hp))) if len(win_hp) > 0 else 0.0
+                    if win_rms > 8.0 * bg_rms and win_peak > 0.015:
+                        hp_click = True
+                except Exception:
+                    pass
+
+            if (spike_ratio > sigma_threshold and max_diff > 0.03) or hp_click:
+                detected_clicks.append({
+                    "transition_index": trans.get("transition_index"),
+                    "boundary_type": boundary_type,
+                    "time_sec": round(t_sec, 4),
+                    "spike_ratio": round(spike_ratio, 2),
+                    "max_diff": round(max_diff, 4),
+                    "sigma_local": round(sigma_local, 5),
+                    "spectral_flux_click": hp_click,
+                })
 
     return len(detected_clicks) == 0, detected_clicks
 

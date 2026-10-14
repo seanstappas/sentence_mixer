@@ -458,10 +458,21 @@ def preprocess_source(
 
     audio_input = resolved_audio_src if resolved_audio_src else str(v_path)
     sf_handle: Optional[sf.SoundFile] = None
+    temp_full_wav: Optional[Path] = None
     try:
         sf_handle = sf.SoundFile(audio_input)
     except Exception:
-        sf_handle = None
+        temp_full_wav = out_dir / "_full_source_16k.wav"
+        cmd_full = [
+            "ffmpeg", "-y", "-i", str(audio_input),
+            "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+            str(temp_full_wav),
+        ]
+        if subprocess.run(cmd_full, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0 and temp_full_wav.exists():
+            try:
+                sf_handle = sf.SoundFile(str(temp_full_wav))
+            except Exception:
+                sf_handle = None
 
     try:
         for idx, c in enumerate(chunks):
@@ -546,6 +557,11 @@ def preprocess_source(
         if sf_handle is not None:
             try:
                 sf_handle.close()
+            except Exception:
+                pass
+        if temp_full_wav is not None and temp_full_wav.exists():
+            try:
+                temp_full_wav.unlink()
             except Exception:
                 pass
 

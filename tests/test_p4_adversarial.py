@@ -423,7 +423,7 @@ class TestVoiceChecksBorderlineCalibration:
         r1 = add_rec("split_minor", vec_tobin)
         r2 = add_rec("split_minor", vec_mira)
 
-        stats = run_voice_checks(records, _FakeEmbedder(vectors), log=lambda m: None)
+        _stats = run_voice_checks(records, _FakeEmbedder(vectors), log=lambda m: None)
 
         assert r1.voice_best == "tobin"
         assert r2.voice_best == "mira"
@@ -544,6 +544,7 @@ class TestShortClipChunkSlicing:
             vtt_path=str(vtt_path),
             output_corpus_dir=str(corpus_out),
         )
+        assert Path(manifest_path).exists()
 
         # Must have fallen back to FFmpeg exactly once for the cue
         assert len(ffmpeg_commands) == 1
@@ -592,6 +593,7 @@ class TestShortClipChunkSlicing:
             vtt_path=str(vtt_path),
             output_corpus_dir=str(corpus_out),
         )
+        assert Path(manifest_path).exists()
 
         chunk_wav = corpus_out / "chunk_0000.wav"
         data, read_sr = sf.read(str(chunk_wav))

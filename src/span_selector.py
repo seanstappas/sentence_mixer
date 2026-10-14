@@ -103,7 +103,7 @@ def apply_diphone_midpoint_transitions(
         p_succ = succ.realized_phones[0] if succ.realized_phones else node_succ.phone
         base_curr = strip_phone_stress(p_curr)
         base_succ = strip_phone_stress(p_succ)
-        if base_curr != base_succ and not (base_curr in VOWEL_PHONES and base_succ in VOWEL_PHONES and base_curr == base_succ):
+        if base_curr != base_succ:
             continue
 
         ev_curr = inventory.events.get(curr.event_ids[-1]) if curr.event_ids else None
@@ -113,11 +113,21 @@ def apply_diphone_midpoint_transitions(
             mid_curr = (ev_curr.start_sample + ev_curr.end_sample) // 2
             mid_succ = (ev_succ.start_sample + ev_succ.end_sample) // 2
 
+            # Deduplicate shared boundary node across the diphone join so realized_phones/target_phones
+            # don't repeat the phoneme twice in the EditPlan
+            curr_cov = list(new_spans[k].covered_nodes)
+            succ_cov = list(new_spans[k + 1].covered_nodes)
+            if curr.target_node_end == succ.target_node_start:
+                if len(succ_cov) > 1:
+                    succ_cov = succ_cov[1:]
+                elif len(curr_cov) > 1:
+                    curr_cov = curr_cov[:-1]
+
             if curr.start_sample < mid_curr <= ev_curr.end_sample:
-                new_spans[k] = dataclasses.replace(curr, end_sample=mid_curr)
+                new_spans[k] = dataclasses.replace(new_spans[k], end_sample=mid_curr, covered_nodes=curr_cov)
 
             if ev_succ.start_sample <= mid_succ < succ.end_sample:
-                new_spans[k + 1] = dataclasses.replace(succ, start_sample=mid_succ)
+                new_spans[k + 1] = dataclasses.replace(new_spans[k + 1], start_sample=mid_succ, covered_nodes=succ_cov)
 
     return new_spans
 
@@ -206,8 +216,50 @@ class SpanSelector:
         self.global_phone_median: Dict[str, float] = {
             k: float(np.median(v)) for k, v in global_phone_durations.items() if v
         }
-        self.speaker_median_f0: Dict[Optional[str], float] = {}
-        self.global_median_f0: float = 150.0
+
+        # Preloaded feature tracks for zero-disk-seek candidate acoustic evaluation
+        self._preloaded_tracks: Dict[str, Dict[str, Any]] = {}
+        spk_f0_vals: Dict[Optional[str], List[float]] = {}
+        all_f0_vals: List[float] = []
+
+        for src_id, srec in self.inv.sources.items():
+            pcm_path = srec.cached_analysis_pcm_path or srec.cached_pcm_path or srec.source_path
+            if pcm_path:
+                feat_path = Path(pcm_path).parent / f"{Path(pcm_path).stem}.span_features.npz"
+                if not feat_path.exists():
+                    feat_path = Path(pcm_path).parent / f"{Path(pcm_path).stem}.features.npz"
+                if feat_path.exists():
+                    try:
+                        npz_data = np.load(str(feat_path), allow_pickle=True)
+                        self._preloaded_tracks[src_id] = {k: npz_data[k] for k in npz_data.files}
+                    except Exception:
+                        pass
+
+        for wo in self.inv.words.values():
+            if not getattr(wo, "is_eligible", True):
+                continue
+            tracks = self._preloaded_tracks.get(wo.source_content_id)
+            if not tracks or "f0" not in tracks or "voiced_flag" not in tracks:
+                continue
+            hop = int(tracks.get("hop_length", 160))
+            tr_sr = int(tracks.get("sr", 16000))
+            srec = self.inv.sources.get(wo.source_content_id)
+            native_sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 48000
+            s_frame = max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop)))
+            e_frame = min(int(tracks["n_frames"]), int(round((wo.end_sample / float(native_sr)) * tr_sr / hop)))
+            if e_frame > s_frame:
+                f0_sl = tracks["f0"][s_frame:e_frame]
+                vf_sl = tracks["voiced_flag"][s_frame:e_frame]
+                vp_sl = tracks["voiced_probs"][s_frame:e_frame] if "voiced_probs" in tracks else np.ones_like(vf_sl, dtype=float)
+                for f, vf, vp in zip(f0_sl, vf_sl, vp_sl):
+                    if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80.0 <= f <= 500.0:
+                        spk_f0_vals.setdefault(wo.speaker_id, []).append(float(f))
+                        all_f0_vals.append(float(f))
+
+        self.speaker_median_f0: Dict[Optional[str], float] = {
+            spk: float(np.median(vals)) for spk, vals in spk_f0_vals.items() if vals
+        }
+        self.global_median_f0: float = float(np.median(all_f0_vals)) if all_f0_vals else 150.0
 
     @staticmethod
     def _compute_quadratic_duration_penalty(actual_dur: float, median_dur: float) -> float:
@@ -1147,6 +1199,8 @@ class SpanSelector:
                         continue
                     if pred.start_sample == succ.start_sample and pred.end_sample == succ.end_sample:
                         continue
+                    if pred.end_sample != succ.start_sample:
+                        continue
 
                     # Intra-word fragmentation guard: subwords/phones carved from same donor word
                     # are penalized in DP rather than treated as 0-cost continuations
@@ -1211,6 +1265,39 @@ class SpanSelector:
         src_rec = self.inv.sources.get(source_content_id)
         if not src_rec:
             return AcousticMetrics(0.0, 0.0, 0.0)
+
+        # Fast-path: read from preloaded feature tracks (zero disk seek)
+        tracks = self._preloaded_tracks.get(source_content_id)
+        if tracks and "rms" in tracks and "f0" in tracks and "n_frames" in tracks:
+            hop = int(tracks.get("hop_length", 160))
+            tr_sr = int(tracks.get("sr", 16000))
+            native_sr = src_rec.native_sample_rate or 48000
+            s_frame = max(0, int(round((start_sample / float(native_sr)) * tr_sr / hop)))
+            e_frame = min(int(tracks["n_frames"]), int(round((end_sample / float(native_sr)) * tr_sr / hop)))
+            if e_frame > s_frame:
+                rms_slice = tracks["rms"][s_frame:e_frame]
+                f0_slice = tracks["f0"][s_frame:e_frame]
+                vf_slice = tracks["voiced_flag"][s_frame:e_frame] if "voiced_flag" in tracks else np.ones_like(f0_slice, dtype=bool)
+                vp_slice = tracks["voiced_probs"][s_frame:e_frame] if "voiced_probs" in tracks else np.ones_like(f0_slice, dtype=float)
+                rms_val = float(np.sqrt(np.mean(rms_slice ** 2))) if len(rms_slice) > 0 else 0.0
+                valid_pts = [
+                    (idx * (hop / float(tr_sr)), float(f))
+                    for idx, (vf, vp, f) in enumerate(zip(vf_slice, vp_slice, f0_slice))
+                    if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80.0 <= f <= 500.0
+                ]
+                if len(valid_pts) >= 3:
+                    t_v = np.array([pt[0] for pt in valid_pts], dtype=float)
+                    f_v = np.array([pt[1] for pt in valid_pts], dtype=float)
+                    f0_slope = float(np.polyfit(t_v, f_v, 1)[0])
+                    f0_mean = float(np.mean(f_v))
+                elif len(valid_pts) > 0:
+                    f0_slope = 0.0
+                    f0_mean = float(np.mean([pt[1] for pt in valid_pts]))
+                else:
+                    f0_slope, f0_mean = 0.0, 0.0
+                res = AcousticMetrics(f0_slope, rms_val, f0_mean)
+                self._acoustic_metrics_cache[cache_key] = res
+                return res
 
         pcm_path = None
         for cand_path in [src_rec.cached_analysis_pcm_path, src_rec.cached_pcm_path, src_rec.source_path]:
@@ -1440,7 +1527,7 @@ class SpanSelector:
     def is_source_continuation(self, pred: SpanCandidate, curr: SpanCandidate) -> bool:
         """
         True only if curr immediately follows pred in the source recording without cuts.
-        Uses ordered event IDs and physical sample alignment.
+        Requires both physical sample abutment and event successor linkage (when event_ids exist).
         """
         if pred.source_content_id != curr.source_content_id:
             return False
@@ -1449,18 +1536,18 @@ class SpanSelector:
         if pred.start_sample == curr.start_sample and pred.end_sample == curr.end_sample:
             return False
 
-        # Check physical sample adjacency
-        if pred.end_sample == curr.start_sample:
-            return True
+        # Physical sample abutment is mandatory
+        if pred.end_sample != curr.start_sample:
+            return False
 
-        # Check event successor linkage
+        # Check event successor linkage when event IDs are present
         if pred.event_ids and curr.event_ids:
             last_ev = self.inv.events.get(pred.event_ids[-1])
             first_ev = self.inv.events.get(curr.event_ids[0])
-            if last_ev and first_ev and last_ev.successor_id == first_ev.event_id:
-                return True
+            if not (last_ev and first_ev and last_ev.successor_id == first_ev.event_id):
+                return False
 
-        return False
+        return True
 
     def _get_boundary_embedding(
         self,
@@ -1645,7 +1732,9 @@ class SpanSelector:
 
         def _get_tail_emb(cand: SpanCandidate) -> Any:
             if cand.candidate_id not in emb_exit_cache:
-                t_len = min(cand.end_sample - cand.start_sample, 4800)
+                src_rec = self.inv.sources.get(cand.source_content_id)
+                sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 48000
+                t_len = min(cand.end_sample - cand.start_sample, int(round(0.025 * sr)))
                 emb_exit_cache[cand.candidate_id] = self._get_boundary_embedding(
                     cand.source_content_id, cand.end_sample - t_len, cand.end_sample, wavlm_backend
                 )
@@ -1653,7 +1742,9 @@ class SpanSelector:
 
         def _get_head_emb(cand: SpanCandidate) -> Any:
             if cand.candidate_id not in emb_entry_cache:
-                h_len = min(cand.end_sample - cand.start_sample, 4800)
+                src_rec = self.inv.sources.get(cand.source_content_id)
+                sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 48000
+                h_len = min(cand.end_sample - cand.start_sample, int(round(0.025 * sr)))
                 emb_entry_cache[cand.candidate_id] = self._get_boundary_embedding(
                     cand.source_content_id, cand.start_sample, cand.start_sample + h_len, wavlm_backend
                 )
@@ -1665,11 +1756,17 @@ class SpanSelector:
             if not curr_cands:
                 continue
 
-            reachable = [c for c in curr_cands if c.candidate_id in dp]
-            if not reachable:
-                continue
+            # Sort single-node candidates (target_node_end == target_node_start) BEFORE multi-node
+            # candidates so phone [u, u] -> subword [u, u+k] diphone transitions at node u
+            # populate dp[d_succ] before d_succ is expanded in this same node_id iteration.
+            curr_cands_ordered = sorted(
+                curr_cands,
+                key=lambda c: (0 if c.target_node_end == c.target_node_start else 1, c.target_node_end),
+            )
 
-            for curr in reachable:
+            for curr in curr_cands_ordered:
+                if curr.candidate_id not in dp:
+                    continue
                 curr_cost = dp[curr.candidate_id]
                 next_target_nodes = node_succs.get(curr.target_node_end, [])
                 candidates_to_eval: List[Tuple[SpanCandidate, bool]] = []
@@ -1677,13 +1774,17 @@ class SpanSelector:
                     for succ in cands_by_start.get(nxt_node, []):
                         candidates_to_eval.append((succ, False))
 
-                # Fix P2.2: Diphone joins inside synthesized words
+                # Fix P2.2: Diphone joins inside synthesized words (subword<->subword, subword->phone, phone->subword)
+                # Require at least one of (curr, d_succ) to span >1 node so [u, u] -> [u, u] self-loops cannot occur.
                 if curr.span_type in ("subword", "phone"):
+                    curr_is_multi = curr.target_node_end > curr.target_node_start
                     curr_node = graph.nodes[curr.target_node_end] if curr.target_node_end < len(graph.nodes) else None
                     p_curr_last = strip_phone_stress(curr.realized_phones[-1]) if curr.realized_phones else (curr_node.base_phone if curr_node else "")
                     for d_succ in cands_by_start.get(curr.target_node_end, []):
+                        succ_is_multi = d_succ.target_node_end > d_succ.target_node_start
                         if (
-                            d_succ.target_node_end > d_succ.target_node_start
+                            d_succ.candidate_id != curr.candidate_id
+                            and (curr_is_multi or succ_is_multi)
                             and d_succ.span_type in ("subword", "phone")
                         ):
                             d_node = graph.nodes[d_succ.target_node_start] if d_succ.target_node_start < len(graph.nodes) else None
@@ -1693,7 +1794,7 @@ class SpanSelector:
                                 and curr_node.token_index == d_node.token_index
                             ):
                                 p_succ_first = strip_phone_stress(d_succ.realized_phones[0]) if d_succ.realized_phones else d_node.base_phone
-                                if p_curr_last and (p_curr_last == p_succ_first or (p_curr_last in VOWEL_PHONES and p_succ_first in VOWEL_PHONES and p_curr_last == p_succ_first)):
+                                if p_curr_last and p_curr_last == p_succ_first:
                                     candidates_to_eval.append((d_succ, True))
 
                 for succ, is_diphone in candidates_to_eval:
@@ -1701,10 +1802,13 @@ class SpanSelector:
                         # Intra-word fragmentation guard: if curr and succ are subwords or phones
                         # carved from the same donor word, charging 0 transition cost rewards
                         # artificial fragmentation over keeping the multi-phone unit intact.
+                        c_last_ev = self.inv.events.get(curr.event_ids[-1]) if curr.event_ids else None
+                        s_first_ev = self.inv.events.get(succ.event_ids[0]) if succ.event_ids else None
                         same_donor_word = (
-                            bool(curr.event_ids and succ.event_ids)
-                            and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id is not None)
-                            and (self.inv.events.get(curr.event_ids[-1]).word_occurrence_id == self.inv.events.get(succ.event_ids[0]).word_occurrence_id)
+                            c_last_ev is not None
+                            and s_first_ev is not None
+                            and c_last_ev.word_occurrence_id is not None
+                            and c_last_ev.word_occurrence_id == s_first_ev.word_occurrence_id
                         )
                         if same_donor_word and (curr.span_type != "word" or succ.span_type != "word"):
                             trans_cost = max(0.40, self.edit_penalty)

@@ -183,6 +183,32 @@ def resolve_time_ranges(
     return sorted(ranges)
 
 
+def _resolve_character_alias(speaker_arg: str, custom_char_path: Optional[Union[str, Path]] = None) -> List[str]:
+    """Resolves a raw speaker argument or alias across config/characters/*.json configs."""
+    candidates = [speaker_arg]
+    norm = speaker_arg.strip().lower().replace(" ", "_").replace("-", "_")
+    if norm not in candidates:
+        candidates.append(norm)
+
+    char_dirs = list((SCRIPT_DIR / "config" / "characters").glob("*.json"))
+    if custom_char_path and Path(custom_char_path).exists():
+        char_dirs.append(Path(custom_char_path))
+
+    for c_path in char_dirs:
+        try:
+            from subtitle_parsing import CharacterResolver
+            resolver = CharacterResolver(json.loads(c_path.read_text(encoding="utf-8")))
+            resolved_id, _ = resolver.resolve(speaker_arg)
+            if resolved_id and resolved_id not in candidates:
+                candidates.append(resolved_id)
+                norm_res = resolved_id.lower().replace("-", "_")
+                if norm_res not in candidates:
+                    candidates.append(norm_res)
+        except Exception:
+            pass
+    return candidates
+
+
 def pick_timeline_fps(inventory: InventoryIndex, default: RationalTime) -> RationalTime:
     """Most common video frame rate among the inventory's sources (so movies keep 23.976 fps)."""
     counts: Dict[Tuple[int, int], int] = {}
@@ -1921,7 +1947,13 @@ def main():
                                 "  3. Install diarization backend dependencies."
                             )
                         else:
-                            print("[!] Warning: Diarization backend unavailable and no speaker asserted. Proceeding with unverified identity; different voices may be mixed.")
+                            parser.error(
+                                "Diarization backend is unavailable and neither --speaker nor --assume-single-speaker was specified.\n"
+                                "To proceed, either:\n"
+                                "  1. Specify --speaker <id> --assume-single-speaker if the video contains only one speaker.\n"
+                                "  2. Provide verified speaker_intervals in a manifest.\n"
+                                "  3. Install diarization backend dependencies."
+                            )
                     else:
                         diarize_media_path: Union[str, Path] = v_abs
                         if isolate_vocals_flag and v_abs.exists():
@@ -2010,11 +2042,16 @@ def main():
                     )
             elif not inventory_paths:
                 if getattr(args, "speaker", None):
-                    discovered_invs = find_cached_inventories_for_speaker(
-                        args.speaker,
-                        cache_dir=CACHE_BASE_DIR,
-                        registry_path=registry_path,
-                    )
+                    spk_candidates = _resolve_character_alias(args.speaker, custom_char_path=getattr(args, "characters", None))
+                    discovered_invs = []
+                    for cand_spk in spk_candidates:
+                        for inv_p in find_cached_inventories_for_speaker(
+                            cand_spk,
+                            cache_dir=CACHE_BASE_DIR,
+                            registry_path=registry_path,
+                        ):
+                            if inv_p not in discovered_invs:
+                                discovered_invs.append(inv_p)
                     if discovered_invs:
                         print(f"[*] Discovered {len(discovered_invs)} ingested source inventory/inventories containing speaker '{args.speaker}'.")
                         inventory_paths.extend(discovered_invs)
@@ -2063,28 +2100,12 @@ def main():
         }))
 
         if args.speaker is not None:
-            norm_req = args.speaker.strip().lower().replace(" ", "_").replace("-", "_")
+            cand_speakers = _resolve_character_alias(args.speaker, custom_char_path=getattr(args, "characters", None))
+            cand_norms = {c.strip().lower().replace(" ", "_").replace("-", "_") for c in cand_speakers}
             matched_spk = next(
-                (s for s in unique_speakers if s.lower().replace("-", "_") == norm_req),
+                (s for s in unique_speakers if s.lower().replace("-", "_") in cand_norms),
                 None,
             )
-            if matched_spk is None:
-                # Try resolving through CharacterResolver (config/characters/*.json)
-                char_dirs = list((SCRIPT_DIR / "config" / "characters").glob("*.json"))
-                for c_path in char_dirs:
-                    try:
-                        from subtitle_parsing import CharacterResolver
-                        resolver = CharacterResolver(json.loads(c_path.read_text(encoding="utf-8")))
-                        resolved_id, _ = resolver.resolve(args.speaker)
-                        if resolved_id:
-                            matched_spk = next(
-                                (s for s in unique_speakers if s.lower().replace("-", "_") == resolved_id.lower().replace("-", "_")),
-                                None,
-                            )
-                            if matched_spk is not None:
-                                break
-                    except Exception:
-                        pass
             if matched_spk is None:
                 avail_str = ", ".join(sorted(unique_speakers)) if unique_speakers else "none"
                 parser.error(
@@ -2253,6 +2274,7 @@ def main():
                 lead_in_sec=lead_in,
                 pause_style=getattr(args, "pause_style", "freeze"),
                 release_tail_sec=max(0.0, float(getattr(args, "release_tail_ms", 100.0))) / 1000.0,
+                audio_track=getattr(args, "audio_track", "recombined"),
             )
             plan.metadata["pause_style"] = getattr(args, "pause_style", "freeze")
             plan.metadata["release_tail_ms"] = float(getattr(args, "release_tail_ms", 100.0))
@@ -2420,6 +2442,8 @@ def main():
                 for sf_item, df_item in file_mappings.items():
                     if sf_item not in (staged_render, staged_master_wav, staged_plan, staged_xml):
                         key = _artifact_key(sf_item)
+                        if key in manifest_info["artifacts"]:
+                            key = f"{sf_item.stem}_{key}"
                         if key in manifest_info["artifacts"]:
                             raise ValueError(
                                 f"Duplicate manifest artifact key '{key}' for file '{sf_item}' and '{manifest_info['artifacts'][key]['path']}'"
@@ -2598,8 +2622,10 @@ def main():
                 def _artifact_key(staged_file: Path) -> str:
                     stem = staged_file.stem
                     suffix = staged_file.suffix.lower()
-                    if suffix in (".srt", ".vtt"):
-                        return "subtitles"
+                    if suffix == ".srt":
+                        return "subtitles_srt"
+                    if suffix == ".vtt":
+                        return "subtitles_vtt"
                     if "vocals" in stem:
                         return "vocals_render" if suffix == ".mp4" else "vocals_wav"
                     if "recombined" in stem:
@@ -2637,6 +2663,8 @@ def main():
                 for sf_item, df_item in file_mappings.items():
                     if sf_item not in (staged_render, staged_master_wav, staged_xml):
                         key = _artifact_key(sf_item)
+                        if key in manifest_info["artifacts"]:
+                            key = f"{sf_item.stem}_{key}"
                         if key in manifest_info["artifacts"]:
                             raise ValueError(
                                 f"Duplicate manifest artifact key '{key}' for file '{sf_item}' and '{manifest_info['artifacts'][key]['path']}'"

@@ -20,6 +20,7 @@ from typing import Dict, Optional
 from dialogue_mixer import parse_script_text, synthesize_and_render_dialogue
 from run_mixer import load_or_combine_inventories
 
+EP2_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_II_-_Attack_Of_The_Clo_56214896/units_index.json")
 EP3_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3/units_index.json")
 EP6_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_VI_-_Return_Of_The_Jed_3d083b52/units_index.json")
 
@@ -37,6 +38,21 @@ luke: What? How could they do that? This is outrageous; it was unfair. How could
 vader: That's my boy!
 """
 
+EPISODE_3_WEDDING_SCRIPT = """
+obi-wan: I have seen a security recording of him killing younglings.
+padme: I do not believe you. He promised me in our wedding vows he would not kill any more children!
+obi-wan: What wedding? Wait, what do you mean by more children?
+"""
+
+EPISODE_3_COUNCIL_CHAMBERS_SCRIPT = """
+mace-windu: If what you have told me is true, you will have gained my trust. Remain here. Wait in the Council Chambers until we return.
+anakin: I will stay here until they return.
+mace-windu: The Sith Lord has been destroyed. You have saved the Republic.
+yoda: The rank of Master, grant you we do.
+anakin: Thank you, Master!
+padme: Ani, come here. There is someone I want you to meet. Luke, Leia, this is your father!
+"""
+
 # Default character lightsaber / thematic highlight colors
 EP3_DEFAULT_COLORS: Dict[str, str] = {
     "mace": "purple",
@@ -49,6 +65,19 @@ EP6_DEFAULT_COLORS: Dict[str, str] = {
     "palpatine": "red",
     "sidious": "red",
     "vader": "blue",
+}
+
+EP3_WEDDING_DEFAULT_COLORS: Dict[str, str] = {
+    "obi-wan": "blue",
+    "padme": "yellow",
+}
+
+EP3_COUNCIL_DEFAULT_COLORS: Dict[str, str] = {
+    "mace-windu": "purple",
+    "mace": "purple",
+    "anakin": "blue",
+    "yoda": "green",
+    "padme": "yellow",
 }
 
 
@@ -130,13 +159,69 @@ def render_episode_6(
     )
 
 
+def render_episode_3_wedding_vows(
+    output_path: Path,
+    resolution: str = "1080p",
+    speaker_colors: Optional[Dict[str, str]] = None,
+) -> Path:
+    print("\n" + "=" * 60)
+    print("RENDERING EPISODE III MEME: THE WEDDING VOWS (OBI-WAN & PADME)")
+    print("=" * 60)
+    lines = parse_script_text(EPISODE_3_WEDDING_SCRIPT)
+    print(f"Loading inventories: {EP2_INVENTORY_PATH}, {EP3_INVENTORY_PATH}")
+    inv, _ = load_or_combine_inventories([str(EP2_INVENTORY_PATH), str(EP3_INVENTORY_PATH)])
+    colors = dict(EP3_WEDDING_DEFAULT_COLORS)
+    if speaker_colors:
+        colors.update(speaker_colors)
+    print(f"Speaker highlight colors: {colors}")
+    return synthesize_and_render_dialogue(
+        lines=lines,
+        inventory_index=inv,
+        output_video_path=output_path,
+        audio_track="recombined",
+        pause_between_sec=0.45,
+        resolution=resolution,
+        burn_subtitles=True,
+        highlight_words=True,
+        speaker_colors=colors,
+    )
+
+
+def render_episode_3_council_chambers(
+    output_path: Path,
+    resolution: str = "1080p",
+    speaker_colors: Optional[Dict[str, str]] = None,
+) -> Path:
+    print("\n" + "=" * 60)
+    print("RENDERING EPISODE III MEME: COUNCIL CHAMBERS (MACE, ANAKIN, YODA, PADME)")
+    print("=" * 60)
+    lines = parse_script_text(EPISODE_3_COUNCIL_CHAMBERS_SCRIPT)
+    print(f"Loading inventories: {EP2_INVENTORY_PATH}, {EP3_INVENTORY_PATH}")
+    inv, _ = load_or_combine_inventories([str(EP2_INVENTORY_PATH), str(EP3_INVENTORY_PATH)])
+    colors = dict(EP3_COUNCIL_DEFAULT_COLORS)
+    if speaker_colors:
+        colors.update(speaker_colors)
+    print(f"Speaker highlight colors: {colors}")
+    return synthesize_and_render_dialogue(
+        lines=lines,
+        inventory_index=inv,
+        output_video_path=output_path,
+        audio_track="recombined",
+        pause_between_sec=0.45,
+        resolution=resolution,
+        burn_subtitles=True,
+        highlight_words=True,
+        speaker_colors=colors,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render multi-speaker dialogue scenes.")
     parser.add_argument(
         "--clip",
-        choices=["1", "2", "all"],
+        choices=["1", "2", "3", "4", "all"],
         default="all",
-        help="Which clip to render (1: Ep3, 2: Ep6, all: both)",
+        help="Which clip to render (1: Ep3 Anakin/Mace, 2: Ep6 Luke/Palpatine/Vader, 3: Ep3 Meme Wedding Vows, 4: Ep3 Meme Council Chambers, all: all clips)",
     )
     parser.add_argument(
         "--resolution",
@@ -156,12 +241,20 @@ def main() -> None:
     custom_colors = parse_colors_arg(args.colors)
 
     if args.clip in ("1", "all"):
-        p3 = out_dir / "episode_3_anakin_mace.mp4"
-        render_episode_3(p3, resolution=args.resolution, speaker_colors=custom_colors)
+        p1 = out_dir / "episode_3_anakin_mace.mp4"
+        render_episode_3(p1, resolution=args.resolution, speaker_colors=custom_colors)
 
     if args.clip in ("2", "all"):
-        p6 = out_dir / "episode_6_luke_palpatine_vader.mp4"
-        render_episode_6(p6, resolution=args.resolution, speaker_colors=custom_colors)
+        p2 = out_dir / "episode_6_luke_palpatine_vader.mp4"
+        render_episode_6(p2, resolution=args.resolution, speaker_colors=custom_colors)
+
+    if args.clip in ("3", "all"):
+        p3 = out_dir / "meme_wedding_vows.mp4"
+        render_episode_3_wedding_vows(p3, resolution=args.resolution, speaker_colors=custom_colors)
+
+    if args.clip in ("4", "all"):
+        p4 = out_dir / "meme_council_chambers.mp4"
+        render_episode_3_council_chambers(p4, resolution=args.resolution, speaker_colors=custom_colors)
 
     print("\n[+] All requested clips rendered successfully.")
 

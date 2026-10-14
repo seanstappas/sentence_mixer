@@ -25,6 +25,7 @@ from contracts import (
     PlanSegment,
     PlanTransition,
     RationalTime,
+    SourceRecord,
     SpanCandidate,
     TargetGraph,
 )
@@ -236,15 +237,26 @@ def refine_splice_boundary(
         if max_lag < 1:
             return (0, 0)
 
-        l_eval = min(n_out, n_in - max_lag)
+        # Snap outgoing cut to nearest upward zero-crossing within <= 2ms of nominal end
+        max_snap = max(1, int(round(0.002 * sr)))
+        shift_out = 0
+        for i in range(n_out - 1, max(1, n_out - max_snap) - 1, -1):
+            if out_1d[i - 1] <= 0.0 < out_1d[i]:
+                shift_out = i - n_out  # <= 0
+                break
+        out_trimmed = out_1d[: n_out + shift_out] if shift_out < 0 else out_1d
+        n_out_trimmed = len(out_trimmed)
+
+        l_eval = min(n_out_trimmed, n_in - max_lag)
         if l_eval < 16:
-            l_eval = min(n_out, n_in, max(8, min(n_out, n_in) // 2))
+            l_eval = min(n_out_trimmed, n_in, max(8, min(n_out_trimmed, n_in) // 2))
             max_lag = min(max_lag, n_in - l_eval)
 
         if max_lag < 1 or l_eval < 4:
-            return (0, 0)
+            return (int(shift_out), 0)
 
-        ref_out = out_1d[:l_eval]
+        # Align incoming phase over crossfade window l_eval against terminal window of outgoing audio
+        ref_out = out_trimmed[-l_eval:]
         ref_in = in_1d[:l_eval]
         denom_0 = float(np.sqrt((np.sum(ref_out ** 2) * np.sum(ref_in ** 2)) + 1e-12))
         r_0 = float(np.sum(ref_out * ref_in) / denom_0) if denom_0 > 0 else 0.0
@@ -253,7 +265,7 @@ def refine_splice_boundary(
         best_lag = 0
 
         for lag in range(0, max_lag + 1):
-            u = out_1d[:l_eval]
+            u = ref_out
             v = in_1d[lag : lag + l_eval]
 
             if len(u) != l_eval or len(v) != l_eval:
@@ -267,9 +279,135 @@ def refine_splice_boundary(
                 best_r = r
                 best_lag = lag
 
-        shift_out = 0
         shift_in = best_lag
         return (int(shift_out), int(shift_in))
+
+
+def _source_sample_to_video_pts(sample_idx: int, src_rec: SourceRecord) -> float:
+    """
+    Computes sample-accurate video PTS accounting for container codec delay and stream origins.
+    """
+    sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 48000
+    codec_delay = getattr(src_rec, "codec_delay_samples", 0) or 0
+    effective_sample = max(0, sample_idx - codec_delay)
+    audio_sec = samples_to_seconds(effective_sample, sr) + float(getattr(src_rec, "decoded_audio_origin_sec", 0.0) or 0.0)
+    video_origin = float(getattr(src_rec, "decoded_video_origin_sec", 0.0) or 0.0)
+    return max(0.0, audio_sec - video_origin)
+
+
+def _refine_spans_in_native_audio(
+    selected_spans: List[SpanCandidate],
+    inventory: InventoryIndex,
+    tail_sec: float = 0.0,
+) -> Tuple[List[int], List[int]]:
+    """
+    Refines boundary sample offsets in native source audio prior to EditPlan construction.
+    Gracefully skips refinement if source media or cached PCM files do not exist on disk (mock-safe).
+    """
+    span_starts = [s.start_sample for s in selected_spans]
+    span_ends = [s.end_sample for s in selected_spans]
+
+    # Quick check if files exist on disk for all referenced sources
+    can_refine = True
+    src_paths: Dict[str, str] = {}
+    for span in selected_spans:
+        src_rec = inventory.sources.get(span.source_content_id)
+        if not src_rec:
+            can_refine = False
+            break
+        p = src_rec.cached_pcm_path or src_rec.source_path
+        if not p or not Path(p).exists():
+            can_refine = False
+            break
+        src_paths[span.source_content_id] = p
+
+    if not can_refine or len(selected_spans) == 0:
+        return span_starts, span_ends
+
+    # Apply variant samples when flagged during candidate retrieval
+    for i, span in enumerate(selected_spans):
+        src_rec = inventory.sources[span.source_content_id]
+        native_sr = src_rec.native_sample_rate or 48000
+        min_len = int(round(0.030 * native_sr))
+
+        entry_v = getattr(span, "entry_variant_samples", 0) or 0
+        exit_v = getattr(span, "exit_variant_samples", 0) or 0
+
+        # Only apply entry/exit collar trimming on non-continuations
+        is_cont_pred = False
+        if i > 0:
+            pred = selected_spans[i - 1]
+            if pred.source_content_id == span.source_content_id and pred.end_sample == span.start_sample:
+                is_cont_pred = True
+
+        is_cont_succ = False
+        if i < len(selected_spans) - 1:
+            succ = selected_spans[i + 1]
+            if succ.source_content_id == span.source_content_id and span.end_sample == succ.start_sample:
+                is_cont_succ = True
+
+        new_st = span_starts[i] + (entry_v if not is_cont_pred else 0)
+        new_en = span_ends[i] - (exit_v if not is_cont_succ else 0)
+        if new_en - new_st >= min_len:
+            span_starts[i] = new_st
+            span_ends[i] = new_en
+
+    # Perform boundary refinement between adjacent cuts
+    stop_fric = ("P", "T", "K", "B", "D", "G", "S", "SH", "F", "TH", "CH")
+    for i in range(len(selected_spans) - 1):
+        curr_span = selected_spans[i]
+        next_span = selected_spans[i + 1]
+
+        # Natural continuations require no boundary modification
+        if curr_span.source_content_id == next_span.source_content_id and span_ends[i] == span_starts[i + 1]:
+            continue
+
+        p_curr = src_paths.get(curr_span.source_content_id)
+        p_next = src_paths.get(next_span.source_content_id)
+        if not p_curr or not p_next:
+            continue
+
+        try:
+            curr_sr = inventory.sources[curr_span.source_content_id].native_sample_rate or 48000
+            next_sr = inventory.sources[next_span.source_content_id].native_sample_rate or 48000
+            # Read boundary slices: ~25ms before cut and ~35ms after cut
+            win_curr = int(round(0.025 * curr_sr))
+            win_next = int(round(0.035 * next_sr))
+
+            curr_en = span_ends[i]
+            next_st = span_starts[i + 1]
+
+            read_st_curr = max(0, curr_en - win_curr)
+            read_en_next = next_st + win_next
+
+            audio_curr, _ = sf.read(p_curr, start=read_st_curr, stop=curr_en)
+            audio_next, _ = sf.read(p_next, start=next_st, stop=read_en_next)
+
+            if len(audio_curr) < 16 or len(audio_next) < 16:
+                continue
+
+            is_unv = False
+            last_p = curr_span.realized_phones[-1].rstrip("012") if getattr(curr_span, "realized_phones", None) else ""
+            first_p = next_span.realized_phones[0].rstrip("012") if getattr(next_span, "realized_phones", None) else ""
+            if last_p in stop_fric or last_p == "sil" or first_p in stop_fric or first_p == "sil":
+                is_unv = True
+
+            shift_out, shift_in = refine_splice_boundary(
+                audio_curr, audio_next, sr=curr_sr, max_shift_ms=15.0, is_unvoiced=is_unv
+            )
+
+            # Apply shifts while respecting minimum segment lengths
+            min_len_curr = int(round(0.030 * curr_sr))
+            min_len_next = int(round(0.030 * next_sr))
+
+            if shift_out < 0 and (span_ends[i] + shift_out - span_starts[i]) >= min_len_curr:
+                span_ends[i] += shift_out
+            if shift_in > 0 and (span_ends[i + 1] - (span_starts[i + 1] + shift_in)) >= min_len_next:
+                span_starts[i + 1] += shift_in
+        except Exception:
+            continue
+
+    return span_starts, span_ends
 
 
 def build_edit_plan(
@@ -284,6 +422,7 @@ def build_edit_plan(
     pause_style: str = "freeze",
     release_tail_sec: float = 0.0,
     finalize: bool = True,
+    audio_track: str = "recombined",
 ) -> EditPlan:
     """
     Constructs an immutable, sample-accurate EditPlan from selected spans.
@@ -458,16 +597,23 @@ def build_edit_plan(
         current_output_sample = p_end
         return pause_seg
 
+    # Step 0: Plan-Time Boundary Refinement across native audio windows (mock-safe)
+    refined_starts, refined_ends = _refine_spans_in_native_audio(selected_spans, inventory, tail_sec)
+
     for i, span in enumerate(selected_spans):
         src_rec = inventory.sources[span.source_content_id]
         native_sr = src_rec.native_sample_rate
         next_span = selected_spans[i + 1] if i < len(selected_spans) - 1 else None
+
+        span_start = refined_starts[i]
+        span_nominal_end = refined_ends[i]
 
         # Determine if the next span is a natural continuation of this one
         is_cont = False
         if next_span is not None and span.source_content_id == next_span.source_content_id:
             if (
                 span.end_sample == next_span.start_sample
+                and span_nominal_end == refined_starts[i + 1]
                 and span.event_ids
                 and next_span.event_ids
                 and inventory.events.get(span.event_ids[-1]) is not None
@@ -476,10 +622,10 @@ def build_edit_plan(
                 is_cont = True
 
         tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec)
-        span_end = span.end_sample + tail
+        span_end = span_nominal_end + tail
 
         # Duration in native samples
-        native_duration = span_end - span.start_sample
+        native_duration = span_end - span_start
         # Resampled duration at project sample rate
         resampled_duration = int(round(float(native_duration) * project_sample_rate / float(native_sr)))
 
@@ -490,7 +636,7 @@ def build_edit_plan(
         start_frame = cumulative_frame_ceiling(seg_start_sample, project_sample_rate, video_fps)
         end_frame = cumulative_frame_ceiling(seg_end_sample, project_sample_rate, video_fps)
         frame_count = end_frame - start_frame  # may be 0 for very short clips
-        source_pts = samples_to_seconds(span.start_sample, native_sr)
+        source_pts = _source_sample_to_video_pts(span_start, src_rec)
 
         target_phones = [graph.nodes[nid].phone for nid in span.covered_nodes if nid < len(graph.nodes)]
 
@@ -513,7 +659,7 @@ def build_edit_plan(
             segment_index=seg_idx,
             source_content_id=span.source_content_id,
             speaker_id=span.speaker_id,
-            source_start_sample=span.start_sample,
+            source_start_sample=span_start,
             source_end_sample=span_end,
             output_start_sample=seg_start_sample,
             output_end_sample=seg_end_sample,
@@ -526,6 +672,8 @@ def build_edit_plan(
             video_frame_count=frame_count,
             video_source_pts_sec=source_pts,
             realized_phones=realized,
+            entry_variant_samples=getattr(span, "entry_variant_samples", 0),
+            exit_variant_samples=getattr(span, "exit_variant_samples", 0),
         )
         segments.append(seg)
         seg_idx += 1
@@ -657,7 +805,7 @@ def build_edit_plan(
     )
     plan.validate()
     if finalize:
-        finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"))
+        finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"), audio_track=audio_track)
     return plan
 
 
@@ -668,6 +816,7 @@ def finalize_edit_plan(
     target_i: float = -16.0,
     target_tp: float = -1.0,
     target_lra: float = 11.0,
+    audio_track: str = "recombined",
 ) -> EditPlan:
     """
     Freezes all DSP decisions into the EditPlan before rendering:
@@ -721,10 +870,15 @@ def finalize_edit_plan(
         src_rec = plan.sources.get(first_seg.source_content_id) if plan.sources else None
         src_path = None
         if src_rec:
-            if src_rec.cached_pcm_path and Path(src_rec.cached_pcm_path).exists():
-                src_path = src_rec.cached_pcm_path
-            elif src_rec.source_path and Path(src_rec.source_path).exists():
-                src_path = src_rec.source_path
+            # When audio_track is vocals or recombined, prefer vocal stem if available
+            if audio_track in ("vocals", "isolated", "recombined") and getattr(src_rec, "cached_vocal_pcm_path", None):
+                if Path(src_rec.cached_vocal_pcm_path).exists():
+                    src_path = src_rec.cached_vocal_pcm_path
+            if not src_path:
+                if src_rec.cached_pcm_path and Path(src_rec.cached_pcm_path).exists():
+                    src_path = src_rec.cached_pcm_path
+                elif src_rec.source_path and Path(src_rec.source_path).exists():
+                    src_path = src_rec.source_path
         elif first_seg.source_video_path and Path(first_seg.source_video_path).exists():
             src_path = first_seg.source_video_path
 
@@ -746,11 +900,12 @@ def finalize_edit_plan(
                     # Ranged read: long sources (whole movies) are never loaded entirely
                     chunk, _ = sf.read(str(src_path), start=st, stop=en) if en > st else (np.zeros(0), native_rate)
                     if native_rate != plan.project_sample_rate and len(chunk) > 0:
-                        import librosa
-                        if chunk.ndim > 1:
-                            chunk = librosa.resample(chunk, orig_sr=native_rate, target_sr=plan.project_sample_rate, axis=0)
-                        else:
-                            chunk = librosa.resample(chunk, orig_sr=native_rate, target_sr=plan.project_sample_rate)
+                        import math
+                        import scipy.signal
+                        g = math.gcd(int(plan.project_sample_rate), int(native_rate))
+                        up = int(plan.project_sample_rate // g)
+                        down = int(native_rate // g)
+                        chunk = scipy.signal.resample_poly(chunk, up, down, axis=0)
                     run_audio_chunks.append(chunk)
             except Exception:
                 pass
@@ -866,7 +1021,8 @@ def finalize_edit_plan(
             from video_assembler import render_master_pcm
             with tempfile.TemporaryDirectory(prefix="sm_loudness_analysis_") as tmp_d:
                 analysis_wav = Path(tmp_d) / "analysis_master.wav"
-                render_master_pcm(plan, str(analysis_wav), normalize_loudness=False)
+                effective_analysis_track = "vocals" if audio_track in ("both", "all") else audio_track
+                render_master_pcm(plan, str(analysis_wav), normalize_loudness=False, audio_track=effective_analysis_track)
                 if analysis_wav.exists() and analysis_wav.stat().st_size > 0:
                     cmd1 = [
                         "ffmpeg", "-nostats",

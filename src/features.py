@@ -372,6 +372,15 @@ class ContinuousFeatureExtractor:
         mfcc_slice = tracks["mfcc"][:, start_frame:end_frame]
         avg_mfcc = [float(x) for x in np.mean(mfcc_slice, axis=1)] if mfcc_slice.shape[1] > 0 else [0.0] * 13
 
+        if "delta_mfcc" in tracks and tracks["delta_mfcc"].shape[1] > start_frame:
+            delta_mfcc = [float(x) for x in tracks["delta_mfcc"][:, start_frame]]
+        elif mfcc_slice.shape[1] >= 2:
+            delta_mfcc = [float(x) for x in (mfcc_slice[:, -1] - mfcc_slice[:, 0])]
+        elif start_frame > 0 and start_frame < tracks["mfcc"].shape[1]:
+            delta_mfcc = [float(x) for x in (tracks["mfcc"][:, start_frame] - tracks["mfcc"][:, start_frame - 1])]
+        else:
+            delta_mfcc = [0.0] * 13
+
         rec = FeatureRecord(
             source_content_id=source_content_id,
             sample_rate=orig_sr,
@@ -383,6 +392,7 @@ class ContinuousFeatureExtractor:
             voicing_state=voicing_state,
             spectral_centroid=avg_centroid,
             mfcc_13=avg_mfcc,
+            delta_mfcc_13=delta_mfcc,
         )
         rec.validate()
         return rec
@@ -413,8 +423,10 @@ def get_phone_manner(phone: Optional[str]) -> str:
 def compute_manner_scale(exit_phone: Optional[str], entry_phone: Optional[str]) -> float:
     """
     Computes phonetic manner scaling for join costs (Fix P3.3).
-    Returns 1.0 for matching phones, vowel-to-vowel, or matching manner transitions.
-    Returns 0.25 when crossing natural phonetic manner jumps (e.g. stop/fricative into vowel).
+    Returns 1.0 for matching phones or matching manner transitions.
+    Returns 0.75 for continuous resonant transitions (vowel <-> sonorant).
+    Returns 0.50 for same-voicing stops/fricatives.
+    Returns 0.25 across natural phonetic manner jumps (e.g. stop/fricative into vowel).
     """
     if not exit_phone or not entry_phone:
         return 1.0
@@ -426,7 +438,9 @@ def compute_manner_scale(exit_phone: Optional[str], entry_phone: Optional[str]) 
     m2 = get_phone_manner(p2)
     if m1 == m2 and m1 != "unknown":
         return 1.0
-    # Natural phonetic manner jump (e.g. stop/fricative into vowel, vowel into stop/fricative)
+    if (m1 == "vowel" and m2 == "sonorant") or (m1 == "sonorant" and m2 == "vowel"):
+        return 0.75
+    # Natural phonetic manner jump (e.g. stop/fricative into vowel, vowel into stop/fricative, stop into fricative)
     return 0.25
 
 
@@ -442,7 +456,7 @@ def compute_join_cost(
     Computes acoustic concatenation cost between candidate exit and candidate entry.
     Natural original continuations receive zero join cost.
     Handles unvoiced F0 without fabricating 120 Hz.
-    Applies liftered Mahalanobis MFCC distance and phonetic manner scaling (Fix P3.3).
+    Applies liftered Mahalanobis MFCC distance, delta-MFCC slope, and phonetic manner scaling (Fix P3.3).
     """
     if is_natural_continuation:
         return 0.0
@@ -462,20 +476,35 @@ def compute_join_cost(
     energy_diff = abs(math.log(e1) - math.log(e2))
     cost += 0.15 * min(energy_diff, 3.0)
 
-    # 2. Spectral (MFCC) distance with liftered Mahalanobis weighting (Fix P3.3)
+    # 2. Spectral (MFCC) distance with liftered Mahalanobis weighting and delta-MFCC continuity (Fix P3.3)
     if feat_exit.mfcc_13 and feat_entry.mfcc_13:
-        m1 = np.array(feat_exit.mfcc_13[1:], dtype=float)  # drop C0 (energy)
-        m2 = np.array(feat_entry.mfcc_13[1:], dtype=float)
-        # Lifter weights w_k = 1 + 6 * sin(pi * k / 12) for k=1..12
-        weights = np.array([1.0 + 6.0 * math.sin(math.pi * k / 12.0) for k in range(1, 13)])
-        diff_weighted = (m1 - m2) * weights
-        norm1 = np.linalg.norm(m1 * weights)
-        norm2 = np.linalg.norm(m2 * weights)
-        dist = float(np.linalg.norm(diff_weighted) / (norm1 + norm2 + 1e-6))
-        cost += 0.5 * manner_scale * dist
+        k_len = min(len(feat_exit.mfcc_13) - 1, len(feat_entry.mfcc_13) - 1, 12)
+        if k_len > 0:
+            m1 = np.array(feat_exit.mfcc_13[1 : k_len + 1], dtype=float)  # drop C0 (energy)
+            m2 = np.array(feat_entry.mfcc_13[1 : k_len + 1], dtype=float)
+            # Lifter weights w_k = 1 + 6 * sin(pi * k / 12) for k=1..k_len
+            weights = np.array([1.0 + 6.0 * math.sin(math.pi * k / 12.0) for k in range(1, k_len + 1)])
+            diff_weighted = (m1 - m2) * weights
+            norm1 = np.linalg.norm(m1 * weights)
+            norm2 = np.linalg.norm(m2 * weights)
+            dist = float(np.linalg.norm(diff_weighted) / (norm1 + norm2 + 1e-6))
+
+            # Include delta-MFCC slope continuity if available
+            if feat_exit.delta_mfcc_13 and feat_entry.delta_mfcc_13:
+                d1 = np.array(feat_exit.delta_mfcc_13[1 : k_len + 1], dtype=float)
+                d2 = np.array(feat_entry.delta_mfcc_13[1 : k_len + 1], dtype=float)
+                d_dist = float(np.linalg.norm(d1 - d2) / (np.linalg.norm(d1) + np.linalg.norm(d2) + 1e-6))
+                dist = 0.7 * dist + 0.3 * d_dist
+
+            cost += 0.5 * manner_scale * dist
 
     # 3. Pitch (F0) continuity
-    if feat_exit.f0_hz is not None and feat_entry.f0_hz is not None:
+    if (
+        feat_exit.f0_hz is not None
+        and feat_entry.f0_hz is not None
+        and feat_exit.f0_hz > 0
+        and feat_entry.f0_hz > 0
+    ):
         # Both voiced: compare semitones with steep penalty for larger melodic jumps
         f1 = feat_exit.f0_hz
         f2 = feat_entry.f0_hz
@@ -485,7 +514,7 @@ def compute_join_cost(
         else:
             cost += 0.15 + 0.4 * min(semitone_diff - 2.0, 10.0)
     elif feat_exit.voicing_state != feat_entry.voicing_state:
-        # Transition between voiced and unvoiced: moderate transition penalty
-        cost += 0.25
+        # Transition between voiced and unvoiced: scaled by manner_scale
+        cost += 0.25 * manner_scale
 
     return cost

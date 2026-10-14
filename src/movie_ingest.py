@@ -378,20 +378,30 @@ def run_voice_checks(
             # Minor character (< MIN_CENTROID_SEGMENTS lines) evaluated against major-character centroids
             spk_lines = [rec for rec in named if rec.label == r.label]
             req_margin = min(threshold, MIN_CONFIDENT_MARGIN) if threshold is not None else MIN_CONFIDENT_MARGIN
-            spk_matches_best = [
-                rec for rec in spk_lines
-                if getattr(rec, "voice_best", None) == best
-                and getattr(rec, "voice_sim", 0.0) >= MIN_CONFIDENT_SIMILARITY
-                and getattr(rec, "voice_margin", 0.0) >= req_margin
-            ]
-            all_match = len(spk_matches_best) == len(spk_lines) and len(spk_lines) >= 1
-            strong = (
-                best != r.label
-                and threshold is not None
-                and best_sim >= MIN_CONFIDENT_SIMILARITY
-                and margin >= req_margin
-                and all_match
-            )
+
+            if len(spk_lines) <= 1:
+                strong = (
+                    best != r.label
+                    and threshold is not None
+                    and best_sim >= MIN_CONFIDENT_SIMILARITY
+                    and margin >= req_margin
+                )
+            else:
+                confident_matches = [
+                    getattr(rec, "voice_best", None)
+                    for rec in spk_lines
+                    if getattr(rec, "voice_sim", 0.0) >= MIN_CONFIDENT_SIMILARITY
+                    and getattr(rec, "voice_margin", 0.0) >= req_margin
+                ]
+                unanimous_major = len(confident_matches) == len(spk_lines) and len(set(confident_matches)) == 1 and confident_matches[0] == best
+
+                strong = (
+                    best != r.label
+                    and threshold is not None
+                    and best_sim >= MIN_CONFIDENT_SIMILARITY
+                    and margin >= req_margin
+                    and unanimous_major
+                )
         if strong:
             r.status = "voice_mismatch"
             r.eligible = False
@@ -848,6 +858,20 @@ def ensure_movie_aligned(
             pass
     if fps is None:
         fps = RationalTime.from_str(video.get("r_frame_rate", "24000/1001"))
+    pad_val = audio_stream.get("initial_padding") or audio_stream.get("start_pad") or 0
+    try:
+        codec_delay = int(pad_val)
+    except (ValueError, TypeError):
+        codec_delay = 0
+
+    def _safe_flt(val: Any) -> float:
+        if val is None or val == "N/A" or val == "":
+            return 0.0
+        try:
+            return float(val)
+        except Exception:
+            return 0.0
+
     src_rec = SourceRecord(
         content_id=source_id,
         source_path=str(v),
@@ -855,6 +879,9 @@ def ensure_movie_aligned(
         native_channels=2,
         selected_audio_stream=int(audio_stream.get("index", 1)),
         selected_video_stream=int(video.get("index", 0)),
+        decoded_audio_origin_sec=_safe_flt(audio_stream.get("start_time")),
+        decoded_video_origin_sec=_safe_flt(video.get("start_time")),
+        codec_delay_samples=codec_delay,
         video_fps=fps.to_dict(),
         video_duration_sec=audio.duration_sec,
         audio_duration_sec=audio.duration_sec,

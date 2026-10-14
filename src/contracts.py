@@ -230,6 +230,7 @@ class FeatureRecord:
     voicing_state: Literal["voiced", "unvoiced", "silence"]
     spectral_centroid: float
     mfcc_13: List[float] = field(default_factory=list)
+    delta_mfcc_13: List[float] = field(default_factory=list)
     wavlm_embedding_id: Optional[str] = None
     quality_flags: List[str] = field(default_factory=list)
 
@@ -335,6 +336,8 @@ class PlanSegment:
     video_source_pts_sec: float = 0.0
     freeze_video: bool = False
     realized_phones: List[str] = field(default_factory=list)
+    entry_variant_samples: int = 0
+    exit_variant_samples: int = 0
 
     @property
     def duration_samples(self) -> int:

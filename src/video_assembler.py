@@ -29,7 +29,6 @@ if sys.platform == "win32":
         pass
 
 from contracts import EditPlan, PlanSegment, RationalTime
-from edit_plan import refine_splice_boundary
 
 COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
 OUTPUT_RESOLUTIONS = {"1080p": (1920, 1080), "1440p": (2560, 1440), "4k": (3840, 2160), "2160p": (3840, 2160)}
@@ -611,37 +610,8 @@ def render_master_pcm(
                 prev_slice = segment_slices.get(trans.from_segment_index)
                 next_slice = segment_slices.get(trans.to_segment_index)
                 if prev_slice is not None and next_slice is not None:
-                    # Fix P2.1: Non-destructive Optimal Coupling and upward zero-crossing snapping
-                    is_unv = False
-                    stop_fric = ("P", "T", "K", "B", "D", "G", "S", "SH", "F", "TH", "CH")
-                    if from_seg.realized_phones:
-                        last_p = from_seg.realized_phones[-1].rstrip("012")
-                        if last_p in stop_fric or last_p == "sil":
-                            is_unv = True
-                    if to_seg.realized_phones:
-                        first_p = to_seg.realized_phones[0].rstrip("012")
-                        if first_p in stop_fric or first_p == "sil":
-                            is_unv = True
-
-                    margin = min(int(round(0.015 * sr)), max(0, len(next_slice) - fade_len))
-                    search_tail = prev_slice[-fade_len:]
-                    search_head = next_slice[:fade_len + margin] if margin > 0 else next_slice[:fade_len]
-                    _s_out, shift_in = refine_splice_boundary(
-                        search_tail, search_head, sr=sr, max_shift_ms=15.0, is_unvoiced=is_unv
-                    )
-
-                    # Outgoing crossfade slice is strictly anchored to the terminal window of prev_slice
-                    # (shift_out == 0) to ensure continuous sample playback across fade_start without step discontinuity.
                     p_tail = prev_slice[-fade_len:]
-
-                    # Incoming crossfade slice is aligned by shift_in
-                    head_idx_start = max(0, shift_in)
-                    head_idx_end = head_idx_start + fade_len
-                    if head_idx_end <= len(next_slice):
-                        n_head = next_slice[head_idx_start:head_idx_end]
-                    else:
-                        n_head = next_slice[:fade_len]
-                        head_idx_start = 0
+                    n_head = next_slice[:fade_len]
 
                     if is_stereo:
                         prev_tail = p_tail if len(p_tail) >= fade_len else np.pad(p_tail, ((fade_len - len(p_tail), 0), (0, 0)))
@@ -655,25 +625,6 @@ def render_master_pcm(
                         fade_out = fade_out[:, np.newaxis]
                         fade_in = fade_in[:, np.newaxis]
                     master_audio[fade_start:fade_end] = (prev_tail * fade_out) + (next_head * fade_in)
-
-                    # Ensure to_seg in master_audio maintains continuous playback after fade_end:
-                    # When shift_in > 0, update segment_slices and adjust master_audio after fade_end
-                    # so next_slice continues seamlessly from index shift_in + fade_len without step jump.
-                    if head_idx_start > 0:
-                        aligned_slice = next_slice[head_idx_start:]
-                        if len(aligned_slice) < len(next_slice):
-                            pad_len = len(next_slice) - len(aligned_slice)
-                            pad_spec = ((0, pad_len), (0, 0)) if is_stereo else (0, pad_len)
-                            aligned_slice = np.pad(aligned_slice, pad_spec, mode="edge")
-                        segment_slices[trans.to_segment_index] = aligned_slice
-
-                        needed_len = len(next_slice) - fade_len
-                        if needed_len > 0:
-                            end_update = min(total_samples, fade_end + needed_len)
-                            up_len = end_update - fade_end
-                            old_body = next_slice[fade_len : fade_len + up_len]
-                            new_body = aligned_slice[fade_len : fade_len + up_len]
-                            master_audio[fade_end:end_update] += (new_body - old_body)
 
     # Normalize audio to prevent clipping if summed overlaps peak (disabled in cuts-only mode)
     is_cuts_only = (getattr(plan, "rendering_mode", "source-derived") == "cuts-only")
@@ -706,11 +657,15 @@ def render_master_pcm(
         if silence_segs:
             data, out_sr = sf.read(str(out_wav), dtype="float32")
             ramp_len = int(round(0.003 * out_sr))
-            for sil_seg in silence_segs:
-                s_start = sil_seg.output_start_sample
-                s_end = sil_seg.output_end_sample
+            for idx_sil, sil_seg in enumerate(silence_segs):
+                s_start = max(0, min(len(data), sil_seg.output_start_sample))
+                s_end = max(0, min(len(data), sil_seg.output_end_sample))
+                if s_end <= s_start:
+                    continue  # Skip 0-sample <gap:0ms> markers so speech is not notched
+                prev_sil_end = silence_segs[idx_sil - 1].output_end_sample if idx_sil > 0 else 0
+                next_sil_start = silence_segs[idx_sil + 1].output_start_sample if idx_sil + 1 < len(silence_segs) else len(data)
                 if s_start > 0 and ramp_len > 0:
-                    r_start = max(0, s_start - ramp_len)
+                    r_start = max(0, prev_sil_end, s_start - ramp_len)
                     l_in = s_start - r_start
                     if l_in > 0:
                         fade = 0.5 * (1.0 + np.cos(np.linspace(0, np.pi, l_in, dtype=np.float32)))
@@ -719,7 +674,7 @@ def render_master_pcm(
                         data[r_start:s_start] *= fade
                 data[s_start:s_end] = 0.0
                 if s_end < len(data) and ramp_len > 0:
-                    r_end = min(len(data), s_end + ramp_len)
+                    r_end = min(len(data), next_sil_start, s_end + ramp_len)
                     l_out = r_end - s_end
                     if l_out > 0:
                         fade = 0.5 * (1.0 - np.cos(np.linspace(0, np.pi, l_out, dtype=np.float32)))
@@ -972,9 +927,11 @@ def render_sentence_mix(
                 input_args: List[str] = []
                 filter_chains: List[str] = []
                 out_labels: List[str] = []
-                source_input_map: Dict[str, int] = {}
                 current_in_idx = 0
                 can_batch = True
+
+                holds_dir = temp_dir / "holds"
+                holds_dir.mkdir(parents=True, exist_ok=True)
 
                 for k, (idx, seg) in enumerate(active_segments):
                     frame_count = seg.video_frame_count
@@ -987,8 +944,6 @@ def render_sentence_mix(
                     )
 
                     if is_freeze:
-                        holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
-                        holds_dir.mkdir(parents=True, exist_ok=True)
                         freeze_img = holds_dir / f"hold_{idx:04d}.png"
                         extracted = False
                         if freeze_img.exists() and freeze_img.stat().st_size > 0:
@@ -1013,18 +968,15 @@ def render_sentence_mix(
                         out_labels.append(f"[v{k}]")
                         current_in_idx += 1
                     elif has_valid_source:
-                        src_str = str(Path(seg.source_video_path).resolve())
-                        if src_str not in source_input_map:
-                            source_input_map[src_str] = current_in_idx
-                            input_args.extend(["-i", str(seg.source_video_path)])
-                            current_in_idx += 1
-                        s_idx = source_input_map[src_str]
                         start_pts = seg.video_source_pts_sec
+                        # Dedicated per-cut seek input to prevent memory buffer queue overflow in FFmpeg
+                        input_args.extend(["-ss", f"{start_pts:.6f}", "-t", f"{dur_sec + 0.25:.6f}", "-i", str(seg.source_video_path)])
                         filter_chains.append(
-                            f"[{s_idx}:v]trim=start={start_pts:.6f}:duration={dur_sec:.6f},"
-                            f"setpts=PTS-STARTPTS,fps={fps_str},{scale_pad},format=yuv420p[v{k}]"
+                            f"[{current_in_idx}:v]fps={fps_str},trim=end_frame={frame_count},"
+                            f"setpts=PTS-STARTPTS,{scale_pad},format=yuv420p[v{k}]"
                         )
                         out_labels.append(f"[v{k}]")
+                        current_in_idx += 1
                     else:
                         is_audio_only = (
                             not seg.source_video_path
@@ -1056,7 +1008,7 @@ def render_sentence_mix(
                         "-an",
                         str(temp_concat_video),
                     ]
-                    res_batch = subprocess.run(cmd_batch, capture_output=True)
+                    res_batch = subprocess.run(cmd_batch, capture_output=True, timeout=300)
                     if res_batch.returncode == 0 and temp_concat_video.exists() and temp_concat_video.stat().st_size > 0:
                         batched_success = True
             except Exception:
@@ -1064,6 +1016,8 @@ def render_sentence_mix(
 
         if not batched_success:
             print(f"[*] Cutting {len(plan.segments)} CFR video slices (-crf 18) to {to_file_uri(temp_dir)}...")
+            holds_dir = temp_dir / "holds"
+            holds_dir.mkdir(parents=True, exist_ok=True)
             for idx, seg in enumerate(plan.segments):
                 slice_mp4 = temp_dir / f"slice_{idx:04d}.mp4"
                 frame_count = seg.video_frame_count
@@ -1075,8 +1029,6 @@ def render_sentence_mix(
                 # Check if this segment is a pause/freeze-frame cut
                 is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
                 if is_freeze:
-                    holds_dir = out_mp4.parent / f"{out_mp4.stem}_holds"
-                    holds_dir.mkdir(parents=True, exist_ok=True)
                     freeze_img = holds_dir / f"hold_{idx:04d}.png"
                     extracted = False
 

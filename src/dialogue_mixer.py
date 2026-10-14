@@ -91,6 +91,7 @@ def concat_edit_plans(
             p_end = p_start + pause_samples
             p_start_frame = cumulative_frame_ceiling(p_start, sr, fps)
             p_end_frame = cumulative_frame_ceiling(p_end, sr, fps)
+            freeze_pts = prev_seg.video_source_pts_sec + (float(prev_seg.duration_samples) / float(sr))
             pause_seg = PlanSegment(
                 segment_index=seg_idx,
                 source_content_id="silence",
@@ -108,8 +109,8 @@ def concat_edit_plans(
                 fade_out_samples=0,
                 is_silence=True,
                 video_start_frame=p_start_frame,
-                video_frame_count=max(1, p_end_frame - p_start_frame),
-                video_source_pts_sec=prev_seg.video_source_pts_sec,
+                video_frame_count=max(0, p_end_frame - p_start_frame),
+                video_source_pts_sec=freeze_pts,
                 freeze_video=True,
                 realized_phones=[],
             )
@@ -118,7 +119,7 @@ def concat_edit_plans(
                 transition_index=trans_idx,
                 from_segment_index=prev_seg.segment_index,
                 to_segment_index=seg_idx,
-                transition_type="continuation",
+                transition_type="pause",
                 overlap_samples=0,
             ))
             seg_idx += 1
@@ -236,15 +237,19 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
     curr_t0 = 0.0
     curr_t1 = 0.0
 
+    prev_span_type = ""
     for s in plan.segments:
         if s.is_silence or s.span_type == "pause":
             if curr_word:
                 words.append((curr_word, time_offset_sec + curr_t0, time_offset_sec + curr_t1))
                 curr_word = None
+            prev_span_type = s.span_type
             continue
         lbl = s.target_text.strip()
         t0 = s.output_start_sample / float(plan.project_sample_rate)
         t1 = s.output_end_sample / float(plan.project_sample_rate)
+
+        can_merge = (s.span_type in ("subword", "phone")) and (prev_span_type in ("subword", "phone"))
 
         if " " in lbl:
             if curr_word:
@@ -254,7 +259,7 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
             dur_per = (t1 - t0) / max(1, len(subwords))
             for idx, sw in enumerate(subwords):
                 words.append((sw, time_offset_sec + t0 + idx * dur_per, time_offset_sec + t0 + (idx + 1) * dur_per))
-        elif lbl == curr_word:
+        elif lbl == curr_word and can_merge:
             curr_t1 = max(curr_t1, t1)
         else:
             if curr_word:
@@ -262,6 +267,7 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
             curr_word = lbl
             curr_t0 = t0
             curr_t1 = t1
+        prev_span_type = s.span_type
 
     if curr_word:
         words.append((curr_word, time_offset_sec + curr_t0, time_offset_sec + curr_t1))
@@ -553,56 +559,65 @@ def synthesize_and_render_dialogue(
 
     # Combine plans into one master timeline
     combined_plan = concat_edit_plans(plans, pause_between_sec=pause_between_sec)
-    finalize_edit_plan(combined_plan, inventory_index, normalize_loudness=True)
+    finalize_edit_plan(combined_plan, inventory_index, normalize_loudness=True, audio_track=audio_track)
     print(f"[+] Combined EditPlan created: {len(combined_plan.segments)} segments, duration: {combined_plan.total_output_samples/48000:.2f}s")
 
     # Staged rendering
     attempt_dir = output_video_path.parent / f".attempt_{uuid.uuid4().hex}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_mp4 = attempt_dir / f"{output_video_path.stem}_raw.mp4"
-    plan_json = attempt_dir / f"{output_video_path.stem}.plan.json"
-    combined_plan.save(str(plan_json))
+    import shutil
+    try:
+        raw_mp4 = attempt_dir / f"{output_video_path.stem}_raw.mp4"
+        plan_json = attempt_dir / f"{output_video_path.stem}.plan.json"
+        combined_plan.save(str(plan_json))
 
-    print(f"[*] Rendering master video ({audio_track} audio, {resolution or 'source'})...")
-    render_sentence_mix(
-        combined_plan,
-        str(raw_mp4),
-        normalize_loudness=True,
-        audio_track=audio_track,
-        output_resolution=resolution,
-    )
-
-    final_delivery = raw_mp4
-    if burn_subtitles:
-        ass_path = attempt_dir / f"{output_video_path.stem}.ass"
-        generate_highlighted_ass_subtitles(
-            turn_infos,
-            ass_path,
-            speaker_colors=speaker_colors,
-            default_highlight_color=default_highlight_color,
+        print(f"[*] Rendering master video ({audio_track} audio, {resolution or 'source'})...")
+        render_sentence_mix(
+            combined_plan,
+            str(raw_mp4),
+            normalize_loudness=True,
+            audio_track=audio_track,
+            output_resolution=resolution,
         )
 
-        burned_mp4 = attempt_dir / output_video_path.name
-        sub_escaped = str(ass_path.resolve()).replace("\\", "/").replace(":", r"\:")
-        vf = f"subtitles='{sub_escaped}'"
-        print("[*] Burning word-highlighted subtitles via FFmpeg...")
-        cmd = [
-            "ffmpeg", "-y", "-nostats", "-loglevel", "error",
-            "-i", str(raw_mp4),
-            "-vf", vf,
-            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-            "-c:a", "copy",
-            str(burned_mp4),
-        ]
-        subprocess.run(cmd, check=True)
-        final_delivery = burned_mp4
+        final_delivery = raw_mp4
+        if burn_subtitles:
+            ass_path = attempt_dir / f"{output_video_path.stem}.ass"
+            generate_highlighted_ass_subtitles(
+                turn_infos,
+                ass_path,
+                speaker_colors=speaker_colors,
+                default_highlight_color=default_highlight_color,
+            )
 
-    output_video_path.parent.mkdir(parents=True, exist_ok=True)
-    import shutil
-    shutil.move(str(final_delivery), str(output_video_path))
-    shutil.copy(str(plan_json), str(output_video_path.with_suffix(".plan.json")))
-    shutil.rmtree(attempt_dir, ignore_errors=True)
+            burned_mp4 = attempt_dir / output_video_path.name
+            sub_escaped = str(ass_path.resolve()).replace("\\", "/").replace(":", r"\:")
+            vf = f"subtitles='{sub_escaped}'"
+            print("[*] Burning word-highlighted subtitles via FFmpeg...")
+            cmd = [
+                "ffmpeg", "-y", "-nostats", "-loglevel", "error",
+                "-i", str(raw_mp4),
+                "-vf", vf,
+                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                "-c:a", "copy",
+                str(burned_mp4),
+            ]
+            subprocess.run(cmd, check=True)
+            final_delivery = burned_mp4
+
+        output_video_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(final_delivery), str(output_video_path))
+        shutil.copy(str(plan_json), str(output_video_path.with_suffix(".plan.json")))
+        raw_wav = raw_mp4.with_suffix(".wav")
+        if raw_wav.exists():
+            shutil.copy(str(raw_wav), str(output_video_path.with_suffix(".wav")))
+        if burn_subtitles:
+            ass_src = attempt_dir / f"{output_video_path.stem}.ass"
+            if ass_src.exists():
+                shutil.copy(str(ass_src), str(output_video_path.with_suffix(".ass")))
+    finally:
+        shutil.rmtree(attempt_dir, ignore_errors=True)
 
     print(f"[+] Successfully generated dialogue clip: {output_video_path} ({output_video_path.stat().st_size} bytes)")
     return output_video_path

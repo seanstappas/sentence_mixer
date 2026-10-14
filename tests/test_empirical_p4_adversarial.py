@@ -4,19 +4,18 @@ Focuses on edge cases, mathematical limits, corruption handling, and algorithmic
 """
 
 import json
-import math
 import subprocess
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from contracts import RationalTime, SourceRecord, EditPlan, PlanSegment, EDIT_PLAN_SCHEMA_VERSION
+from contracts import EDIT_PLAN_SCHEMA_VERSION, EditPlan, PlanSegment, RationalTime
 from media_time import extract_source_record
-from movie_ingest import run_voice_checks, SegmentRecord, MIN_CONFIDENT_SIMILARITY
+from movie_ingest import SegmentRecord, run_voice_checks
 from diarization import SpeakerDiarizer
 from speaker_registry import SpeakerRegistry
 
@@ -259,7 +258,7 @@ def test_movie_voice_checks_minor_character_variations():
     dr_line = add_line("droid", np.array([0.0, 0.0, 0.0, 1.0] + [0.0]*12))
 
     embedder = _MockEmbedder(vectors)
-    stats = run_voice_checks(records, embedder, log=lambda m: None)
+    _stats = run_voice_checks(records, embedder, log=lambda m: None)
 
     # 1. Single line officer matching vader is flagged as voice_mismatch
     assert off_line.voice_best == "vader"
@@ -326,7 +325,7 @@ def test_movie_voice_checks_empty_or_single_centroid():
     records.append(r_minor)
     vectors[20.0] = c_solo + 0.01 * rng.normal(size=16)
 
-    stats_b = run_voice_checks(records, _MockEmbedder(vectors), log=lambda m: None)
+    _stats_b = run_voice_checks(records, _MockEmbedder(vectors), log=lambda m: None)
     # With only 1 centroid, ranked has len == 1, second == -1.0, margin = best_sim - (-1.0)
     assert r_minor.voice_best == "solo"
     assert r_minor.voice_margin > 1.0
@@ -378,6 +377,7 @@ Multichannel cue
                 output_corpus_dir=str(out_corpus),
             )
             manifest = json.loads(Path(manifest_str).read_text(encoding="utf-8"))
+            assert manifest["source_video"] == str(audio_file)
             chunk_wav = out_corpus / "chunk_0000.wav"
             assert chunk_wav.exists()
 
