@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 import re
 import subprocess
 import tempfile
@@ -40,7 +41,12 @@ CONTINUE_MIN_SEC = 0.080
 CONTINUE_SPEECH_DROP_DB = 12.0
 
 
-def release_tail_samples(span: SpanCandidate, inventory: InventoryIndex, tail_sec: float) -> int:
+def release_tail_samples(
+    span: SpanCandidate,
+    inventory: InventoryIndex,
+    tail_sec: float,
+    nominal_end: Optional[int] = None,
+) -> int:
     """
     Native samples to extend a cut past its last aligned phone when that phone is followed
     by aligned silence. Forced alignment tends to end word-final consonants (f, s, th, t)
@@ -50,14 +56,15 @@ def release_tail_samples(span: SpanCandidate, inventory: InventoryIndex, tail_se
     if tail_sec <= 0 or not span.event_ids:
         return 0
     last = inventory.events.get(span.event_ids[-1])
-    if last is None or last.kind != "phone" or span.end_sample < last.end_sample - 1:
+    end_s = nominal_end if nominal_end is not None else span.end_sample
+    if last is None or last.kind != "phone" or end_s < last.end_sample - 1:
         return 0
     succ = inventory.events.get(last.successor_id) if last.successor_id else None
     if succ is None or succ.kind != "silence":
         return 0
     src = inventory.sources.get(span.source_content_id)
     sr = src.native_sample_rate if src and src.native_sample_rate else 48000
-    room = succ.end_sample - max(succ.start_sample, span.end_sample) - int(round(RELEASE_GUARD_SEC * sr))
+    room = succ.end_sample - max(succ.start_sample, end_s) - int(round(RELEASE_GUARD_SEC * sr))
     return max(0, min(int(round(tail_sec * sr)), room))
 
 
@@ -299,6 +306,9 @@ def _refine_spans_in_native_audio(
     selected_spans: List[SpanCandidate],
     inventory: InventoryIndex,
     tail_sec: float = 0.0,
+    graph: Optional[TargetGraph] = None,
+    rendering_mode: str = "source-derived",
+    overlap_duration_ms: float = 14.0,
 ) -> Tuple[List[int], List[int]]:
     """
     Refines boundary sample offsets in native source audio prior to EditPlan construction.
@@ -338,19 +348,52 @@ def _refine_spans_in_native_audio(
         if i > 0:
             pred = selected_spans[i - 1]
             if pred.source_content_id == span.source_content_id and pred.end_sample == span.start_sample:
-                is_cont_pred = True
+                if not (pred.event_ids and span.event_ids):
+                    is_cont_pred = True
+                else:
+                    p_last_ev = inventory.events.get(pred.event_ids[-1])
+                    s_first_ev = inventory.events.get(span.event_ids[0])
+                    if p_last_ev and s_first_ev and p_last_ev.successor_id == s_first_ev.event_id:
+                        is_cont_pred = True
 
         is_cont_succ = False
         if i < len(selected_spans) - 1:
             succ = selected_spans[i + 1]
             if succ.source_content_id == span.source_content_id and span.end_sample == succ.start_sample:
-                is_cont_succ = True
+                if not (span.event_ids and succ.event_ids):
+                    is_cont_succ = True
+                else:
+                    c_last_ev = inventory.events.get(span.event_ids[-1])
+                    s_first_ev = inventory.events.get(succ.event_ids[0])
+                    if c_last_ev and s_first_ev and c_last_ev.successor_id == s_first_ev.event_id:
+                        is_cont_succ = True
 
         new_st = span_starts[i] + (entry_v if not is_cont_pred else 0)
         new_en = span_ends[i] - (exit_v if not is_cont_succ else 0)
         if new_en - new_st >= min_len:
             span_starts[i] = new_st
             span_ends[i] = new_en
+
+    # Refine outer utterance leading edge (span_starts[0]) to upward zero-crossing
+    first_span = selected_spans[0]
+    p_first = src_paths.get(first_span.source_content_id)
+    if p_first:
+        try:
+            first_sr = inventory.sources[first_span.source_content_id].native_sample_rate or 48000
+            st_0 = span_starts[0]
+            info_first = sf.info(p_first)
+            en_0 = min(info_first.frames, span_ends[0], st_0 + int(round(0.025 * first_sr)))
+            if en_0 > st_0:
+                head_audio, _ = sf.read(p_first, start=st_0, stop=en_0)
+                if len(head_audio) >= 16:
+                    _, shift_head = refine_splice_boundary(
+                        np.zeros(len(head_audio), dtype=np.float32), head_audio, sr=first_sr, max_shift_ms=2.0, is_unvoiced=True
+                    )
+                    min_len_0 = int(round(0.030 * first_sr))
+                    if shift_head > 0 and (span_ends[0] - (span_starts[0] + shift_head)) >= min_len_0:
+                        span_starts[0] += shift_head
+        except Exception:
+            pass
 
     # Perform boundary refinement between adjacent cuts
     stop_fric = ("P", "T", "K", "B", "D", "G", "S", "SH", "F", "TH", "CH")
@@ -360,7 +403,12 @@ def _refine_spans_in_native_audio(
 
         # Natural continuations require no boundary modification
         if curr_span.source_content_id == next_span.source_content_id and span_ends[i] == span_starts[i + 1]:
-            continue
+            if not (curr_span.event_ids and next_span.event_ids):
+                continue
+            c_ev = inventory.events.get(curr_span.event_ids[-1])
+            n_ev = inventory.events.get(next_span.event_ids[0])
+            if c_ev and n_ev and c_ev.successor_id == n_ev.event_id:
+                continue
 
         p_curr = src_paths.get(curr_span.source_content_id)
         p_next = src_paths.get(next_span.source_content_id)
@@ -370,15 +418,43 @@ def _refine_spans_in_native_audio(
         try:
             curr_sr = inventory.sources[curr_span.source_content_id].native_sample_rate or 48000
             next_sr = inventory.sources[next_span.source_content_id].native_sample_rate or 48000
-            # Read boundary slices: ~25ms before cut and ~35ms after cut
-            win_curr = int(round(0.025 * curr_sr))
-            win_next = int(round(0.035 * next_sr))
+
+            # Detect whether this boundary is a pause or cuts-only splice
+            has_pause = False
+            if graph and hasattr(graph, "nodes") and curr_span.covered_nodes and next_span.covered_nodes:
+                c_last_node = graph.nodes[curr_span.covered_nodes[-1]]
+                n_first_node = graph.nodes[next_span.covered_nodes[0]]
+                if c_last_node.token_index != n_first_node.token_index and c_last_node.is_word_final:
+                    explicit = c_last_node.token_index in getattr(graph, "explicit_gaps", {})
+                    p_pause = graph.punctuation_pauses.get(c_last_node.token_index, 0.0)
+                    if explicit or p_pause > 0.0:
+                        has_pause = True
+
+            # If separated by pause or rendering cuts-only, use unvoiced zero-crossing snaps on both edges
+            is_unv = (rendering_mode == "cuts-only") or has_pause
+            if not is_unv:
+                last_p = curr_span.realized_phones[-1].rstrip("012") if getattr(curr_span, "realized_phones", None) else ""
+                first_p = next_span.realized_phones[0].rstrip("012") if getattr(next_span, "realized_phones", None) else ""
+                if not last_p and graph and curr_span.covered_nodes and curr_span.covered_nodes[-1] < len(graph.nodes):
+                    last_p = getattr(graph.nodes[curr_span.covered_nodes[-1]], "base_phone", "") or graph.nodes[curr_span.covered_nodes[-1]].phone.rstrip("012")
+                if not first_p and graph and next_span.covered_nodes and next_span.covered_nodes[0] < len(graph.nodes):
+                    first_p = getattr(graph.nodes[next_span.covered_nodes[0]], "base_phone", "") or graph.nodes[next_span.covered_nodes[0]].phone.rstrip("012")
+                if last_p in stop_fric or last_p == "sil" or first_p in stop_fric or first_p == "sil":
+                    is_unv = True
+
+            # Window lengths: align evaluation window to crossfade duration + lag range
+            win_curr = int(round(max(0.016, (overlap_duration_ms + 2.0) / 1000.0) * curr_sr))
+            win_next = int(round(max(0.029, (overlap_duration_ms + 15.0) / 1000.0) * next_sr))
 
             curr_en = span_ends[i]
             next_st = span_starts[i + 1]
 
-            read_st_curr = max(0, curr_en - win_curr)
-            read_en_next = next_st + win_next
+            info_next = sf.info(p_next)
+            read_st_curr = max(span_starts[i], curr_en - win_curr)
+            read_en_next = min(info_next.frames, span_ends[i + 1], next_st + win_next)
+
+            if curr_en <= read_st_curr or read_en_next <= next_st:
+                continue
 
             audio_curr, _ = sf.read(p_curr, start=read_st_curr, stop=curr_en)
             audio_next, _ = sf.read(p_next, start=next_st, stop=read_en_next)
@@ -386,15 +462,19 @@ def _refine_spans_in_native_audio(
             if len(audio_curr) < 16 or len(audio_next) < 16:
                 continue
 
-            is_unv = False
-            last_p = curr_span.realized_phones[-1].rstrip("012") if getattr(curr_span, "realized_phones", None) else ""
-            first_p = next_span.realized_phones[0].rstrip("012") if getattr(next_span, "realized_phones", None) else ""
-            if last_p in stop_fric or last_p == "sil" or first_p in stop_fric or first_p == "sil":
-                is_unv = True
-
-            shift_out, shift_in = refine_splice_boundary(
-                audio_curr, audio_next, sr=curr_sr, max_shift_ms=15.0, is_unvoiced=is_unv
-            )
+            # Resample audio_next if native sample rates differ
+            if curr_sr != next_sr:
+                import scipy.signal
+                g_sr = math.gcd(curr_sr, next_sr)
+                audio_next_resampled = scipy.signal.resample_poly(audio_next, curr_sr // g_sr, next_sr // g_sr, axis=0)
+                shift_out, shift_in_resampled = refine_splice_boundary(
+                    audio_curr, audio_next_resampled, sr=curr_sr, max_shift_ms=15.0, is_unvoiced=is_unv
+                )
+                shift_in = int(round(shift_in_resampled * float(next_sr) / float(curr_sr)))
+            else:
+                shift_out, shift_in = refine_splice_boundary(
+                    audio_curr, audio_next, sr=curr_sr, max_shift_ms=15.0, is_unvoiced=is_unv
+                )
 
             # Apply shifts while respecting minimum segment lengths
             min_len_curr = int(round(0.030 * curr_sr))
@@ -406,6 +486,26 @@ def _refine_spans_in_native_audio(
                 span_starts[i + 1] += shift_in
         except Exception:
             continue
+
+    # Refine outer utterance trailing edge (span_ends[-1]) to upward zero-crossing
+    last_span = selected_spans[-1]
+    p_last = src_paths.get(last_span.source_content_id)
+    if p_last:
+        try:
+            last_sr = inventory.sources[last_span.source_content_id].native_sample_rate or 48000
+            en_last = span_ends[-1]
+            st_last = max(span_starts[-1], en_last - int(round(0.025 * last_sr)))
+            if en_last > st_last:
+                tail_audio, _ = sf.read(p_last, start=st_last, stop=en_last)
+                if len(tail_audio) >= 16:
+                    shift_tail, _ = refine_splice_boundary(
+                        tail_audio, np.zeros(len(tail_audio), dtype=np.float32), sr=last_sr, max_shift_ms=2.0, is_unvoiced=True
+                    )
+                    min_len_last = int(round(0.030 * last_sr))
+                    if shift_tail < 0 and (span_ends[-1] + shift_tail - span_starts[-1]) >= min_len_last:
+                        span_ends[-1] += shift_tail
+        except Exception:
+            pass
 
     return span_starts, span_ends
 
@@ -450,6 +550,18 @@ def build_edit_plan(
 
     seg_idx = 0
 
+    tail_sec = release_tail_sec if rendering_mode != "cuts-only" else 0.0
+
+    # Step 0: Plan-Time Boundary Refinement across native audio windows (mock-safe)
+    refined_starts, refined_ends = _refine_spans_in_native_audio(
+        selected_spans,
+        inventory,
+        tail_sec=tail_sec,
+        graph=graph,
+        rendering_mode=rendering_mode,
+        overlap_duration_ms=overlap_duration_ms,
+    )
+
     # Check for leading gap (boundary index -1)
     leading_gap = getattr(graph, "explicit_gaps", {}).get(-1, lead_in_sec)
     if leading_gap > 0.0 and selected_spans:
@@ -461,7 +573,7 @@ def build_edit_plan(
 
         p_start_frame = cumulative_frame_ceiling(p_start, project_sample_rate, video_fps)
         p_end_frame = cumulative_frame_ceiling(p_end, project_sample_rate, video_fps)
-        p_source_pts = samples_to_seconds(first_span.start_sample, first_src_rec.native_sample_rate)
+        p_source_pts = _source_sample_to_video_pts(refined_starts[0], first_src_rec)
 
         pause_seg = PlanSegment(
             segment_index=seg_idx,
@@ -494,7 +606,6 @@ def build_edit_plan(
         ))
 
     speech_index: Optional[_SpeechIndex] = None
-    tail_sec = release_tail_sec if rendering_mode != "cuts-only" else 0.0
     end_fade = int(round(SEGMENT_END_FADE_SEC * project_sample_rate))
 
     def pause_seconds(token_index: int) -> float:
@@ -510,9 +621,15 @@ def build_edit_plan(
         nonlocal seg_idx, current_output_sample, speech_index
         pause_samples = int(round(pause_sec * project_sample_rate))
         last_seg = prev_seg
-        freeze_pts = prev_seg.video_source_pts_sec + float(prev_seg.duration_samples) / float(project_sample_rate)
 
         src_rec = inventory.sources.get(prev_seg.source_content_id)
+        if prev_seg.is_silence:
+            freeze_pts = prev_seg.video_source_pts_sec
+        elif src_rec is not None:
+            freeze_pts = _source_sample_to_video_pts(prev_seg.source_end_sample, src_rec)
+        else:
+            freeze_pts = prev_seg.video_source_pts_sec + (float(prev_seg.duration_samples) / float(project_sample_rate))
+
         if pause_style == "continue" and not explicit and not prev_seg.is_silence and src_rec is not None:
             sr = src_rec.native_sample_rate or project_sample_rate
             want = int(round(pause_sec * sr))
@@ -545,7 +662,7 @@ def build_edit_plan(
                     fade_out_samples=min(end_fade, cont_proj),
                     video_start_frame=cumulative_frame_ceiling(c_start, project_sample_rate, video_fps),
                     video_frame_count=0,
-                    video_source_pts_sec=samples_to_seconds(start, sr),
+                    video_source_pts_sec=_source_sample_to_video_pts(start, src_rec),
                 )
                 segments.append(c_seg)
                 transitions.append(PlanTransition(
@@ -559,7 +676,7 @@ def build_edit_plan(
                 current_output_sample = c_end
                 last_seg = c_seg
                 pause_samples = max(0, pause_samples - cont_proj)
-                freeze_pts = samples_to_seconds(start + cont, sr)
+                freeze_pts = _source_sample_to_video_pts(start + cont, src_rec)
 
         if pause_samples <= 0 and last_seg is not prev_seg:
             return last_seg
@@ -597,9 +714,6 @@ def build_edit_plan(
         current_output_sample = p_end
         return pause_seg
 
-    # Step 0: Plan-Time Boundary Refinement across native audio windows (mock-safe)
-    refined_starts, refined_ends = _refine_spans_in_native_audio(selected_spans, inventory, tail_sec)
-
     for i, span in enumerate(selected_spans):
         src_rec = inventory.sources[span.source_content_id]
         native_sr = src_rec.native_sample_rate
@@ -611,17 +725,16 @@ def build_edit_plan(
         # Determine if the next span is a natural continuation of this one
         is_cont = False
         if next_span is not None and span.source_content_id == next_span.source_content_id:
-            if (
-                span.end_sample == next_span.start_sample
-                and span_nominal_end == refined_starts[i + 1]
-                and span.event_ids
-                and next_span.event_ids
-                and inventory.events.get(span.event_ids[-1]) is not None
-                and inventory.events[span.event_ids[-1]].successor_id == next_span.event_ids[0]
-            ):
-                is_cont = True
+            if span.end_sample == next_span.start_sample and span_nominal_end == refined_starts[i + 1]:
+                if not (span.event_ids and next_span.event_ids):
+                    is_cont = True
+                else:
+                    last_ev = inventory.events.get(span.event_ids[-1])
+                    first_ev = inventory.events.get(next_span.event_ids[0])
+                    if last_ev and first_ev and last_ev.successor_id == first_ev.event_id:
+                        is_cont = True
 
-        tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec)
+        tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec, nominal_end=span_nominal_end)
         span_end = span_nominal_end + tail
 
         # Duration in native samples
@@ -715,7 +828,7 @@ def build_edit_plan(
                     if rendering_mode == "source-derived":
                         next_src_rec = inventory.sources.get(next_span.source_content_id)
                         next_sr = next_src_rec.native_sample_rate if next_src_rec and next_src_rec.native_sample_rate > 0 else project_sample_rate
-                        next_resampled_dur = int(round(float(next_span.end_sample - next_span.start_sample) * project_sample_rate / float(next_sr)))
+                        next_resampled_dur = int(round(float(refined_ends[i + 1] - refined_starts[i + 1]) * project_sample_rate / float(next_sr)))
                         max_overlap = min(resampled_duration // 5, next_resampled_dur // 5)
                         overlap = min(overlap_samples_const, max_overlap)
                         current_output_sample -= overlap
@@ -870,8 +983,9 @@ def finalize_edit_plan(
         src_rec = plan.sources.get(first_seg.source_content_id) if plan.sources else None
         src_path = None
         if src_rec:
-            # When audio_track is vocals or recombined, prefer vocal stem if available
-            if audio_track in ("vocals", "isolated", "recombined") and getattr(src_rec, "cached_vocal_pcm_path", None):
+            # When audio_track is vocals, recombined, both, or all, prefer vocal stem if available
+            effective_rms_track = "vocals" if audio_track in ("both", "all") else audio_track
+            if effective_rms_track in ("vocals", "isolated", "recombined") and getattr(src_rec, "cached_vocal_pcm_path", None):
                 if Path(src_rec.cached_vocal_pcm_path).exists():
                     src_path = src_rec.cached_vocal_pcm_path
             if not src_path:

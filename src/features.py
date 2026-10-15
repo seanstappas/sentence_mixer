@@ -491,10 +491,12 @@ def compute_join_cost(
 
             # Include delta-MFCC slope continuity if available
             if feat_exit.delta_mfcc_13 and feat_entry.delta_mfcc_13:
-                d1 = np.array(feat_exit.delta_mfcc_13[1 : k_len + 1], dtype=float)
-                d2 = np.array(feat_entry.delta_mfcc_13[1 : k_len + 1], dtype=float)
-                d_dist = float(np.linalg.norm(d1 - d2) / (np.linalg.norm(d1) + np.linalg.norm(d2) + 1e-6))
-                dist = 0.7 * dist + 0.3 * d_dist
+                k_delta = min(len(feat_exit.delta_mfcc_13) - 1, len(feat_entry.delta_mfcc_13) - 1, k_len)
+                if k_delta > 0:
+                    d1 = np.array(feat_exit.delta_mfcc_13[1 : k_delta + 1], dtype=float)
+                    d2 = np.array(feat_entry.delta_mfcc_13[1 : k_delta + 1], dtype=float)
+                    d_dist = float(np.linalg.norm(d1 - d2) / (np.linalg.norm(d1) + np.linalg.norm(d2) + 1e-6))
+                    dist = 0.7 * dist + 0.3 * d_dist
 
             cost += 0.5 * manner_scale * dist
 

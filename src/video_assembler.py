@@ -827,7 +827,7 @@ def render_sentence_mix_legacy(
         metadata=metadata,
     )
     from edit_plan import finalize_edit_plan
-    finalize_edit_plan(plan, normalize_loudness=normalize_loudness)
+    finalize_edit_plan(plan, normalize_loudness=normalize_loudness, audio_track=audio_track)
     return render_sentence_mix(
         plan,
         output_mp4_path,
@@ -924,75 +924,86 @@ def render_sentence_mix(
 
         if active_segments:
             try:
-                input_args: List[str] = []
-                filter_chains: List[str] = []
-                out_labels: List[str] = []
-                current_in_idx = 0
-                can_batch = True
-
                 holds_dir = temp_dir / "holds"
                 holds_dir.mkdir(parents=True, exist_ok=True)
 
-                for k, (idx, seg) in enumerate(active_segments):
-                    frame_count = seg.video_frame_count
-                    dur_sec = frame_count * (fps.denominator / float(fps.numerator))
-                    is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
-                    has_valid_source = bool(
-                        seg.source_video_path
-                        and Path(seg.source_video_path).exists()
-                        and _has_video_stream(seg.source_video_path)
-                    )
+                BATCH_CHUNK_SIZE = 40
+                segment_batches = [
+                    active_segments[i : i + BATCH_CHUNK_SIZE]
+                    for i in range(0, len(active_segments), BATCH_CHUNK_SIZE)
+                ]
+                batch_outputs: List[Path] = []
+                can_batch = True
 
-                    if is_freeze:
-                        freeze_img = holds_dir / f"hold_{idx:04d}.png"
-                        extracted = False
-                        if freeze_img.exists() and freeze_img.stat().st_size > 0:
-                            extracted = True
-                        elif has_valid_source:
-                            cmd_extract = [
-                                "ffmpeg", "-y",
-                                "-ss", f"{seg.video_source_pts_sec:.6f}",
-                                "-i", str(seg.source_video_path),
-                                "-frames:v", "1",
-                                "-q:v", "1",
-                                str(freeze_img),
-                            ]
-                            res = subprocess.run(cmd_extract, capture_output=True)
-                            if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                for b_idx, batch_segs in enumerate(segment_batches):
+                    input_args: List[str] = []
+                    filter_chains: List[str] = []
+                    out_labels: List[str] = []
+                    current_in_idx = 0
+
+                    for k, (idx, seg) in enumerate(batch_segs):
+                        frame_count = seg.video_frame_count
+                        dur_sec = frame_count * (fps.denominator / float(fps.numerator))
+                        is_freeze = getattr(seg, "freeze_video", False) or seg.is_silence or seg.span_type == "pause"
+                        has_valid_source = bool(
+                            seg.source_video_path
+                            and Path(seg.source_video_path).exists()
+                            and _has_video_stream(seg.source_video_path)
+                        )
+
+                        if is_freeze:
+                            freeze_img = holds_dir / f"hold_{idx:04d}.png"
+                            extracted = False
+                            if freeze_img.exists() and freeze_img.stat().st_size > 0:
                                 extracted = True
-                        if not extracted:
-                            can_batch = False
-                            break
-                        input_args.extend(["-loop", "1", "-framerate", fps_str, "-t", f"{dur_sec:.6f}", "-i", str(freeze_img)])
-                        filter_chains.append(f"[{current_in_idx}:v]fps={fps_str},{scale_pad},format=yuv420p[v{k}]")
-                        out_labels.append(f"[v{k}]")
-                        current_in_idx += 1
-                    elif has_valid_source:
-                        start_pts = seg.video_source_pts_sec
-                        # Dedicated per-cut seek input to prevent memory buffer queue overflow in FFmpeg
-                        input_args.extend(["-ss", f"{start_pts:.6f}", "-t", f"{dur_sec + 0.25:.6f}", "-i", str(seg.source_video_path)])
-                        filter_chains.append(
-                            f"[{current_in_idx}:v]fps={fps_str},trim=end_frame={frame_count},"
-                            f"setpts=PTS-STARTPTS,{scale_pad},format=yuv420p[v{k}]"
-                        )
-                        out_labels.append(f"[v{k}]")
-                        current_in_idx += 1
-                    else:
-                        is_audio_only = (
-                            not seg.source_video_path
-                            or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
-                        )
-                        if is_audio_only:
-                            input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])
-                            filter_chains.append(f"[{current_in_idx}:v]format=yuv420p[v{k}]")
+                            elif has_valid_source:
+                                cmd_extract = [
+                                    "ffmpeg", "-y",
+                                    "-ss", f"{seg.video_source_pts_sec:.6f}",
+                                    "-i", str(seg.source_video_path),
+                                    "-frames:v", "1",
+                                    "-q:v", "1",
+                                    str(freeze_img),
+                                ]
+                                res = subprocess.run(cmd_extract, capture_output=True)
+                                if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                                    extracted = True
+                            if not extracted:
+                                can_batch = False
+                                break
+                            input_args.extend(["-loop", "1", "-framerate", fps_str, "-t", f"{dur_sec:.6f}", "-i", str(freeze_img)])
+                            filter_chains.append(f"[{current_in_idx}:v]fps={fps_str},{scale_pad},trim=end_frame={frame_count},format=yuv420p[v{k}]")
+                            out_labels.append(f"[v{k}]")
+                            current_in_idx += 1
+                        elif has_valid_source:
+                            start_pts = seg.video_source_pts_sec
+                            # Dedicated per-cut seek input to prevent memory buffer queue overflow in FFmpeg
+                            input_args.extend(["-ss", f"{start_pts:.6f}", "-t", f"{dur_sec + 0.25:.6f}", "-i", str(seg.source_video_path)])
+                            filter_chains.append(
+                                f"[{current_in_idx}:v]fps={fps_str},trim=end_frame={frame_count},"
+                                f"setpts=PTS-STARTPTS,{scale_pad},tpad=stop_mode=clone:stop=-1,trim=end_frame={frame_count},format=yuv420p[v{k}]"
+                            )
                             out_labels.append(f"[v{k}]")
                             current_in_idx += 1
                         else:
-                            can_batch = False
-                            break
+                            is_audio_only = (
+                                not seg.source_video_path
+                                or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                            )
+                            if is_audio_only:
+                                input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])
+                                filter_chains.append(f"[{current_in_idx}:v]trim=end_frame={frame_count},format=yuv420p[v{k}]")
+                                out_labels.append(f"[v{k}]")
+                                current_in_idx += 1
+                            else:
+                                can_batch = False
+                                break
 
-                if can_batch and out_labels:
-                    print(f"[*] Rendering {len(active_segments)} video cuts in single-pass FFmpeg filtergraph...")
+                    if not can_batch or not out_labels:
+                        can_batch = False
+                        break
+
+                    batch_out = temp_concat_video if len(segment_batches) == 1 else temp_dir / f"batch_{b_idx:04d}.mp4"
                     concat_filter = "".join(out_labels) + f"concat=n={len(out_labels)}:v=1:a=0[outv]"
                     full_filtergraph = ";".join(filter_chains) + ";" + concat_filter
                     cmd_batch = [
@@ -1006,11 +1017,35 @@ def render_sentence_mix(
                         *COLOR_TAGS,
                         "-r", fps_str,
                         "-an",
-                        str(temp_concat_video),
+                        str(batch_out),
                     ]
                     res_batch = subprocess.run(cmd_batch, capture_output=True, timeout=300)
-                    if res_batch.returncode == 0 and temp_concat_video.exists() and temp_concat_video.stat().st_size > 0:
+                    if res_batch.returncode == 0 and batch_out.exists() and batch_out.stat().st_size > 0:
+                        batch_outputs.append(batch_out)
+                    else:
+                        can_batch = False
+                        break
+
+                if can_batch and len(batch_outputs) == len(segment_batches):
+                    if len(batch_outputs) == 1:
                         batched_success = True
+                    else:
+                        batch_concat_txt = temp_dir / "batch_concat.txt"
+                        with open(batch_concat_txt, "w", encoding="utf-8") as bcf:
+                            for b_p in batch_outputs:
+                                esc_p = str(b_p).replace("\\", "/")
+                                bcf.write(f"file '{esc_p}'\n")
+                        cmd_batch_concat = [
+                            "ffmpeg", "-y",
+                            "-f", "concat",
+                            "-safe", "0",
+                            "-i", str(batch_concat_txt),
+                            "-c", "copy",
+                            str(temp_concat_video),
+                        ]
+                        res_cc = subprocess.run(cmd_batch_concat, capture_output=True)
+                        if res_cc.returncode == 0 and temp_concat_video.exists() and temp_concat_video.stat().st_size > 0:
+                            batched_success = True
             except Exception:
                 batched_success = False
 

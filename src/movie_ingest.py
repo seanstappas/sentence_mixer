@@ -333,8 +333,7 @@ def run_voice_checks(
             r.voice_best = best
             r.voice_sim = round(best_sim, 4)
             r.voice_margin = round(best_sim - second, 4)
-            spk_vecs = by_spk.get(r.label or "", [])
-            other_vecs = [v for v in spk_vecs if not np.array_equal(v, e)]
+            other_vecs = [emb[rec.key] for rec in named if rec.label == r.label and rec.key != r.key]
             if other_vecs:
                 m_other = np.mean(np.stack(other_vecs), axis=0)
                 own_sim = float(e @ (m_other / (np.linalg.norm(m_other) + 1e-9)))
@@ -393,7 +392,11 @@ def run_voice_checks(
                     if getattr(rec, "voice_sim", 0.0) >= MIN_CONFIDENT_SIMILARITY
                     and getattr(rec, "voice_margin", 0.0) >= req_margin
                 ]
-                unanimous_major = len(confident_matches) == len(spk_lines) and len(set(confident_matches)) == 1 and confident_matches[0] == best
+                unanimous_major = (
+                    len(confident_matches) == len(spk_lines)
+                    and len(set(confident_matches)) == 1
+                    and confident_matches[0] == best
+                )
 
                 strong = (
                     best != r.label
@@ -857,7 +860,17 @@ def ensure_movie_aligned(
         except Exception:
             pass
     if fps is None:
-        fps = RationalTime.from_str(video.get("r_frame_rate", "24000/1001"))
+        r_fps_str = video.get("r_frame_rate", "24000/1001")
+        if r_fps_str and r_fps_str != "0/0":
+            try:
+                cand_r = RationalTime.from_str(r_fps_str)
+                if cand_r.numerator > 0 and cand_r.denominator > 0:
+                    fps = cand_r
+            except Exception:
+                pass
+    if fps is None:
+        fps = RationalTime(24000, 1001)
+
     pad_val = audio_stream.get("initial_padding") or audio_stream.get("start_pad") or 0
     try:
         codec_delay = int(pad_val)
@@ -868,8 +881,10 @@ def ensure_movie_aligned(
         if val is None or val == "N/A" or val == "":
             return 0.0
         try:
-            return float(val)
-        except Exception:
+            import math
+            res = float(val)
+            return res if math.isfinite(res) else 0.0
+        except (ValueError, TypeError):
             return 0.0
 
     src_rec = SourceRecord(

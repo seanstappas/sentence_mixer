@@ -269,16 +269,13 @@ class SpeakerDiarizer:
     ) -> List[Tuple[float, float]]:
         """
         Splits long candidate speech turns (>= 2.4s) at local cosine distance peaks of sliding-window embeddings.
+        Recursively splits across multiple speaker transitions until no further valid split points remain.
         """
-        refined_turns: List[Tuple[float, float]] = []
-        for t_start, t_end in turns:
+        def _split_single_turn(t_start: float, t_end: float, depth: int = 0) -> List[Tuple[float, float]]:
             dur = t_end - t_start
-            if dur < 2.4:
-                refined_turns.append((t_start, t_end))
-                continue
+            if dur < (2.0 * win_sec) or depth >= 4:
+                return [(t_start, t_end)]
 
-            # Slide window pair [t - win, t] and [t, t + win]
-            curr_split_start = t_start
             best_t = None
             max_dist = 0.0
 
@@ -300,18 +297,21 @@ class SpeakerDiarizer:
                         sim = 1.0
                     dist = 1.0 - max(-1.0, min(1.0, sim))
                     if dist > split_cos_dist and dist > max_dist:
-                        if (t_cur - curr_split_start) >= self.min_turn_duration and (t_end - t_cur) >= self.min_turn_duration:
+                        if (t_cur - t_start) >= self.min_turn_duration and (t_end - t_cur) >= self.min_turn_duration:
                             max_dist = dist
                             best_t = t_cur
 
                 t_cur += hop_sec
 
             if best_t is not None:
-                refined_turns.append((t_start, best_t))
-                refined_turns.append((best_t, t_end))
-            else:
-                refined_turns.append((t_start, t_end))
+                left_turns = _split_single_turn(t_start, best_t, depth + 1)
+                right_turns = _split_single_turn(best_t, t_end, depth + 1)
+                return left_turns + right_turns
+            return [(t_start, t_end)]
 
+        refined_turns: List[Tuple[float, float]] = []
+        for t_start, t_end in turns:
+            refined_turns.extend(_split_single_turn(t_start, t_end))
         return refined_turns
 
     def diarize(

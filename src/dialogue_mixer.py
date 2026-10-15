@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from contracts import EditPlan, PlanSegment, PlanTransition, RationalTime
-from edit_plan import build_edit_plan, finalize_edit_plan
+from edit_plan import _source_sample_to_video_pts, build_edit_plan, finalize_edit_plan
 from features import ContinuousFeatureExtractor
 from lexicon import Lexicon
 from media_time import cumulative_frame_ceiling
@@ -91,7 +91,14 @@ def concat_edit_plans(
             p_end = p_start + pause_samples
             p_start_frame = cumulative_frame_ceiling(p_start, sr, fps)
             p_end_frame = cumulative_frame_ceiling(p_end, sr, fps)
-            freeze_pts = prev_seg.video_source_pts_sec + (float(prev_seg.duration_samples) / float(sr))
+            if prev_seg.is_silence:
+                freeze_pts = prev_seg.video_source_pts_sec
+            else:
+                src_rec = combined_sources.get(prev_seg.source_content_id)
+                if src_rec:
+                    freeze_pts = _source_sample_to_video_pts(prev_seg.source_end_sample, src_rec)
+                else:
+                    freeze_pts = prev_seg.video_source_pts_sec + (float(prev_seg.duration_samples) / float(sr))
             pause_seg = PlanSegment(
                 segment_index=seg_idx,
                 source_content_id="silence",
@@ -552,6 +559,7 @@ def synthesize_and_render_dialogue(
             pause_style="continue",
             release_tail_sec=0.100,
             finalize=False,
+            audio_track=audio_track,
         )
         plans.append(plan)
         turn_infos.append((spk, text, plan, curr_time_sec))

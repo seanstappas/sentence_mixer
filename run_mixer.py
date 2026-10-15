@@ -1075,7 +1075,7 @@ def ingest_sources(
     else:
         registry_path = registry_path.resolve()
 
-    audio_track = getattr(args, "audio_track", "raw")
+    audio_track = getattr(args, "audio_track", "recombined")
     isolate_vocals_flag = bool(
         getattr(args, "isolate_vocals", False)
         or (audio_track in ("isolated", "vocals", "recombined", "both", "all"))
@@ -1916,7 +1916,7 @@ def main():
             registry_path = registry_path.resolve()
 
         # Align any unaligned sources
-        audio_track = getattr(args, "audio_track", "raw")
+        audio_track = getattr(args, "audio_track", "recombined")
         isolate_vocals_flag = getattr(args, "isolate_vocals", False) or (audio_track in ("isolated", "vocals", "recombined", "both", "all"))
         for item in source_items:
             v_abs = Path(item["video"]).resolve()
@@ -2281,7 +2281,7 @@ def main():
             plan.metadata["features"] = args.features
             plan.metadata["normalize_loudness"] = args.normalize_loudness
             plan.metadata["isolate_vocals"] = isolate_vocals_flag
-            plan.metadata["audio_track"] = getattr(args, "audio_track", "combined")
+            plan.metadata["audio_track"] = getattr(args, "audio_track", "recombined")
             if out_xml_path:
                 plan.metadata["xml_path"] = str(Path(out_xml_path).resolve())
             if wavlm_config:
@@ -2326,7 +2326,7 @@ def main():
                     plan,
                     str(staged_render),
                     normalize_loudness=args.normalize_loudness,
-                    audio_track=getattr(args, "audio_track", "raw"),
+                    audio_track=getattr(args, "audio_track", "recombined"),
                     output_resolution=getattr(args, "resolution", None),
                 )
 
@@ -2562,7 +2562,7 @@ def main():
                     str(staged_render),
                     target_fps=fps,
                     normalize_loudness=args.normalize_loudness,
-                    audio_track=getattr(args, "audio_track", "raw"),
+                    audio_track=getattr(args, "audio_track", "recombined"),
                     output_resolution=getattr(args, "resolution", None),
                 )
 
