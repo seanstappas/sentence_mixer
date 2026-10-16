@@ -189,7 +189,7 @@ def check_render_quality(
         word_durations: Dict[str, float] = {}
         speech_levels: List[float] = []
         for s in plan_data.get("segments", []):
-            if s.get("is_silence"):
+            if s.get("is_silence") or s.get("span_type") in ("pause", "continue"):
                 continue
             dur_ms = (s["output_end_sample"] - s["output_start_sample"]) * 1000.0 / float(sr)
             w_text = normalize_text(s.get("target_text", "")).lower()

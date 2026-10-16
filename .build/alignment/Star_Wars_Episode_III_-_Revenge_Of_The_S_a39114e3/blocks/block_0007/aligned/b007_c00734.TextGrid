@@ -1,0 +1,84 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0 
+xmax = 3.176938 
+tiers? <exists> 
+size = 2 
+item []: 
+    item [1]:
+        class = "IntervalTier" 
+        name = "words" 
+        xmin = 0 
+        xmax = 3.176938 
+        intervals: size = 5 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 1.08 
+            text = "" 
+        intervals [2]:
+            xmin = 1.08 
+            xmax = 1.36 
+            text = "you" 
+        intervals [3]:
+            xmin = 1.36 
+            xmax = 1.99 
+            text = "must" 
+        intervals [4]:
+            xmin = 1.99 
+            xmax = 2.98 
+            text = "choose" 
+        intervals [5]:
+            xmin = 2.98 
+            xmax = 3.176938 
+            text = "" 
+    item [2]:
+        class = "IntervalTier" 
+        name = "phones" 
+        xmin = 0 
+        xmax = 3.176938 
+        intervals: size = 11 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 1.08 
+            text = "" 
+        intervals [2]:
+            xmin = 1.08 
+            xmax = 1.14 
+            text = "Y" 
+        intervals [3]:
+            xmin = 1.14 
+            xmax = 1.36 
+            text = "UW1" 
+        intervals [4]:
+            xmin = 1.36 
+            xmax = 1.39 
+            text = "M" 
+        intervals [5]:
+            xmin = 1.39 
+            xmax = 1.58 
+            text = "AH1" 
+        intervals [6]:
+            xmin = 1.58 
+            xmax = 1.67 
+            text = "S" 
+        intervals [7]:
+            xmin = 1.67 
+            xmax = 1.99 
+            text = "T" 
+        intervals [8]:
+            xmin = 1.99 
+            xmax = 2.06 
+            text = "CH" 
+        intervals [9]:
+            xmin = 2.06 
+            xmax = 2.91 
+            text = "UW1" 
+        intervals [10]:
+            xmin = 2.91 
+            xmax = 2.98 
+            text = "Z" 
+        intervals [11]:
+            xmin = 2.98 
+            xmax = 3.176938 
+            text = "" 

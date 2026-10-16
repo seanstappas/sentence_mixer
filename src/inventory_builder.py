@@ -111,6 +111,8 @@ def build_units_inventory(
     single_speaker_verified: bool = False,
     source_record: Optional[SourceRecord] = None,
     speaker_intervals: Optional[List[Any]] = None,
+    lexicon: Optional[Any] = None,
+    recover_oov_words: bool = False,
 ) -> Dict[str, Any]:
     """
     Builds a JSON unit inventory of all words and phonemes from aligned TextGrids.
@@ -120,6 +122,19 @@ def build_units_inventory(
     manifest_p = Path(manifest_path).resolve()
     with open(manifest_p, "r", encoding="utf-8") as f:
         manifest = json.load(f)
+
+    # Initialize lexicon for subtitle-anchored OOV word recovery if requested
+    if (recover_oov_words or lexicon is not None) and lexicon is None:
+        try:
+            from lexicon import Lexicon
+            repo_root = Path(__file__).resolve().parent.parent
+            dict_files = [
+                repo_root / "dictionaries" / "custom_pronunciations.txt",
+                repo_root / "dictionaries" / "merged_dictionary.dict",
+            ]
+            lexicon = Lexicon([p for p in dict_files if p.exists()])
+        except Exception:
+            lexicon = None
 
     # Resolve source video path relative to manifest's parent directory
     rel_video = manifest.get("source_video", "")
@@ -378,6 +393,94 @@ def build_units_inventory(
                         constituent_ids.append(ev_id)
                         realized_phones.append(ev.label)
                         ev.word_occurrence_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
+
+            if not constituent_ids:
+                if lexicon is not None:
+                    # Subtitle-Anchored OOV Recovery:
+                    # When MFA assigns 'spn' to a valid subtitle word, synthesize phone events
+                    # across the word interval from Lexicon / G2P so the word is not lost.
+                    import unicodedata
+                    norm_w = unicodedata.normalize("NFKD", clean_word).encode("ASCII", "ignore").decode("utf-8")
+                    prons = lexicon.get_pronunciations(clean_word) or (lexicon.get_pronunciations(norm_w) if norm_w != clean_word else [])
+                    if prons:
+                        chosen_phones = prons[0]
+                        num_p = len(chosen_phones)
+                        from target_graph import DEFAULT_DURATION_PRIORS
+                        priors = [DEFAULT_DURATION_PRIORS.get(strip_phone_stress(p), 0.10) for p in chosen_phones]
+                        total_prior = sum(priors) if sum(priors) > 0 else 1.0
+                        total_samples = max(num_p, w_end_sample - w_start_sample)
+
+                        curr_sample = w_start_sample
+                        synth_event_ids: List[str] = []
+                        word_occ_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
+
+                        for p_i, ph in enumerate(chosen_phones):
+                            ph_clean = ph.upper()
+                            ph_dur_samples = int(round(total_samples * (priors[p_i] / total_prior)))
+                            if p_i == num_p - 1:
+                                next_sample = w_end_sample
+                            else:
+                                next_sample = min(w_end_sample, curr_sample + max(1, ph_dur_samples))
+
+                            ev_id = f"ev_{content_id}_{chunk_id}_syn_{w_idx:04d}_{p_i:02d}"
+                            base_p = strip_phone_stress(ph_clean)
+                            stress_p = get_phone_stress(ph_clean)
+
+                            ev = AlignedEvent(
+                                event_id=ev_id,
+                                source_content_id=content_id,
+                                utterance_id=chunk_id,
+                                speaker_id=chunk_speaker,
+                                kind="phone",
+                                start_sample=curr_sample,
+                                end_sample=next_sample,
+                                label=ph_clean,
+                                base_phone=base_p,
+                                stress=stress_p,
+                                word_occurrence_id=word_occ_id,
+                            )
+                            if synth_event_ids:
+                                prev_id = synth_event_ids[-1]
+                                ev.predecessor_id = prev_id
+                                events_dict[prev_id].successor_id = ev_id
+
+                            events_dict[ev_id] = ev
+                            synth_event_ids.append(ev_id)
+                            constituent_ids.append(ev_id)
+                            realized_phones.append(ph_clean)
+
+                            if ph_clean not in phone_to_event_ids:
+                                phone_to_event_ids[ph_clean] = []
+                            phone_to_event_ids[ph_clean].append(ev_id)
+
+                            if base_p not in base_phone_to_event_ids:
+                                base_phone_to_event_ids[base_p] = []
+                            base_phone_to_event_ids[base_p].append(ev_id)
+
+                            # Legacy phone entry
+                            if ph_clean not in legacy_phones:
+                                legacy_phones[ph_clean] = []
+                            legacy_phones[ph_clean].append({
+                                "source_video": str(source_video_path),
+                                "chunk_id": chunk_id,
+                                "label": ph_clean,
+                                "start_sec": curr_sample / float(sr),
+                                "end_sec": next_sample / float(sr),
+                                "duration": (next_sample - curr_sample) / float(sr),
+                                "sample_start": curr_sample,
+                                "sample_end": next_sample,
+                                "speaker_id": chunk_speaker,
+                                "source_content_id": content_id,
+                            })
+
+                            total_events_indexed += 1
+                            curr_sample = next_sample
+
+                        if chunk_event_ids and synth_event_ids:
+                            prev_ch_id = chunk_event_ids[-1]
+                            events_dict[prev_ch_id].successor_id = synth_event_ids[0]
+                            events_dict[synth_event_ids[0]].predecessor_id = prev_ch_id
+                        chunk_event_ids.extend(synth_event_ids)
 
             if not constituent_ids:
                 continue

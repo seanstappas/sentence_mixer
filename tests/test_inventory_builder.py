@@ -200,3 +200,100 @@ def test_t14_nested_duplicate_chunk_basenames():
         # Words should be indexed from both chunks (2 words per chunk = 4 words total)
         assert len(inv_data["words"]) == 4, f"Expected 4 words across both utterances, got {len(inv_data['words'])}"
 
+
+def test_subtitle_anchored_oov_recovery():
+    """
+    Verifies that when an in-universe proper noun (e.g. 'alderaan') has only 'spn'
+    in the alignment TextGrid, build_units_inventory with recover_oov_words=True
+    recovers the word and synthesizes constituent phonetic events from the Lexicon.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        aligned_dir = tmp_path / "aligned"
+        aligned_dir.mkdir()
+
+        # TextGrid with 'alderaan' having only 'spn'
+        tg_content = """File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0
+xmax = 1.0
+tiers? <exists>
+size = 2
+item []:
+    item [1]:
+        class = "IntervalTier"
+        name = "words"
+        xmin = 0
+        xmax = 1.0
+        intervals: size = 1
+        intervals [1]:
+            xmin = 0.1
+            xmax = 0.9
+            text = "alderaan"
+    item [2]:
+        class = "IntervalTier"
+        name = "phones"
+        xmin = 0
+        xmax = 1.0
+        intervals: size = 1
+        intervals [1]:
+            xmin = 0.1
+            xmax = 0.9
+            text = "spn"
+"""
+        tg_file = aligned_dir / "chunk_0001.TextGrid"
+        tg_file.write_text(tg_content, encoding="utf-8")
+
+        manifest = {
+            "source_video": "dummy.mp4",
+            "speaker_id": "obi-wan",
+            "single_speaker_verified": True,
+            "chunks": {
+                "chunk_0001": {
+                    "start_sec": 10.0,
+                    "end_sec": 11.0,
+                    "duration": 1.0,
+                    "text": "alderaan",
+                }
+            },
+        }
+        manifest_file = tmp_path / "corpus_manifest.json"
+        manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+
+        synth_source = SourceRecord(
+            content_id="src_dummy",
+            source_path="dummy.mp4",
+            native_sample_rate=48000,
+            native_channels=2,
+        )
+
+        out_unrecovered = tmp_path / "units_unrecovered.json"
+        inv_unrec = build_units_inventory(
+            str(aligned_dir),
+            str(manifest_file),
+            str(out_unrecovered),
+            source_record=synth_source,
+            recover_oov_words=False,
+        )
+        assert len(inv_unrec["words"]) == 0, "Unrecovered inventory must drop spn-only word"
+
+        out_recovered = tmp_path / "units_recovered.json"
+        inv_rec = build_units_inventory(
+            str(aligned_dir),
+            str(manifest_file),
+            str(out_recovered),
+            source_record=synth_source,
+            recover_oov_words=True,
+        )
+        assert len(inv_rec["words"]) == 1, "Recovered inventory must retain 'alderaan'"
+        wo = next(iter(inv_rec["words"].values()))
+        assert wo["word_normalized"] == "alderaan"
+        assert wo["speaker_id"] == "obi-wan"
+        assert len(wo["realized_phones"]) >= 3, f"Expected constituent phonemes, got {wo['realized_phones']}"
+        assert wo["realized_phones"][0] in ("AO1", "AA1")
+        assert wo["realized_phones"][-1] == "N"
+        assert len(inv_rec["words_inventory"]["alderaan"]) == 1
+        assert len(inv_rec["words_inventory"]["alderaan"][0]["phones"]) >= 3
+
+

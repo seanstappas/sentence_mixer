@@ -1,0 +1,1 @@
+A partial message was intercepted in a diplomatic packet

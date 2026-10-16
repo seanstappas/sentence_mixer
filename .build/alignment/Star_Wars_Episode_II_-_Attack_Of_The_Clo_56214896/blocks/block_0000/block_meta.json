@@ -1,0 +1,14 @@
+{
+  "key": "54471f25e412f546f99d2ce4418df2bf29b502960e70fb320d09924c05103769",
+  "block": [
+    0.0,
+    600.0
+  ],
+  "chunks": 106,
+  "textgrids": 106,
+  "seconds": 87.7,
+  "fallback_center_chunks": [
+    "b000_c00066"
+  ],
+  "fallback_tried": true
+}

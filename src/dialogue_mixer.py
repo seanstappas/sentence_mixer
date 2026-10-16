@@ -246,7 +246,7 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
 
     prev_span_type = ""
     for s in plan.segments:
-        if s.is_silence or s.span_type == "pause":
+        if s.is_silence or s.span_type in ("pause", "continue") or s.target_text.strip().startswith("[pause]"):
             if curr_word:
                 words.append((curr_word, time_offset_sec + curr_t0, time_offset_sec + curr_t1))
                 curr_word = None
@@ -514,6 +514,8 @@ def synthesize_and_render_dialogue(
     highlight_words: bool = True,
     speaker_colors: Optional[Dict[str, str]] = None,
     default_highlight_color: str = "&H0000FFFF&",
+    lexicon: Optional[Lexicon] = None,
+    pronunciation_overrides: Optional[Dict[str, List[List[str]]]] = None,
 ) -> Path:
     """
     High-level entry point:
@@ -521,7 +523,20 @@ def synthesize_and_render_dialogue(
     renders video + master audio, generates highlighted ASS subtitles,
     and burns subtitles into the delivery MP4.
     """
-    lex = Lexicon()
+    if lexicon is not None:
+        lex = lexicon
+    else:
+        repo_root = Path(__file__).resolve().parent.parent
+        dict_files = [
+            repo_root / "dictionaries" / "custom_pronunciations.txt",
+            repo_root / "dictionaries" / "merged_dictionary.dict",
+        ]
+        lex = Lexicon([p for p in dict_files if p.exists()])
+
+    if pronunciation_overrides:
+        for w, prons in pronunciation_overrides.items():
+            lex.word_to_pronunciations[w.lower()] = prons
+
     graph_builder = TargetGraphBuilder(lex)
     selector = SpanSelector(inventory_index)
     feature_extractor = ContinuousFeatureExtractor(sr=16000)

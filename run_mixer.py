@@ -2275,6 +2275,7 @@ def main():
                 pause_style=getattr(args, "pause_style", "freeze"),
                 release_tail_sec=max(0.0, float(getattr(args, "release_tail_ms", 100.0))) / 1000.0,
                 audio_track=getattr(args, "audio_track", "recombined"),
+                normalize_loudness=args.normalize_loudness,
             )
             plan.metadata["pause_style"] = getattr(args, "pause_style", "freeze")
             plan.metadata["release_tail_ms"] = float(getattr(args, "release_tail_ms", 100.0))

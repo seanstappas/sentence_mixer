@@ -78,3 +78,57 @@ grandmothers	G R AE1 N M AH0 DH ER0 Z
 grandmothers	G R AE1 N M AH2 DH ER0 Z
 grandmothers	G R AE1 N D M AH0 DH ER0 Z
 grandmothers	G R AE1 N D M AH2 DH ER0 Z
+alderaan	AO1 L D ER0 AA2 N
+alderaan	AA1 L D ER0 AA2 N
+alderaan's	AO1 L D ER0 AA2 N Z
+dantooine	D AE2 N T UW1 IY0 N
+tatooine	T AE2 T UW1 IY0 N
+naboo	N AH0 B UW1
+naboo's	N AH0 B UW1 Z
+mustafar	M AH1 S T AH0 F AA2 R
+utapau	UW1 T AH0 P AW2
+skywalker	S K AY1 W AO2 K ER0
+skywalker	S K AY1 W AA2 K ER0
+skywalker's	S K AY1 W AO2 K ER0 Z
+amidala	AE2 M AH0 D AA1 L AH0
+amidala's	AE2 M AH0 D AA1 L AH0 Z
+leia	L EY1 AH0
+leia	L IY1 AH0
+leia's	L EY1 AH0 Z
+organa	AO0 R G AA1 N AH0
+chewie	CH UW1 IY0
+chewie's	CH UW1 IY0 Z
+chewbacca	CH UW0 B AA1 K AH0
+chewbacca's	CH UW0 B AA1 K AH0 Z
+jabba	JH AE1 B AH0
+jabba's	JH AE1 B AH0 Z
+calrissian	K AE2 L R IH1 S IY0 AH0 N
+valorum	V AH0 L AO1 R AH0 M
+sebulba	S AH0 B UH1 L B AH0
+plagueis	P L EY1 G AH0 S
+sidious	S IH1 D IY0 AH0 S
+sidious's	S IH1 D IY0 AH0 S IH0 Z
+sifo	S IY1 F OW0
+sifo-dyas	S IY1 F OW0 D AY1 AH0 S
+padawan	P AE1 D AH0 W AA2 N
+padawans	P AE1 D AH0 W AA2 N Z
+cloner	K L OW1 N ER0
+cloners	K L OW1 N ER0 Z
+droid	D R OY1 D
+droids	D R OY1 D Z
+droid's	D R OY1 D Z
+lightsaber	L AY1 T S EY2 B ER0
+lightsabers	L AY1 T S EY2 B ER0 Z
+tydirium	T AY0 D IH1 R IY0 AH0 M
+wookiee	W UH1 K IY0
+wookiees	W UH1 K IY0 Z
+gungan	G AH1 NG G AH0 N
+gungans	G AH1 NG G AH0 N Z
+sandpeople	S AE1 N D P IY2 P AH0 L
+r2	AA1 R T UW1
+r2-d2	AA1 R T UW1 D IY1 T UW1
+r4	AA1 R F AO1 R
+3po	TH R IY1 P IY1 OW0
+c-3po	S IY1 TH R IY1 P IY1 OW0
+wesa	W IY1 S AH0
+yousa	Y UW1 S AH0

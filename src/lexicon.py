@@ -26,7 +26,7 @@ except ImportError:
     pass
 
 _G2P_INSTANCE = None
-_STAGED_DICT_CACHE: Dict[Tuple[str, str, str], Tuple[Any, str, str]] = {}
+_STAGED_DICT_CACHE: Dict[Tuple[str, str, str, str], Tuple[Any, str, str]] = {}
 STAGING_FORMAT_VERSION = 2
 
 
@@ -425,6 +425,7 @@ def stage_mfa_dictionary(
     base_dict_path: Optional[Union[str, Path]] = None,
     custom_dict_path: Optional[Union[str, Path]] = None,
     output_path: Optional[Union[str, Path]] = None,
+    extra_words: Optional[Any] = None,
 ) -> Tuple[Path, str]:
     """
     Dynamically combines base dictionary (merged_dictionary.dict) and custom pronunciations
@@ -457,8 +458,9 @@ def stage_mfa_dictionary(
     # filesystem timestamp tick as the last staging must still invalidate the result.
     b_stat = (b_path.stat().st_mtime_ns, b_path.stat().st_size) if b_path.exists() else (0, 0)
     c_sha = _file_sha(c_path)
-    cache_key = (str(b_path), str(c_path), str(out_p))
-    fast_key = (b_stat, c_sha)
+    extra_fp = hashlib.sha256(" ".join(sorted(set(extra_words))).encode("utf-8")).hexdigest() if extra_words else ""
+    cache_key = (str(b_path), str(c_path), str(out_p), extra_fp)
+    fast_key = (b_stat, c_sha, extra_fp)
 
     # Fast in-memory check (base dictionary by size+mtime, custom file by content)
     if cache_key in _STAGED_DICT_CACHE:
@@ -466,7 +468,7 @@ def stage_mfa_dictionary(
         if cached_fast == fast_key and out_p.exists() and out_p.stat().st_size > 0:
             return out_p, cached_hash
 
-    inputs_fp = hashlib.sha256(f"{_file_sha(b_path)}|{c_sha}|{STAGING_FORMAT_VERSION}".encode("utf-8")).hexdigest()
+    inputs_fp = hashlib.sha256(f"{_file_sha(b_path)}|{c_sha}|{extra_fp}|{STAGING_FORMAT_VERSION}".encode("utf-8")).hexdigest()
     meta_p = out_p.with_name(out_p.name + ".inputs.json")
 
     # Reuse the staged file on disk if it was built from identical inputs
@@ -515,6 +517,26 @@ def stage_mfa_dictionary(
                     # For custom pronunciations or non-prob entries, generate both lowercase and uppercase variants
                     # to ensure robust matching regardless of subtitle cue casing.
                     for w_variant in (word.lower(), word.upper()):
+                        entry = f"{w_variant}\t{phones_str}"
+                        if entry not in seen:
+                            seen.add(entry)
+                            staged_lines.append(entry)
+
+    if extra_words:
+        lex_instance: Optional[Lexicon] = None
+        for w in extra_words:
+            w_clean = re.sub(r"[^\w\'-]", "", str(w)).strip().lower()
+            if not w_clean or w_clean in {"sil", "sp", "spn", "eps", "<eps>"}:
+                continue
+            if any(f"{w_clean}\t" in s or f"{w_clean.upper()}\t" in s for s in staged_lines):
+                continue
+            if lex_instance is None:
+                lex_instance = Lexicon([p for p in (b_path, c_path) if p.exists()])
+            prons = lex_instance.get_pronunciations(w_clean)
+            if prons:
+                for p_var in prons:
+                    phones_str = " ".join(p_var)
+                    for w_variant in (w_clean.lower(), w_clean.upper()):
                         entry = f"{w_variant}\t{phones_str}"
                         if entry not in seen:
                             seen.add(entry)

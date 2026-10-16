@@ -1,0 +1,9 @@
+{
+  "alignment_key": "4bf4886feec0ddde8de8cf9d0f7d028e71933e0ff8589c4bb5b4733797cee916",
+  "media_hash": "5623dd18ee9081b0819ca3e080e4e174ef84e6d9385ad897bfa955b08ee70514",
+  "transcript_hash": "9bb456f1e7343156844c68cecce9a8e2329fe3acf06cd0988ef123534ee5fb09",
+  "dict_hash": "ae37c633a46d3e9ca9d418fa3e067188161245c7faf8930240eb3e7cd9cdd1b9",
+  "acoustic_model": "english_us_arpa",
+  "mfa_options": {},
+  "preprocessor_version": "2.0"
+}

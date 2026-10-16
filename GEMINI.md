@@ -11,6 +11,7 @@ Handoff and current state: `plans/10_05_handoff.md` (read before making changes)
 - Always use the **Variable-Span Selector** (`--selector span`, default). Do NOT default to `--selector legacy`.
 - The variable-span engine optimizes across 4 tiers: Phrases -> Words -> Subwords -> Phonemes.
 - When working with small speaker corpora (<30s speech), ensure acoustic cognate fallbacks are active to avoid broken Viterbi paths on missing consonants (`G` -> `K`, `NG` -> `N`, `V` -> `F`).
+- **Subtitle-Anchored OOV Recovery**: MFA labels words missing from its static dictionary as `spn` (spoken noise) even when the word boundaries `[xmin, xmax]` are accurately aligned on the TextGrid `words` tier. Movie ingestion (`src/movie_ingest.py`) enables `recover_oov_words=True` in `build_units_inventory` (`src/inventory_builder.py`) to synthesize constituent phones from `Lexicon` (`custom_pronunciations.txt` -> CMUdict -> G2P) proportional to duration priors, preserving intact spoken words (e.g. *Alderaan*, *droid*, *Skywalker*).
 
 ## Audio Quality & Mixing Heuristics
 - Default to `--audio-track recombined` to preserve cinematic background atmosphere underneath EBU R128 (-16 LUFS) normalized vocals.
@@ -28,4 +29,5 @@ Handoff and current state: `plans/10_05_handoff.md` (read before making changes)
 - Speaker labels come from subtitles/transcripts (`tools/label_subtitles.py`), voice checks, and user review (`config/speaker_labels/`). Do not run clustering diarization on movies.
 - Text speaker labels are authoritative; voice (WavLM-SV, 0.70-0.86 accurate on short film lines) may only exclude a labeled line on strong calibrated evidence, and review defaults keep the text label.
 - Movie caches are expensive to rebuild (about 1.5 h per movie). Run `run_mixer.py clean <source> --dry-run` before any real `clean`, and never delete `.build/subtitles/labeled/` or `config/speaker_labels/` (user inputs).
+- When adding new entries to `dictionaries/custom_pronunciations.txt` or updating inventory logic for already-ingested movies, run `.venv\Scripts\python.exe tools\rebuild_movie_inventories.py` (~3 s per movie) to rebuild `units_index.json` in-place from cached `.TextGrid` files without re-running MFA alignment.
 - Labeled VTTs, label reports, screenplays/transcripts, and the alignment corpus contain copyrighted text: keep them in git-ignored folders and never copy their text into tracked files, tests, or chat output. Tests use invented dialogue.

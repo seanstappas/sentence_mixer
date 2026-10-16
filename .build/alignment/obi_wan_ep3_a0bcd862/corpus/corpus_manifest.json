@@ -1,0 +1,1947 @@
+{
+  "source_video": "D:\\Code\\sentence_mixer\\input\\obi_wan_ep3.mp4",
+  "source_vtt": "D:\\Code\\sentence_mixer\\input\\obi_wan_ep3.en.vtt",
+  "audio_source_path": "D:\\Code\\sentence_mixer\\.build\\vocals\\obi_wan_ep3_a0bcd862\\vocals.wav",
+  "speaker_id": "obi-wan",
+  "single_speaker_verified": true,
+  "asr_tail_enrichment": false,
+  "assume_single_speaker": false,
+  "total_chunks": 215,
+  "chunks": {
+    "chunk_0000": {
+      "start_sec": 0.0,
+      "end_sec": 2.55,
+      "duration": 2.55,
+      "text": "oh i see it oh this is going to be easy",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0000.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0000.txt"
+    },
+    "chunk_0001": {
+      "start_sec": 2.56,
+      "end_sec": 4.87,
+      "duration": 2.31,
+      "text": "odd bald you copy mark my position form",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0001.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0001.txt"
+    },
+    "chunk_0002": {
+      "start_sec": 4.88,
+      "end_sec": 6.63,
+      "duration": 1.75,
+      "text": "your squad up behind me let the pass",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0002.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0002.txt"
+    },
+    "chunk_0003": {
+      "start_sec": 6.64,
+      "end_sec": 9.03,
+      "duration": 2.3899999999999997,
+      "text": "between us no no they are doing their",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0003.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0003.txt"
+    },
+    "chunk_0004": {
+      "start_sec": 9.04,
+      "end_sec": 10.549,
+      "duration": 1.5090000000000003,
+      "text": "job",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0004.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0004.txt"
+    },
+    "chunk_0005": {
+      "start_sec": 10.559,
+      "end_sec": 13.589,
+      "duration": 3.030000000000001,
+      "text": "they overshot us all right r4 no no no",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0005.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0005.txt"
+    },
+    "chunk_0006": {
+      "start_sec": 13.599,
+      "end_sec": 15.749,
+      "duration": 2.1500000000000004,
+      "text": "no nothing too fancy flying is for",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0006.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0006.txt"
+    },
+    "chunk_0007": {
+      "start_sec": 15.759,
+      "end_sec": 17.51,
+      "duration": 1.7510000000000012,
+      "text": "droids i'm hit",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0007.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0007.txt"
+    },
+    "chunk_0008": {
+      "start_sec": 17.52,
+      "end_sec": 19.83,
+      "duration": 2.3099999999999987,
+      "text": "anakin r4 be careful",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0008.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0008.txt"
+    },
+    "chunk_0009": {
+      "start_sec": 19.84,
+      "end_sec": 21.51,
+      "duration": 1.6700000000000017,
+      "text": "oh dear they're shutting down all the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0009.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0009.txt"
+    },
+    "chunk_0010": {
+      "start_sec": 21.52,
+      "end_sec": 24.15,
+      "duration": 2.629999999999999,
+      "text": "controls the mission get to the command",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0010.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0010.txt"
+    },
+    "chunk_0011": {
+      "start_sec": 24.16,
+      "end_sec": 25.99,
+      "duration": 1.8299999999999983,
+      "text": "ship get the chancellor i'm running out",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0011.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0011.txt"
+    },
+    "chunk_0012": {
+      "start_sec": 26.0,
+      "end_sec": 27.75,
+      "duration": 1.75,
+      "text": "of tricks here",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0012.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0012.txt"
+    },
+    "chunk_0013": {
+      "start_sec": 27.76,
+      "end_sec": 35.43,
+      "duration": 7.669999999999998,
+      "text": "the name of how'd",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0013.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0013.txt"
+    },
+    "chunk_0014": {
+      "start_sec": 35.44,
+      "end_sec": 37.35,
+      "duration": 1.9100000000000037,
+      "text": "hold on anakin you're gonna get us both",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0014.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0014.txt"
+    },
+    "chunk_0015": {
+      "start_sec": 37.36,
+      "end_sec": 38.869,
+      "duration": 1.5090000000000003,
+      "text": "killed get out of here there's nothing",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0015.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0015.txt"
+    },
+    "chunk_0016": {
+      "start_sec": 38.879,
+      "end_sec": 41.19,
+      "duration": 2.311,
+      "text": "more you can do r2 hit the first droid",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0016.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0016.txt"
+    },
+    "chunk_0017": {
+      "start_sec": 41.2,
+      "end_sec": 43.43,
+      "duration": 2.229999999999997,
+      "text": "center eye great r2 well have you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0017.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0017.txt"
+    },
+    "chunk_0018": {
+      "start_sec": 43.44,
+      "end_sec": 45.35,
+      "duration": 1.9100000000000037,
+      "text": "noticed the shields are still up oh i",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0018.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0018.txt"
+    },
+    "chunk_0019": {
+      "start_sec": 45.36,
+      "end_sec": 49.51,
+      "duration": 4.149999999999999,
+      "text": "have a bad feeling about this part",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0019.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0019.txt"
+    },
+    "chunk_0020": {
+      "start_sec": 49.52,
+      "end_sec": 51.189,
+      "duration": 1.668999999999997,
+      "text": "the chancellor's signal is coming from",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0020.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0020.txt"
+    },
+    "chunk_0021": {
+      "start_sec": 51.199,
+      "end_sec": 52.31,
+      "duration": 1.1110000000000042,
+      "text": "right there",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0021.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0021.txt"
+    },
+    "chunk_0022": {
+      "start_sec": 52.32,
+      "end_sec": 53.91,
+      "duration": 1.5899999999999963,
+      "text": "the observation platform at the top of",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0022.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0022.txt"
+    },
+    "chunk_0023": {
+      "start_sec": 53.92,
+      "end_sec": 56.549,
+      "duration": 2.628999999999998,
+      "text": "that spire i sense a trap spring the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0023.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0023.txt"
+    },
+    "chunk_0024": {
+      "start_sec": 56.559,
+      "end_sec": 59.59,
+      "duration": 3.031000000000006,
+      "text": "trap yeah take this and wait for orders did",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0024.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0024.txt"
+    },
+    "chunk_0025": {
+      "start_sec": 59.6,
+      "end_sec": 61.43,
+      "duration": 1.8299999999999983,
+      "text": "you press the stop button no we don't",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0025.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0025.txt"
+    },
+    "chunk_0026": {
+      "start_sec": 61.44,
+      "end_sec": 63.91,
+      "duration": 2.469999999999999,
+      "text": "want to get out we want to get moving r2",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0026.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0026.txt"
+    },
+    "chunk_0027": {
+      "start_sec": 63.92,
+      "end_sec": 78.55,
+      "duration": 14.629999999999995,
+      "text": "activate elevator",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0027.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0027.txt"
+    },
+    "chunk_0028": {
+      "start_sec": 78.56,
+      "end_sec": 99.59,
+      "duration": 21.03,
+      "text": "always on the move",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0028.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0028.txt"
+    },
+    "chunk_0029": {
+      "start_sec": 99.6,
+      "end_sec": 102.71000000000001,
+      "duration": 3.1100000000000136,
+      "text": "oh it's you well r2 has been did i say",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0029.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0029.txt"
+    },
+    "chunk_0030": {
+      "start_sec": 102.72,
+      "end_sec": 104.71000000000001,
+      "duration": 1.990000000000009,
+      "text": "anything i didn't say anything",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0030.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0030.txt"
+    },
+    "chunk_0031": {
+      "start_sec": 104.72,
+      "end_sec": 106.38900000000001,
+      "duration": 1.6690000000000111,
+      "text": "chancellor this time we will do it",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0031.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0031.txt"
+    },
+    "chunk_0032": {
+      "start_sec": 106.399,
+      "end_sec": 109.99000000000001,
+      "duration": 3.591000000000008,
+      "text": "together chancellor palpatine sith lords are our",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0032.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0032.txt"
+    },
+    "chunk_0033": {
+      "start_sec": 110.0,
+      "end_sec": 113.749,
+      "duration": 3.7489999999999952,
+      "text": "speciality you won't get away this time",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0033.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0033.txt"
+    },
+    "chunk_0034": {
+      "start_sec": 113.759,
+      "end_sec": 116.469,
+      "duration": 2.7099999999999937,
+      "text": "did i miss something too late jump let's",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0034.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0034.txt"
+    },
+    "chunk_0035": {
+      "start_sec": 116.479,
+      "end_sec": 117.749,
+      "duration": 1.269999999999996,
+      "text": "see if we can find something in the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0035.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0035.txt"
+    },
+    "chunk_0036": {
+      "start_sec": 117.759,
+      "end_sec": 119.67,
+      "duration": 1.9110000000000014,
+      "text": "hangar bed that's still flyable wait a",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0036.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0036.txt"
+    },
+    "chunk_0037": {
+      "start_sec": 119.68,
+      "end_sec": 121.429,
+      "duration": 1.7489999999999952,
+      "text": "minute how did this happen we're smarter",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0037.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0037.txt"
+    },
+    "chunk_0038": {
+      "start_sec": 121.439,
+      "end_sec": 124.31,
+      "duration": 2.8710000000000093,
+      "text": "than this patience do you have a plan b",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0038.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0038.txt"
+    },
+    "chunk_0039": {
+      "start_sec": 124.32,
+      "end_sec": 126.31,
+      "duration": 1.990000000000009,
+      "text": "you have a job to do anakin try not to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0039.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0039.txt"
+    },
+    "chunk_0040": {
+      "start_sec": 126.32,
+      "end_sec": 128.869,
+      "duration": 2.5490000000000066,
+      "text": "upset him not this time",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0040.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0040.txt"
+    },
+    "chunk_0041": {
+      "start_sec": 128.879,
+      "end_sec": 131.43,
+      "duration": 2.551000000000016,
+      "text": "and this time you won't escape grievous",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0041.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0041.txt"
+    },
+    "chunk_0042": {
+      "start_sec": 131.44,
+      "end_sec": 133.75,
+      "duration": 2.3100000000000023,
+      "text": "can you fly a cruiser like this well not",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0042.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0042.txt"
+    },
+    "chunk_0043": {
+      "start_sec": 133.76,
+      "end_sec": 136.15,
+      "duration": 2.390000000000015,
+      "text": "to worry we are still flying half a ship",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0043.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0043.txt"
+    },
+    "chunk_0044": {
+      "start_sec": 136.16,
+      "end_sec": 139.03,
+      "duration": 2.8700000000000045,
+      "text": "eight plus 16 we're in the atmosphere",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0044.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0044.txt"
+    },
+    "chunk_0045": {
+      "start_sec": 139.04,
+      "end_sec": 141.589,
+      "duration": 2.5490000000000066,
+      "text": "ready five thousand",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0045.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0045.txt"
+    },
+    "chunk_0046": {
+      "start_sec": 141.599,
+      "end_sec": 144.47,
+      "duration": 2.8710000000000093,
+      "text": "fire ships on the left and the right",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0046.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0046.txt"
+    },
+    "chunk_0047": {
+      "start_sec": 144.48,
+      "end_sec": 146.309,
+      "duration": 1.8290000000000077,
+      "text": "landing strip straight ahead another",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0047.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0047.txt"
+    },
+    "chunk_0048": {
+      "start_sec": 146.319,
+      "end_sec": 148.79,
+      "duration": 2.4710000000000036,
+      "text": "happy landing oh no i'm not brave enough",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0048.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0048.txt"
+    },
+    "chunk_0049": {
+      "start_sec": 148.8,
+      "end_sec": 150.47,
+      "duration": 1.6699999999999875,
+      "text": "for politics i have to report to the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0049.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0049.txt"
+    },
+    "chunk_0050": {
+      "start_sec": 150.48,
+      "end_sec": 152.22899999999998,
+      "duration": 1.7489999999999952,
+      "text": "council besides someone needs to be the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0050.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0050.txt"
+    },
+    "chunk_0051": {
+      "start_sec": 152.239,
+      "end_sec": 154.39,
+      "duration": 2.150999999999982,
+      "text": "poster boy let us not forget anakin that",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0051.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0051.txt"
+    },
+    "chunk_0052": {
+      "start_sec": 154.4,
+      "end_sec": 156.71,
+      "duration": 2.3100000000000023,
+      "text": "you rescued me from the bus droids and",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0052.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0052.txt"
+    },
+    "chunk_0053": {
+      "start_sec": 156.72,
+      "end_sec": 158.47,
+      "duration": 1.75,
+      "text": "you killed count dooku and you rescued",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0053.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0053.txt"
+    },
+    "chunk_0054": {
+      "start_sec": 158.48,
+      "end_sec": 160.15,
+      "duration": 1.670000000000016,
+      "text": "the chancellor carrying me unconscious",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0054.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0054.txt"
+    },
+    "chunk_0055": {
+      "start_sec": 160.16,
+      "end_sec": 163.03,
+      "duration": 2.8700000000000045,
+      "text": "on your back anakin let's be fair today",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0055.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0055.txt"
+    },
+    "chunk_0056": {
+      "start_sec": 163.04,
+      "end_sec": 165.11,
+      "duration": 2.0700000000000216,
+      "text": "you were the hero and you deserve your",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0056.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0056.txt"
+    },
+    "chunk_0057": {
+      "start_sec": 165.12,
+      "end_sec": 167.75,
+      "duration": 2.6299999999999955,
+      "text": "glorious day with the politicians ninth",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0057.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0057.txt"
+    },
+    "chunk_0058": {
+      "start_sec": 167.76,
+      "end_sec": 169.67000000000002,
+      "duration": 1.910000000000025,
+      "text": "time that business on caton caterina",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0058.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0058.txt"
+    },
+    "chunk_0059": {
+      "start_sec": 169.68,
+      "end_sec": 171.19,
+      "duration": 1.509999999999991,
+      "text": "doesn't doesn't count i'll see you at",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0059.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0059.txt"
+    },
+    "chunk_0060": {
+      "start_sec": 171.2,
+      "end_sec": 173.11,
+      "duration": 1.910000000000025,
+      "text": "the briefing you missed the report on",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0060.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0060.txt"
+    },
+    "chunk_0061": {
+      "start_sec": 173.12,
+      "end_sec": 174.949,
+      "duration": 1.8290000000000077,
+      "text": "the outer rim of sieges",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0061.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0061.txt"
+    },
+    "chunk_0062": {
+      "start_sec": 174.959,
+      "end_sec": 177.82999999999998,
+      "duration": 2.870999999999981,
+      "text": "in short they are going very well",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0062.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0062.txt"
+    },
+    "chunk_0063": {
+      "start_sec": 177.84,
+      "end_sec": 180.309,
+      "duration": 2.468999999999994,
+      "text": "silicon has fallen and master vos has",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0063.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0063.txt"
+    },
+    "chunk_0064": {
+      "start_sec": 180.319,
+      "end_sec": 182.869,
+      "duration": 2.5500000000000114,
+      "text": "moved his troops to boss pity the senate",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0064.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0064.txt"
+    },
+    "chunk_0065": {
+      "start_sec": 182.879,
+      "end_sec": 185.03,
+      "duration": 2.1510000000000105,
+      "text": "is expected to vote more executive",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0065.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0065.txt"
+    },
+    "chunk_0066": {
+      "start_sec": 185.04,
+      "end_sec": 187.27,
+      "duration": 2.230000000000018,
+      "text": "powers to the chancellor today",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0066.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0066.txt"
+    },
+    "chunk_0067": {
+      "start_sec": 187.28,
+      "end_sec": 189.91,
+      "duration": 2.6299999999999955,
+      "text": "be careful of your friend palpatine",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0067.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0067.txt"
+    },
+    "chunk_0068": {
+      "start_sec": 189.92,
+      "end_sec": 191.91,
+      "duration": 1.990000000000009,
+      "text": "he has requested your presence he would",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0068.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0068.txt"
+    },
+    "chunk_0069": {
+      "start_sec": 191.92,
+      "end_sec": 193.03,
+      "duration": 1.1100000000000136,
+      "text": "not say",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0069.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0069.txt"
+    },
+    "chunk_0070": {
+      "start_sec": 193.04,
+      "end_sec": 195.27,
+      "duration": 2.230000000000018,
+      "text": "all of this is unusual and it's making",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0070.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0070.txt"
+    },
+    "chunk_0071": {
+      "start_sec": 195.28,
+      "end_sec": 197.03,
+      "duration": 1.75,
+      "text": "me feel uneasy",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0071.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0071.txt"
+    },
+    "chunk_0072": {
+      "start_sec": 197.04,
+      "end_sec": 199.27,
+      "duration": 2.230000000000018,
+      "text": "we do not have many ships to spare he's",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0072.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0072.txt"
+    },
+    "chunk_0073": {
+      "start_sec": 199.28,
+      "end_sec": 201.589,
+      "duration": 2.3089999999999975,
+      "text": "right it's a system we cannot afford to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0073.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0073.txt"
+    },
+    "chunk_0074": {
+      "start_sec": 201.599,
+      "end_sec": 204.22899999999998,
+      "duration": 2.6299999999999955,
+      "text": "lose calm down anakin you have been given a",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0074.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0074.txt"
+    },
+    "chunk_0075": {
+      "start_sec": 204.239,
+      "end_sec": 205.43,
+      "duration": 1.1910000000000025,
+      "text": "great honor",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0075.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0075.txt"
+    },
+    "chunk_0076": {
+      "start_sec": 205.44,
+      "end_sec": 207.27,
+      "duration": 1.8300000000000125,
+      "text": "to be on the council at your age it's",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0076.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0076.txt"
+    },
+    "chunk_0077": {
+      "start_sec": 207.28,
+      "end_sec": 209.75,
+      "duration": 2.469999999999999,
+      "text": "never happened before",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0077.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0077.txt"
+    },
+    "chunk_0078": {
+      "start_sec": 209.76,
+      "end_sec": 211.43,
+      "duration": 1.670000000000016,
+      "text": "the fact of the matter is you are too",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0078.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0078.txt"
+    },
+    "chunk_0079": {
+      "start_sec": 211.44,
+      "end_sec": 213.67000000000002,
+      "duration": 2.230000000000018,
+      "text": "close to the chancellor the council",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0079.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0079.txt"
+    },
+    "chunk_0080": {
+      "start_sec": 213.68,
+      "end_sec": 215.50900000000001,
+      "duration": 1.8290000000000077,
+      "text": "doesn't like it when he interferes in",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0080.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0080.txt"
+    },
+    "chunk_0081": {
+      "start_sec": 215.519,
+      "end_sec": 219.19,
+      "duration": 3.6709999999999923,
+      "text": "jedi affairs but it's what you wanted",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0081.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0081.txt"
+    },
+    "chunk_0082": {
+      "start_sec": 219.2,
+      "end_sec": 220.63,
+      "duration": 1.4300000000000068,
+      "text": "your friendship with chancellor",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0082.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0082.txt"
+    },
+    "chunk_0083": {
+      "start_sec": 220.64,
+      "end_sec": 222.789,
+      "duration": 2.149000000000001,
+      "text": "palpatine seems to have paid off the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0083.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0083.txt"
+    },
+    "chunk_0084": {
+      "start_sec": 222.799,
+      "end_sec": 224.71,
+      "duration": 1.9110000000000014,
+      "text": "only reason the council has approved",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0084.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0084.txt"
+    },
+    "chunk_0085": {
+      "start_sec": 224.72,
+      "end_sec": 226.39,
+      "duration": 1.6699999999999875,
+      "text": "your appointment is because the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0085.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0085.txt"
+    },
+    "chunk_0086": {
+      "start_sec": 226.4,
+      "end_sec": 228.55,
+      "duration": 2.1500000000000057,
+      "text": "chancellor trusts you anakin i am on",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0086.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0086.txt"
+    },
+    "chunk_0087": {
+      "start_sec": 228.56,
+      "end_sec": 229.99,
+      "duration": 1.4300000000000068,
+      "text": "your side i didn't want to put you in",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0087.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0087.txt"
+    },
+    "chunk_0088": {
+      "start_sec": 230.0,
+      "end_sec": 232.47,
+      "duration": 2.469999999999999,
+      "text": "this situation the council wants you to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0088.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0088.txt"
+    },
+    "chunk_0089": {
+      "start_sec": 232.48,
+      "end_sec": 235.35,
+      "duration": 2.8700000000000045,
+      "text": "report on all the chancellor's dealings",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0089.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0089.txt"
+    },
+    "chunk_0090": {
+      "start_sec": 235.36,
+      "end_sec": 237.589,
+      "duration": 2.228999999999985,
+      "text": "they want to know what he's up to we are",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0090.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0090.txt"
+    },
+    "chunk_0091": {
+      "start_sec": 237.599,
+      "end_sec": 240.07,
+      "duration": 2.4710000000000036,
+      "text": "at war anakin this assignment is not to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0091.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0091.txt"
+    },
+    "chunk_0092": {
+      "start_sec": 240.08,
+      "end_sec": 242.309,
+      "duration": 2.228999999999985,
+      "text": "be on record that is why you must help",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0092.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0092.txt"
+    },
+    "chunk_0093": {
+      "start_sec": 242.319,
+      "end_sec": 243.75,
+      "duration": 1.4310000000000116,
+      "text": "us",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0093.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0093.txt"
+    },
+    "chunk_0094": {
+      "start_sec": 243.76,
+      "end_sec": 246.39,
+      "duration": 2.6299999999999955,
+      "text": "anakin our allegiance is to the senate",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0094.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0094.txt"
+    },
+    "chunk_0095": {
+      "start_sec": 246.4,
+      "end_sec": 247.91,
+      "duration": 1.509999999999991,
+      "text": "not to its leader who has managed to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0095.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0095.txt"
+    },
+    "chunk_0096": {
+      "start_sec": 247.92,
+      "end_sec": 249.75,
+      "duration": 1.8300000000000125,
+      "text": "stay in office long after his term has",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0096.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0096.txt"
+    },
+    "chunk_0097": {
+      "start_sec": 249.76,
+      "end_sec": 251.91,
+      "duration": 2.1500000000000057,
+      "text": "expired yes but use your feelings anakin",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0097.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0097.txt"
+    },
+    "chunk_0098": {
+      "start_sec": 251.92,
+      "end_sec": 254.149,
+      "duration": 2.2290000000000134,
+      "text": "something is out of place the council is",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0098.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0098.txt"
+    },
+    "chunk_0099": {
+      "start_sec": 254.159,
+      "end_sec": 255.27,
+      "duration": 1.1110000000000184,
+      "text": "asking you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0099.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0099.txt"
+    },
+    "chunk_0100": {
+      "start_sec": 255.28,
+      "end_sec": 256.87,
+      "duration": 1.5900000000000034,
+      "text": "anakin did not take to his new",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0100.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0100.txt"
+    },
+    "chunk_0101": {
+      "start_sec": 256.88,
+      "end_sec": 259.43,
+      "duration": 2.5500000000000114,
+      "text": "assignment with much enthusiasm with all",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0101.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0101.txt"
+    },
+    "chunk_0102": {
+      "start_sec": 259.44,
+      "end_sec": 261.67,
+      "duration": 2.230000000000018,
+      "text": "due respect master is he not the chosen",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0102.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0102.txt"
+    },
+    "chunk_0103": {
+      "start_sec": 261.68,
+      "end_sec": 264.39,
+      "duration": 2.7099999999999795,
+      "text": "one is he not to destroy the sith and bring",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0103.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0103.txt"
+    },
+    "chunk_0104": {
+      "start_sec": 264.4,
+      "end_sec": 266.83,
+      "duration": 2.430000000000007,
+      "text": "balance to the force he will not let me",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0104.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0104.txt"
+    },
+    "chunk_0105": {
+      "start_sec": 266.84,
+      "end_sec": 269.27,
+      "duration": 2.430000000000007,
+      "text": "down he never has",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0105.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0105.txt"
+    },
+    "chunk_0106": {
+      "start_sec": 269.28,
+      "end_sec": 271.67,
+      "duration": 2.390000000000043,
+      "text": "oh i agree however it may turn out just",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0106.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0106.txt"
+    },
+    "chunk_0107": {
+      "start_sec": 271.68,
+      "end_sec": 273.59000000000003,
+      "duration": 1.910000000000025,
+      "text": "to be a wild panther chase",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0107.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0107.txt"
+    },
+    "chunk_0108": {
+      "start_sec": 273.6,
+      "end_sec": 276.15,
+      "duration": 2.5499999999999545,
+      "text": "you are strong and wise anakin and i am",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0108.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0108.txt"
+    },
+    "chunk_0109": {
+      "start_sec": 276.15999999999997,
+      "end_sec": 278.39,
+      "duration": 2.230000000000018,
+      "text": "very proud of you i have trained you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0109.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0109.txt"
+    },
+    "chunk_0110": {
+      "start_sec": 278.4,
+      "end_sec": 280.23,
+      "duration": 1.830000000000041,
+      "text": "since you were a small boy",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0110.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0110.txt"
+    },
+    "chunk_0111": {
+      "start_sec": 280.24,
+      "end_sec": 282.469,
+      "duration": 2.228999999999985,
+      "text": "i have taught you everything i know",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0111.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0111.txt"
+    },
+    "chunk_0112": {
+      "start_sec": 282.479,
+      "end_sec": 284.31,
+      "duration": 1.8310000000000173,
+      "text": "and you have become a far greater jedi",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0112.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0112.txt"
+    },
+    "chunk_0113": {
+      "start_sec": 284.32,
+      "end_sec": 285.99,
+      "duration": 1.670000000000016,
+      "text": "than i could ever hope to be",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0113.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0113.txt"
+    },
+    "chunk_0114": {
+      "start_sec": 286.0,
+      "end_sec": 288.39,
+      "duration": 2.3899999999999864,
+      "text": "but be patient anakin it will not be",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0114.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0114.txt"
+    },
+    "chunk_0115": {
+      "start_sec": 288.4,
+      "end_sec": 290.23,
+      "duration": 1.830000000000041,
+      "text": "long before the council makes you a jedi",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0115.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0115.txt"
+    },
+    "chunk_0116": {
+      "start_sec": 290.24,
+      "end_sec": 292.629,
+      "duration": 2.38900000000001,
+      "text": "master goodbye old friend",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0116.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0116.txt"
+    },
+    "chunk_0117": {
+      "start_sec": 292.639,
+      "end_sec": 294.629,
+      "duration": 1.990000000000009,
+      "text": "may the force be with you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0117.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0117.txt"
+    },
+    "chunk_0118": {
+      "start_sec": 294.639,
+      "end_sec": 296.469,
+      "duration": 1.829999999999984,
+      "text": "i'll keep them distracted until you get",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0118.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0118.txt"
+    },
+    "chunk_0119": {
+      "start_sec": 296.479,
+      "end_sec": 299.51,
+      "duration": 3.031000000000006,
+      "text": "there just don't take too long",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0119.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0119.txt"
+    },
+    "chunk_0120": {
+      "start_sec": 299.52,
+      "end_sec": 301.67,
+      "duration": 2.150000000000034,
+      "text": "very well the burden is on me not to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0120.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0120.txt"
+    },
+    "chunk_0121": {
+      "start_sec": 301.68,
+      "end_sec": 304.629,
+      "duration": 2.9490000000000123,
+      "text": "destroy all the droids until you arrive",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0121.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0121.txt"
+    },
+    "chunk_0122": {
+      "start_sec": 304.639,
+      "end_sec": 305.99,
+      "duration": 1.350999999999999,
+      "text": "save your energy",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0122.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0122.txt"
+    },
+    "chunk_0123": {
+      "start_sec": 306.0,
+      "end_sec": 307.67,
+      "duration": 1.670000000000016,
+      "text": "don't give up",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0123.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0123.txt"
+    },
+    "chunk_0124": {
+      "start_sec": 307.68,
+      "end_sec": 310.15,
+      "duration": 2.4699999999999704,
+      "text": "unfortunately the war with your kind",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0124.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0124.txt"
+    },
+    "chunk_0125": {
+      "start_sec": 310.16,
+      "end_sec": 312.23,
+      "duration": 2.069999999999993,
+      "text": "permission i should like some fuel",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0125.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0125.txt"
+    },
+    "chunk_0126": {
+      "start_sec": 312.24,
+      "end_sec": 314.23,
+      "duration": 1.990000000000009,
+      "text": "and to use your city as a base as i",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0126.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0126.txt"
+    },
+    "chunk_0127": {
+      "start_sec": 314.24,
+      "end_sec": 316.39,
+      "duration": 2.1499999999999773,
+      "text": "search nearby systems for general",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0127.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0127.txt"
+    },
+    "chunk_0128": {
+      "start_sec": 316.4,
+      "end_sec": 319.27,
+      "duration": 2.8700000000000045,
+      "text": "grievous i understand tell your people",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0128.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0128.txt"
+    },
+    "chunk_0129": {
+      "start_sec": 319.28,
+      "end_sec": 320.95,
+      "duration": 1.670000000000016,
+      "text": "to take shelter",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0129.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0129.txt"
+    },
+    "chunk_0130": {
+      "start_sec": 320.96,
+      "end_sec": 322.629,
+      "duration": 1.6690000000000396,
+      "text": "if you have warriors",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0130.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0130.txt"
+    },
+    "chunk_0131": {
+      "start_sec": 322.639,
+      "end_sec": 324.71,
+      "duration": 2.0709999999999695,
+      "text": "now is the time take the fighter back to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0131.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0131.txt"
+    },
+    "chunk_0132": {
+      "start_sec": 324.72,
+      "end_sec": 326.629,
+      "duration": 1.9089999999999918,
+      "text": "the ship tell cody",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0132.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0132.txt"
+    },
+    "chunk_0133": {
+      "start_sec": 326.639,
+      "end_sec": 329.35,
+      "duration": 2.7110000000000127,
+      "text": "i've made contact hello there",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0133.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0133.txt"
+    },
+    "chunk_0134": {
+      "start_sec": 329.36,
+      "end_sec": 332.39,
+      "duration": 3.0299999999999727,
+      "text": "your move oh i don't think so",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0134.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0134.txt"
+    },
+    "chunk_0135": {
+      "start_sec": 332.4,
+      "end_sec": 335.43,
+      "duration": 3.0300000000000296,
+      "text": "so uncivilized commander contact your",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0135.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0135.txt"
+    },
+    "chunk_0136": {
+      "start_sec": 335.44,
+      "end_sec": 337.67,
+      "duration": 2.230000000000018,
+      "text": "troops tell them to move to the higher",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0136.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0136.txt"
+    },
+    "chunk_0137": {
+      "start_sec": 337.68,
+      "end_sec": 340.23,
+      "duration": 2.5500000000000114,
+      "text": "levels thank you cody now let's get a",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0137.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0137.txt"
+    },
+    "chunk_0138": {
+      "start_sec": 340.24,
+      "end_sec": 342.55,
+      "duration": 2.3100000000000023,
+      "text": "move on we've got a battle twin here",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0138.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0138.txt"
+    },
+    "chunk_0139": {
+      "start_sec": 342.56,
+      "end_sec": 344.71,
+      "duration": 2.1499999999999773,
+      "text": "emergency code 913",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0139.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0139.txt"
+    },
+    "chunk_0140": {
+      "start_sec": 344.72,
+      "end_sec": 346.87,
+      "duration": 2.1499999999999773,
+      "text": "i have no contact on any frequency",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0140.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0140.txt"
+    },
+    "chunk_0141": {
+      "start_sec": 346.88,
+      "end_sec": 349.43,
+      "duration": 2.5500000000000114,
+      "text": "repeat senator organa",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0141.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0141.txt"
+    },
+    "chunk_0142": {
+      "start_sec": 349.44,
+      "end_sec": 352.15,
+      "duration": 2.7099999999999795,
+      "text": "my clone troops turned on me i need help",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0142.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0142.txt"
+    },
+    "chunk_0143": {
+      "start_sec": 352.15999999999997,
+      "end_sec": 353.83,
+      "duration": 1.670000000000016,
+      "text": "how many other jedi have managed to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0143.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0143.txt"
+    },
+    "chunk_0144": {
+      "start_sec": 353.84000000000003,
+      "end_sec": 356.07,
+      "duration": 2.2299999999999613,
+      "text": "survive have we had any contact from the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0144.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0144.txt"
+    },
+    "chunk_0145": {
+      "start_sec": 356.08,
+      "end_sec": 358.71,
+      "duration": 2.6299999999999955,
+      "text": "temple well then we must go back",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0145.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0145.txt"
+    },
+    "chunk_0146": {
+      "start_sec": 358.72,
+      "end_sec": 360.23,
+      "duration": 1.509999999999991,
+      "text": "if there are any stragglers they will",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0146.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0146.txt"
+    },
+    "chunk_0147": {
+      "start_sec": 360.24,
+      "end_sec": 362.55,
+      "duration": 2.3100000000000023,
+      "text": "fall into the trap and be killed yes",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0147.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0147.txt"
+    },
+    "chunk_0148": {
+      "start_sec": 362.56,
+      "end_sec": 364.79,
+      "duration": 2.230000000000018,
+      "text": "master there is too much at stake",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0148.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0148.txt"
+    },
+    "chunk_0149": {
+      "start_sec": 364.8,
+      "end_sec": 366.39,
+      "duration": 1.589999999999975,
+      "text": "i don't think so",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0149.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0149.txt"
+    },
+    "chunk_0150": {
+      "start_sec": 366.4,
+      "end_sec": 367.67,
+      "duration": 1.2700000000000387,
+      "text": "the chancellor will not be able to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0150.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0150.txt"
+    },
+    "chunk_0151": {
+      "start_sec": 367.68,
+      "end_sec": 369.51,
+      "duration": 1.829999999999984,
+      "text": "control the thousands of star systems",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0151.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0151.txt"
+    },
+    "chunk_0152": {
+      "start_sec": 369.52,
+      "end_sec": 371.59,
+      "duration": 2.069999999999993,
+      "text": "without keeping the senate intact not",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0152.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0152.txt"
+    },
+    "chunk_0153": {
+      "start_sec": 371.6,
+      "end_sec": 373.909,
+      "duration": 2.308999999999969,
+      "text": "even the younglings survived",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0153.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0153.txt"
+    },
+    "chunk_0154": {
+      "start_sec": 373.919,
+      "end_sec": 375.67,
+      "duration": 1.7510000000000332,
+      "text": "who",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0154.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0154.txt"
+    },
+    "chunk_0155": {
+      "start_sec": 375.68,
+      "end_sec": 377.51,
+      "duration": 1.829999999999984,
+      "text": "who could have done this",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0155.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0155.txt"
+    },
+    "chunk_0156": {
+      "start_sec": 377.52,
+      "end_sec": 379.749,
+      "duration": 2.229000000000042,
+      "text": "i have recalibrated the code warning all",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0156.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0156.txt"
+    },
+    "chunk_0157": {
+      "start_sec": 379.759,
+      "end_sec": 382.309,
+      "duration": 2.5500000000000114,
+      "text": "surviving jedi to stay away",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0157.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0157.txt"
+    },
+    "chunk_0158": {
+      "start_sec": 382.319,
+      "end_sec": 384.629,
+      "duration": 2.3100000000000023,
+      "text": "wait master there is something i must",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0158.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0158.txt"
+    },
+    "chunk_0159": {
+      "start_sec": 384.639,
+      "end_sec": 387.83,
+      "duration": 3.190999999999974,
+      "text": "know i must know the truth master",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0159.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0159.txt"
+    },
+    "chunk_0160": {
+      "start_sec": 387.84,
+      "end_sec": 390.309,
+      "duration": 2.469000000000051,
+      "text": "it can't be",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0160.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0160.txt"
+    },
+    "chunk_0161": {
+      "start_sec": 390.319,
+      "end_sec": 391.67,
+      "duration": 1.350999999999999,
+      "text": "it can't be",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0161.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0161.txt"
+    },
+    "chunk_0162": {
+      "start_sec": 391.68,
+      "end_sec": 394.95,
+      "duration": 3.269999999999982,
+      "text": "send me to kill the emperor i will not",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0162.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0162.txt"
+    },
+    "chunk_0163": {
+      "start_sec": 394.96,
+      "end_sec": 397.909,
+      "duration": 2.9490000000000123,
+      "text": "kill anakin he is like my brother i",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0163.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0163.txt"
+    },
+    "chunk_0164": {
+      "start_sec": 397.919,
+      "end_sec": 399.909,
+      "duration": 1.990000000000009,
+      "text": "cannot do it i do not know where the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0164.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0164.txt"
+    },
+    "chunk_0165": {
+      "start_sec": 399.919,
+      "end_sec": 402.15,
+      "duration": 2.2309999999999945,
+      "text": "emperor has sent him",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0165.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0165.txt"
+    },
+    "chunk_0166": {
+      "start_sec": 402.15999999999997,
+      "end_sec": 404.07,
+      "duration": 1.910000000000025,
+      "text": "i don't know where to look",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0166.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0166.txt"
+    },
+    "chunk_0167": {
+      "start_sec": 404.08,
+      "end_sec": 405.909,
+      "duration": 1.8290000000000077,
+      "text": "when was the last time you saw him do",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0167.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0167.txt"
+    },
+    "chunk_0168": {
+      "start_sec": 405.919,
+      "end_sec": 407.67,
+      "duration": 1.7510000000000332,
+      "text": "you know where he is now",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0168.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0168.txt"
+    },
+    "chunk_0169": {
+      "start_sec": 407.68,
+      "end_sec": 410.71,
+      "duration": 3.0299999999999727,
+      "text": "padme i need your help",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0169.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0169.txt"
+    },
+    "chunk_0170": {
+      "start_sec": 410.72,
+      "end_sec": 413.67,
+      "duration": 2.9499999999999886,
+      "text": "he's in grave danger from himself",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0170.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0170.txt"
+    },
+    "chunk_0171": {
+      "start_sec": 413.68,
+      "end_sec": 417.189,
+      "duration": 3.5090000000000146,
+      "text": "padme anakin has turned to the dark side",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0171.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0171.txt"
+    },
+    "chunk_0172": {
+      "start_sec": 417.199,
+      "end_sec": 418.469,
+      "duration": 1.2699999999999818,
+      "text": "i have seen",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0172.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0172.txt"
+    },
+    "chunk_0173": {
+      "start_sec": 418.479,
+      "end_sec": 421.189,
+      "duration": 2.7100000000000364,
+      "text": "a security hologram",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0173.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0173.txt"
+    },
+    "chunk_0174": {
+      "start_sec": 421.199,
+      "end_sec": 423.99,
+      "duration": 2.790999999999997,
+      "text": "of him killing younglings",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0174.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0174.txt"
+    },
+    "chunk_0175": {
+      "start_sec": 424.0,
+      "end_sec": 427.189,
+      "duration": 3.1890000000000214,
+      "text": "he was deceived by a lie we all were",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0175.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0175.txt"
+    },
+    "chunk_0176": {
+      "start_sec": 427.199,
+      "end_sec": 429.029,
+      "duration": 1.829999999999984,
+      "text": "it appears that the chancellor is behind",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0176.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0176.txt"
+    },
+    "chunk_0177": {
+      "start_sec": 429.039,
+      "end_sec": 431.189,
+      "duration": 2.150000000000034,
+      "text": "everything including the war",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0177.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0177.txt"
+    },
+    "chunk_0178": {
+      "start_sec": 431.199,
+      "end_sec": 432.95,
+      "duration": 1.7509999999999764,
+      "text": "palpatine is the sith lord we've been",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0178.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0178.txt"
+    },
+    "chunk_0179": {
+      "start_sec": 432.96,
+      "end_sec": 434.309,
+      "duration": 1.3490000000000464,
+      "text": "looking for",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0179.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0179.txt"
+    },
+    "chunk_0180": {
+      "start_sec": 434.319,
+      "end_sec": 436.23,
+      "duration": 1.9110000000000014,
+      "text": "after the death of cant dooku anakin",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0180.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0180.txt"
+    },
+    "chunk_0181": {
+      "start_sec": 436.24,
+      "end_sec": 441.189,
+      "duration": 4.949000000000012,
+      "text": "became his new apprentice",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0181.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0181.txt"
+    },
+    "chunk_0182": {
+      "start_sec": 441.199,
+      "end_sec": 444.15,
+      "duration": 2.950999999999965,
+      "text": "i must find him he has become a very",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0182.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0182.txt"
+    },
+    "chunk_0183": {
+      "start_sec": 444.16,
+      "end_sec": 445.749,
+      "duration": 1.5889999999999986,
+      "text": "great threat",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0183.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0183.txt"
+    },
+    "chunk_0184": {
+      "start_sec": 445.759,
+      "end_sec": 448.83,
+      "duration": 3.0709999999999695,
+      "text": "anakin is the father isn't he i'm so",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0184.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0184.txt"
+    },
+    "chunk_0185": {
+      "start_sec": 448.84,
+      "end_sec": 453.589,
+      "duration": 4.749000000000024,
+      "text": "sorry let her go anakin let her go",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0185.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0185.txt"
+    },
+    "chunk_0186": {
+      "start_sec": 453.599,
+      "end_sec": 456.469,
+      "duration": 2.8700000000000045,
+      "text": "you have done that yourself your anger",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0186.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0186.txt"
+    },
+    "chunk_0187": {
+      "start_sec": 456.479,
+      "end_sec": 458.469,
+      "duration": 1.990000000000009,
+      "text": "and your lust for power have already",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0187.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0187.txt"
+    },
+    "chunk_0188": {
+      "start_sec": 458.479,
+      "end_sec": 461.35,
+      "duration": 2.8710000000000377,
+      "text": "done that you have allowed this dark",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0188.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0188.txt"
+    },
+    "chunk_0189": {
+      "start_sec": 461.36,
+      "end_sec": 464.30899999999997,
+      "duration": 2.9489999999999554,
+      "text": "lord to twist your mind until now until",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0189.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0189.txt"
+    },
+    "chunk_0190": {
+      "start_sec": 464.319,
+      "end_sec": 465.99,
+      "duration": 1.6709999999999923,
+      "text": "now you have become the very thing you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0190.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0190.txt"
+    },
+    "chunk_0191": {
+      "start_sec": 466.0,
+      "end_sec": 469.749,
+      "duration": 3.7490000000000236,
+      "text": "swore to destroy your new empire",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0191.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0191.txt"
+    },
+    "chunk_0192": {
+      "start_sec": 469.759,
+      "end_sec": 472.79,
+      "duration": 3.031000000000006,
+      "text": "anakin my allegiances to the republic to",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0192.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0192.txt"
+    },
+    "chunk_0193": {
+      "start_sec": 472.8,
+      "end_sec": 474.469,
+      "duration": 1.6689999999999827,
+      "text": "democracy",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0193.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0193.txt"
+    },
+    "chunk_0194": {
+      "start_sec": 474.479,
+      "end_sec": 477.27,
+      "duration": 2.790999999999997,
+      "text": "only a sith deals in absolutes",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0194.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0194.txt"
+    },
+    "chunk_0195": {
+      "start_sec": 477.28,
+      "end_sec": 479.27,
+      "duration": 1.990000000000009,
+      "text": "i will do what i must",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0195.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0195.txt"
+    },
+    "chunk_0196": {
+      "start_sec": 479.28,
+      "end_sec": 481.83,
+      "duration": 2.5500000000000114,
+      "text": "i have failed you anakin",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0196.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0196.txt"
+    },
+    "chunk_0197": {
+      "start_sec": 481.84,
+      "end_sec": 483.43,
+      "duration": 1.5900000000000318,
+      "text": "i have failed you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0197.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0197.txt"
+    },
+    "chunk_0198": {
+      "start_sec": 483.44,
+      "end_sec": 485.99,
+      "duration": 2.5500000000000114,
+      "text": "anakin chancellor palpatine is evil well",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0198.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0198.txt"
+    },
+    "chunk_0199": {
+      "start_sec": 486.0,
+      "end_sec": 487.67,
+      "duration": 1.670000000000016,
+      "text": "then you are lost",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0199.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0199.txt"
+    },
+    "chunk_0200": {
+      "start_sec": 487.68,
+      "end_sec": 489.589,
+      "duration": 1.9089999999999918,
+      "text": "it's over anakin",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0200.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0200.txt"
+    },
+    "chunk_0201": {
+      "start_sec": 489.599,
+      "end_sec": 491.51,
+      "duration": 1.9110000000000014,
+      "text": "i have the high ground",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0201.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0201.txt"
+    },
+    "chunk_0202": {
+      "start_sec": 491.52,
+      "end_sec": 493.029,
+      "duration": 1.5090000000000146,
+      "text": "don't try it",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0202.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0202.txt"
+    },
+    "chunk_0203": {
+      "start_sec": 493.039,
+      "end_sec": 495.43,
+      "duration": 2.3910000000000196,
+      "text": "you and the chosen one",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0203.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0203.txt"
+    },
+    "chunk_0204": {
+      "start_sec": 495.44,
+      "end_sec": 497.189,
+      "duration": 1.7490000000000236,
+      "text": "it was said that you would destroy this",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0204.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0204.txt"
+    },
+    "chunk_0205": {
+      "start_sec": 497.199,
+      "end_sec": 498.95,
+      "duration": 1.7509999999999764,
+      "text": "sid not join them",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0205.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0205.txt"
+    },
+    "chunk_0206": {
+      "start_sec": 498.96,
+      "end_sec": 501.189,
+      "duration": 2.229000000000042,
+      "text": "bring balance to the force",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0206.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0206.txt"
+    },
+    "chunk_0207": {
+      "start_sec": 501.199,
+      "end_sec": 503.589,
+      "duration": 2.3899999999999864,
+      "text": "not leave it in darkness",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0207.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0207.txt"
+    },
+    "chunk_0208": {
+      "start_sec": 503.599,
+      "end_sec": 508.55,
+      "duration": 4.951000000000022,
+      "text": "you were my brother anakin i loved you",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0208.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0208.txt"
+    },
+    "chunk_0209": {
+      "start_sec": 508.56,
+      "end_sec": 511.11,
+      "duration": 2.5500000000000114,
+      "text": "she's dying it's a girl",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0209.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0209.txt"
+    },
+    "chunk_0210": {
+      "start_sec": 511.12,
+      "end_sec": 512.7090000000001,
+      "duration": 1.5890000000000555,
+      "text": "we must take them somewhere where the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0210.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0210.txt"
+    },
+    "chunk_0211": {
+      "start_sec": 512.719,
+      "end_sec": 515.029,
+      "duration": 2.3099999999999454,
+      "text": "sith will not sense their presence",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0211.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0211.txt"
+    },
+    "chunk_0212": {
+      "start_sec": 515.039,
+      "end_sec": 517.269,
+      "duration": 2.230000000000018,
+      "text": "and what of the boy i will take the",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0212.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0212.txt"
+    },
+    "chunk_0213": {
+      "start_sec": 517.279,
+      "end_sec": 519.509,
+      "duration": 2.230000000000018,
+      "text": "child and watch over him",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0213.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0213.txt"
+    },
+    "chunk_0214": {
+      "start_sec": 519.519,
+      "end_sec": 523.479,
+      "duration": 3.9600000000000364,
+      "text": "training qui-gon",
+      "speaker_id": "obi-wan",
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0214.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\obi_wan_ep3_a0bcd862\\corpus\\chunk_0214.txt"
+    }
+  }
+}

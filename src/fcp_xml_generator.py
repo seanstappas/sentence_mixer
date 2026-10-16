@@ -155,7 +155,17 @@ def generate_fcp_xml(
                             "-q:v", "1",
                             str(hold_img),
                         ]
-                        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        if not hold_img.exists() or hold_img.stat().st_size == 0:
+                            cmd_eof = [
+                                "ffmpeg", "-y",
+                                "-sseof", "-0.1",
+                                "-i", str(src_path),
+                                "-frames:v", "1",
+                                "-q:v", "1",
+                                str(hold_img),
+                            ]
+                            subprocess.run(cmd_eof, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     except Exception:
                         pass
 

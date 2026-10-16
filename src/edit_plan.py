@@ -57,15 +57,16 @@ def release_tail_samples(
         return 0
     last = inventory.events.get(span.event_ids[-1])
     end_s = nominal_end if nominal_end is not None else span.end_sample
-    if last is None or last.kind != "phone" or end_s < last.end_sample - 1:
+    if last is None or last.kind != "phone" or span.end_sample < last.end_sample - 1:
         return 0
     succ = inventory.events.get(last.successor_id) if last.successor_id else None
     if succ is None or succ.kind != "silence":
         return 0
     src = inventory.sources.get(span.source_content_id)
     sr = src.native_sample_rate if src and src.native_sample_rate else 48000
-    room = succ.end_sample - max(succ.start_sample, end_s) - int(round(RELEASE_GUARD_SEC * sr))
-    return max(0, min(int(round(tail_sec * sr)), room))
+    base_end = max(succ.start_sample, end_s)
+    room = succ.end_sample - base_end - int(round(RELEASE_GUARD_SEC * sr))
+    return max(0, (base_end - end_s) + max(0, min(int(round(tail_sec * sr)), room)))
 
 
 class _SpeechIndex:
@@ -309,6 +310,7 @@ def _refine_spans_in_native_audio(
     graph: Optional[TargetGraph] = None,
     rendering_mode: str = "source-derived",
     overlap_duration_ms: float = 14.0,
+    audio_track: str = "recombined",
 ) -> Tuple[List[int], List[int]]:
     """
     Refines boundary sample offsets in native source audio prior to EditPlan construction.
@@ -320,12 +322,23 @@ def _refine_spans_in_native_audio(
     # Quick check if files exist on disk for all referenced sources
     can_refine = True
     src_paths: Dict[str, str] = {}
+    effective_refine_track = "vocals" if audio_track in ("both", "all") else audio_track
     for span in selected_spans:
         src_rec = inventory.sources.get(span.source_content_id)
         if not src_rec:
             can_refine = False
             break
-        p = src_rec.cached_pcm_path or src_rec.source_path
+        p = ""
+        if effective_refine_track in ("vocals", "isolated", "recombined"):
+            vp = getattr(src_rec, "cached_vocal_pcm_path", "") or ""
+            if vp and Path(vp).exists():
+                try:
+                    if int(sf.info(vp).samplerate) == int(src_rec.native_sample_rate or 48000):
+                        p = vp
+                except Exception:
+                    pass
+        if not p:
+            p = src_rec.cached_pcm_path or src_rec.source_path
         if not p or not Path(p).exists():
             can_refine = False
             break
@@ -430,11 +443,14 @@ def _refine_spans_in_native_audio(
                     if explicit or p_pause > 0.0:
                         has_pause = True
 
-            # If separated by pause or rendering cuts-only, use unvoiced zero-crossing snaps on both edges
-            is_unv = (rendering_mode == "cuts-only") or has_pause
+            # If separated by pause, release tail, or rendering cuts-only, use unvoiced zero-crossing snaps on both edges
+            has_curr_tail = release_tail_samples(curr_span, inventory, tail_sec) > 0
+            is_unv = (rendering_mode == "cuts-only") or has_pause or has_curr_tail
             if not is_unv:
-                last_p = curr_span.realized_phones[-1].rstrip("012") if getattr(curr_span, "realized_phones", None) else ""
-                first_p = next_span.realized_phones[0].rstrip("012") if getattr(next_span, "realized_phones", None) else ""
+                ev_last = inventory.events.get(curr_span.event_ids[-1]) if getattr(curr_span, "event_ids", None) else None
+                ev_first = inventory.events.get(next_span.event_ids[0]) if getattr(next_span, "event_ids", None) else None
+                last_p = (ev_last.base_phone or ev_last.label.rstrip("012")) if ev_last else (curr_span.realized_phones[-1].rstrip("012") if getattr(curr_span, "realized_phones", None) else "")
+                first_p = (ev_first.base_phone or ev_first.label.rstrip("012")) if ev_first else (next_span.realized_phones[0].rstrip("012") if getattr(next_span, "realized_phones", None) else "")
                 if not last_p and graph and curr_span.covered_nodes and curr_span.covered_nodes[-1] < len(graph.nodes):
                     last_p = getattr(graph.nodes[curr_span.covered_nodes[-1]], "base_phone", "") or graph.nodes[curr_span.covered_nodes[-1]].phone.rstrip("012")
                 if not first_p and graph and next_span.covered_nodes and next_span.covered_nodes[0] < len(graph.nodes):
@@ -523,6 +539,7 @@ def build_edit_plan(
     release_tail_sec: float = 0.0,
     finalize: bool = True,
     audio_track: str = "recombined",
+    normalize_loudness: Optional[bool] = None,
 ) -> EditPlan:
     """
     Constructs an immutable, sample-accurate EditPlan from selected spans.
@@ -560,6 +577,7 @@ def build_edit_plan(
         graph=graph,
         rendering_mode=rendering_mode,
         overlap_duration_ms=overlap_duration_ms,
+        audio_track=audio_track,
     )
 
     # Check for leading gap (boundary index -1)
@@ -918,7 +936,8 @@ def build_edit_plan(
     )
     plan.validate()
     if finalize:
-        finalize_edit_plan(plan, inventory, normalize_loudness=(rendering_mode != "cuts-only"), audio_track=audio_track)
+        norm_flag = (rendering_mode != "cuts-only") if normalize_loudness is None else (normalize_loudness and rendering_mode != "cuts-only")
+        finalize_edit_plan(plan, inventory, normalize_loudness=norm_flag, audio_track=audio_track)
     return plan
 
 
@@ -1136,6 +1155,19 @@ def finalize_edit_plan(
             with tempfile.TemporaryDirectory(prefix="sm_loudness_analysis_") as tmp_d:
                 analysis_wav = Path(tmp_d) / "analysis_master.wav"
                 effective_analysis_track = "vocals" if audio_track in ("both", "all") else audio_track
+                if effective_analysis_track in ("vocals", "isolated"):
+                    has_all_vocals = all(
+                        bool(
+                            plan.sources
+                            and s.source_content_id in plan.sources
+                            and getattr(plan.sources[s.source_content_id], "cached_vocal_pcm_path", None)
+                            and Path(plan.sources[s.source_content_id].cached_vocal_pcm_path).exists()
+                        )
+                        for s in plan.segments
+                        if not s.is_silence
+                    )
+                    if not has_all_vocals:
+                        effective_analysis_track = "raw"
                 render_master_pcm(plan, str(analysis_wav), normalize_loudness=False, audio_track=effective_analysis_track)
                 if analysis_wav.exists() and analysis_wav.stat().st_size > 0:
                     cmd1 = [
@@ -1150,6 +1182,7 @@ def finalize_edit_plan(
                         if match:
                             stats = json.loads(match.group(0))
                             plan.metadata["ebur128_analysis"] = stats
+                            plan.metadata["ebur128_analysis_track"] = effective_analysis_track
                             plan.metadata["ebur128_target"] = {
                                 "target_i": target_i,
                                 "target_tp": target_tp,

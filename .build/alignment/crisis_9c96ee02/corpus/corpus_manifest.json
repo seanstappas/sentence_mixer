@@ -1,0 +1,119 @@
+{
+  "source_video": "D:\\Code\\sentence_mixer\\input\\crisis.mp4",
+  "source_vtt": "D:\\Code\\sentence_mixer\\input\\crisis.en.vtt",
+  "audio_source_path": "D:\\Code\\sentence_mixer\\.build\\vocals\\crisis_9c96ee02\\vocals.wav",
+  "speaker_id": null,
+  "single_speaker_verified": false,
+  "assume_single_speaker": false,
+  "total_chunks": 12,
+  "chunks": {
+    "chunk_0000": {
+      "start_sec": 0.26,
+      "end_sec": 2.48,
+      "duration": 2.2199999999999998,
+      "text": "kamar skills are preparing for war there",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0000.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0000.txt"
+    },
+    "chunk_0001": {
+      "start_sec": 2.49,
+      "end_sec": 3.53,
+      "duration": 1.0399999999999996,
+      "text": "can be no doubt of that",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0001.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0001.txt"
+    },
+    "chunk_0002": {
+      "start_sec": 3.54,
+      "end_sec": 5.329,
+      "duration": 1.7889999999999997,
+      "text": "Count Dooku must have made a treaty with",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0002.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0002.txt"
+    },
+    "chunk_0003": {
+      "start_sec": 5.339,
+      "end_sec": 14.18,
+      "duration": 8.841,
+      "text": "them unfortunately the debate is not",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0003.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0003.txt"
+    },
+    "chunk_0004": {
+      "start_sec": 14.19,
+      "end_sec": 17.24,
+      "duration": 3.049999999999999,
+      "text": "over the Senate will never approve the",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0004.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0004.txt"
+    },
+    "chunk_0005": {
+      "start_sec": 17.25,
+      "end_sec": 18.68,
+      "duration": 1.4299999999999997,
+      "text": "use of clones before the separatists",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0005.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0005.txt"
+    },
+    "chunk_0006": {
+      "start_sec": 18.69,
+      "end_sec": 22.099,
+      "duration": 3.408999999999999,
+      "text": "attack this is a crisis the Senate must",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0006.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0006.txt"
+    },
+    "chunk_0007": {
+      "start_sec": 22.109,
+      "end_sec": 24.8,
+      "duration": 2.690999999999999,
+      "text": "vote the Chancellor emergency powers he",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0007.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0007.txt"
+    },
+    "chunk_0008": {
+      "start_sec": 24.81,
+      "end_sec": 27.73,
+      "duration": 2.9200000000000017,
+      "text": "can then approve the creation of an army",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0008.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0008.txt"
+    },
+    "chunk_0009": {
+      "start_sec": 27.74,
+      "end_sec": 30.38,
+      "duration": 2.6400000000000006,
+      "text": "but what senator would have the courage",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0009.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0009.txt"
+    },
+    "chunk_0010": {
+      "start_sec": 30.39,
+      "end_sec": 34.069,
+      "duration": 3.679000000000002,
+      "text": "to propose such a radical amendment if",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0010.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0010.txt"
+    },
+    "chunk_0011": {
+      "start_sec": 34.079,
+      "end_sec": 40.02,
+      "duration": 5.9410000000000025,
+      "text": "only senator Amidala were here",
+      "speaker_id": null,
+      "wav_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0011.wav",
+      "txt_path": "D:\\Code\\sentence_mixer\\.build\\alignment\\crisis_9c96ee02\\corpus\\chunk_0011.txt"
+    }
+  }
+}

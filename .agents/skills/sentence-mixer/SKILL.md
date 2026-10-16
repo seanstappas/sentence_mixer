@@ -47,6 +47,8 @@ Render conversations between multiple speakers with frame-accurate edit plans an
 # Run the dialogue runner script for pre-configured comic scenes
 .venv\Scripts\python.exe tools\render_dialogue_clips.py --clip 1       # Episode III: Anakin & Mace Windu
 .venv\Scripts\python.exe tools\render_dialogue_clips.py --clip 2       # Episode VI: Luke, Palpatine & Vader
+.venv\Scripts\python.exe tools\render_dialogue_clips.py --clip 5       # Episode IV: Obi-Wan & Luke (Alderaan)
+.venv\Scripts\python.exe tools\render_dialogue_clips.py --clip 6       # Episode III: Anakin, Obi-Wan & Sidious
 .venv\Scripts\python.exe tools\render_dialogue_clips.py --clip all --resolution 1080p
 ```
 Or use the Python API in `src/dialogue_mixer.py`:
@@ -66,9 +68,12 @@ synthesize_and_render_dialogue(
     output_video_path=Path("output/scene.mp4"),
     burn_subtitles=True,
     highlight_words=True,
+    pronunciation_overrides={"wtf": [["W", "AH1", "T", "DH", "AH0", "F", "AH1", "K"]]},
+    speaker_colors={"luke": "&H00FFFF00&", "palpatine": "&H000000FF&"},
 )
 ```
 - Subtitles are generated in ASS format with words dynamically highlighted in yellow (`&H0000FFFF&`) as they are spoken.
+- `pronunciation_overrides` maps display tokens (like `"wtf"`) to multi-word phoneme sequences so on-screen subtitles keep the acronym while the selector synthesizes the spoken words.
 - Conversational pauses (`pause_between_sec=0.45`) are inserted between turns without audio dropouts.
 
 ### 3. Ingestion & Continuous Watch Mode
@@ -120,12 +125,20 @@ Add custom phonetic pronunciations to `dictionaries/custom_pronunciations.txt`:
 ```text
 windu	W IH1 N D UW0
 yoda	Y OW1 D AH0
+alderaan	AA1 L D ER0 AA2 N
 ```
-The staged dictionary is rebuilt from file content, so affected sources re-align automatically on the next ingest or mix (no `--force-realign` needed). For movies this re-aligns every block (about 30 min per movie).
+- **Fast In-Place Movie Inventory Rebuild (~3 s per movie)**:
+  When you add pronunciations to `dictionaries/custom_pronunciations.txt` or want to recover words that MFA previously tagged as `spn` (spoken noise) in already-ingested movies, rebuild the movie inventories directly from cached `.TextGrid` files without re-running MFA:
+  ```powershell
+  .venv\Scripts\python.exe tools\rebuild_movie_inventories.py
+  ```
+- During new movie ingests (`src/movie_ingest.py`), all words appearing in the movie's subtitles are automatically staged into `staged_dictionary.dict` via `extra_words`, and any residual `spn` words are recovered via `recover_oov_words=True` in `build_units_inventory`.
 
 ## Troubleshooting Common Issues
 - **`ValueError: Could not find a continuous phonetic path`**:
   Occurs when the speaker corpus lacks a required phoneme and cognate fallback was disabled or missing. Ensure Level 3 cognate fallbacks (`G` <-> `K`, `NG` <-> `N`, `V` <-> `F`, unstressed `AH0` <-> `IH0` <-> `EH0`) are permitted.
+- **A Word Spoken in the Movie Subtitles Gets Spliced from Subwords/Phones**:
+  Occurs when MFA did not have the word in its static dictionary at alignment time and labeled its phones `spn` (spoken noise). Add the word's canonical pronunciation to `dictionaries/custom_pronunciations.txt` and run `.venv\Scripts\python.exe tools\rebuild_movie_inventories.py` (~3 s/movie) to recover the intact `[WORD]` unit from existing TextGrid word boundaries.
 - **Dropped Subtitle Words**:
   Check if subtitle duration is shorter than chunk audio. Prefer fixing the subtitle file (or using uploader-written subtitles instead of YouTube auto-captions). Whisper tail enrichment is opt-in with `--asr-fill-tails`; its words are unverified and can include hallucinations or other speakers, so use it sparingly. Changing the setting re-aligns affected sources automatically on the next ingest or mix.
 - **Robotic / Fragmented Speech**:

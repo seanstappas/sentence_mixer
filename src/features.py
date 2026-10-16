@@ -338,7 +338,7 @@ class ContinuousFeatureExtractor:
         if tracks.get("lazy"):
             tracks = self._window_tracks(tracks, start_sample, end_sample, native_sr)
             start_sample, end_sample, native_sr = tracks["win_start"], tracks["win_end"], self.sr
-        start_frame = max(0, self.sample_to_frame_index(start_sample, native_sr))
+        start_frame = min(max(0, self.sample_to_frame_index(start_sample, native_sr)), max(0, int(tracks["n_frames"]) - 1))
         end_frame = min(tracks["n_frames"], self.sample_to_frame_index(end_sample, native_sr))
 
         if end_frame <= start_frame:

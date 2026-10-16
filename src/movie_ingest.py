@@ -928,6 +928,7 @@ def ensure_movie_aligned(
         inv_dir.mkdir(parents=True, exist_ok=True)
         build_units_inventory(
             str(blocks_root), str(manifest_path), str(inv_path), source_record=src_rec,
+            recover_oov_words=True,
         )
         inv_meta_path.write_text(json.dumps({
             "inventory_key": inv_key, "movie": True, "media_hash": media_hash,

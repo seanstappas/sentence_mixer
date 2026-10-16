@@ -638,8 +638,15 @@ def render_master_pcm(
 
     # Tier 2: Master EBU R128 Loudness Normalization (disabled in cuts-only mode)
     if not is_cuts_only and normalize_loudness:
-        frozen_stats = getattr(plan, "metadata", {}).get("ebur128_analysis")
-        target_meta = getattr(plan, "metadata", {}).get("ebur128_target", {})
+        plan_meta = getattr(plan, "metadata", {}) or {}
+        frozen_stats = plan_meta.get("ebur128_analysis")
+        analysis_track = plan_meta.get("ebur128_analysis_track")
+        if analysis_track is not None:
+            norm_req = "vocals" if audio_track in ("isolated", "vocals") else ("raw" if audio_track in ("combined", "raw") else audio_track)
+            norm_ana = "vocals" if analysis_track in ("isolated", "vocals") else ("raw" if analysis_track in ("combined", "raw") else analysis_track)
+            if norm_req != norm_ana:
+                frozen_stats = None
+        target_meta = plan_meta.get("ebur128_target", {})
         t_i = target_meta.get("target_i", -16.0)
         t_tp = target_meta.get("target_tp", -1.0)
         t_lra = target_meta.get("target_lra", 11.0)
@@ -735,6 +742,7 @@ def render_sentence_mix_legacy(
     keep_temp: bool = False,
     normalize_loudness: bool = True,
     audio_track: str = "combined",
+    output_resolution: Optional[str] = None,
 ) -> str:
     """
     Renders video and audio from legacy units list.
@@ -836,6 +844,7 @@ def render_sentence_mix_legacy(
         keep_temp=keep_temp,
         normalize_loudness=normalize_loudness,
         audio_track=audio_track,
+        output_resolution=output_resolution,
     )
 
 
@@ -870,6 +879,7 @@ def render_sentence_mix(
             keep_temp=keep_temp,
             normalize_loudness=normalize_loudness,
             audio_track=audio_track,
+            output_resolution=output_resolution,
         )
 
     plan = plan_or_units
@@ -968,13 +978,34 @@ def render_sentence_mix(
                                 res = subprocess.run(cmd_extract, capture_output=True)
                                 if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
                                     extracted = True
-                            if not extracted:
+                                else:
+                                    cmd_extract_eof = [
+                                        "ffmpeg", "-y",
+                                        "-sseof", "-0.1",
+                                        "-i", str(seg.source_video_path),
+                                        "-frames:v", "1",
+                                        "-q:v", "1",
+                                        str(freeze_img),
+                                    ]
+                                    res_eof = subprocess.run(cmd_extract_eof, capture_output=True)
+                                    if res_eof.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                                        extracted = True
+                            if extracted:
+                                input_args.extend(["-loop", "1", "-framerate", fps_str, "-t", f"{dur_sec:.6f}", "-i", str(freeze_img)])
+                                filter_chains.append(f"[{current_in_idx}:v]fps={fps_str},{scale_pad},trim=end_frame={frame_count},format=yuv420p[v{k}]")
+                                out_labels.append(f"[v{k}]")
+                                current_in_idx += 1
+                            elif not has_valid_source and (
+                                not seg.source_video_path
+                                or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                            ):
+                                input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])
+                                filter_chains.append(f"[{current_in_idx}:v]trim=end_frame={frame_count},format=yuv420p[v{k}]")
+                                out_labels.append(f"[v{k}]")
+                                current_in_idx += 1
+                            else:
                                 can_batch = False
                                 break
-                            input_args.extend(["-loop", "1", "-framerate", fps_str, "-t", f"{dur_sec:.6f}", "-i", str(freeze_img)])
-                            filter_chains.append(f"[{current_in_idx}:v]fps={fps_str},{scale_pad},trim=end_frame={frame_count},format=yuv420p[v{k}]")
-                            out_labels.append(f"[v{k}]")
-                            current_in_idx += 1
                         elif has_valid_source:
                             start_pts = seg.video_source_pts_sec
                             # Dedicated per-cut seek input to prevent memory buffer queue overflow in FFmpeg
@@ -1081,7 +1112,19 @@ def render_sentence_mix(
                         res = subprocess.run(cmd_extract, capture_output=True)
                         if res.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
                             extracted = True
-                    elif idx > 0 and len(slice_files) > 0:
+                        else:
+                            cmd_extract_eof = [
+                                "ffmpeg", "-y",
+                                "-sseof", "-0.1",
+                                "-i", str(seg.source_video_path),
+                                "-frames:v", "1",
+                                "-q:v", "1",
+                                str(freeze_img),
+                            ]
+                            res_eof = subprocess.run(cmd_extract_eof, capture_output=True)
+                            if res_eof.returncode == 0 and freeze_img.exists() and freeze_img.stat().st_size > 0:
+                                extracted = True
+                    if not extracted and idx > 0 and len(slice_files) > 0:
                         cmd_extract = [
                             "ffmpeg", "-y",
                             "-sseof", "-0.05",

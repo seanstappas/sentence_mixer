@@ -15,14 +15,22 @@ root_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root_dir))
 sys.path.insert(0, str(root_dir / "src"))
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from dialogue_mixer import parse_script_text, synthesize_and_render_dialogue
 from run_mixer import load_or_combine_inventories
 
 EP2_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_II_-_Attack_Of_The_Clo_56214896/units_index.json")
 EP3_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3/units_index.json")
+EP4_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_IV_-_A_New_Hope_1977_2_04865440/units_index.json")
 EP6_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_VI_-_Return_Of_The_Jed_3d083b52/units_index.json")
+
+EPISODE_4_ALDERAAN_SCRIPT = """
+obi-wan: Alderaan ought to be here, but it isn't.
+han: Lost a planet, Master Obi-Wan has. How embarrassing.
+obi-wan: WTF did you say?
+han: I meant it's probably been blown away by the Empire.
+"""
 
 EPISODE_3_SCRIPT = """
 anakin: It's not the Jedi way, he must live!
@@ -78,6 +86,26 @@ EP3_COUNCIL_DEFAULT_COLORS: Dict[str, str] = {
     "anakin": "blue",
     "yoda": "green",
     "padme": "yellow",
+}
+
+EP4_ALDERAAN_DEFAULT_COLORS: Dict[str, str] = {
+    "obi-wan": "blue",
+    "han": "orange",
+}
+
+EP4_PRONUNCIATION_OVERRIDES: Dict[str, List[List[str]]] = {
+    "wtf": [["W", "AH1", "T", "DH", "AH0", "F", "AH1", "K"]],
+}
+
+EPISODE_3_TITLE_DROPS_SCRIPT = """
+padme: Obi-Wan, tell me what's going on.
+obi-wan: It's Palpatine. He's The Phantom Menace we've been looking for. He caused the Attack of the Clones on the Jedi in order to bring about the Revenge of the Sith.
+padme: Oh no! That means that he's been behind these Star Wars the whole time!
+"""
+
+EP3_TITLE_DROPS_DEFAULT_COLORS: Dict[str, str] = {
+    "padme": "magenta",
+    "obi-wan": "cyan",
 }
 
 
@@ -215,13 +243,70 @@ def render_episode_3_council_chambers(
     )
 
 
+def render_episode_4_alderaan(
+    output_path: Path,
+    resolution: str = "1080p",
+    speaker_colors: Optional[Dict[str, str]] = None,
+) -> Path:
+    print("\n" + "=" * 60)
+    print("RENDERING EPISODE IV MEME: ALDERAAN / LOST A PLANET (OBI-WAN & HAN)")
+    print("=" * 60)
+    lines = parse_script_text(EPISODE_4_ALDERAAN_SCRIPT)
+    print(f"Loading inventory: {EP4_INVENTORY_PATH}")
+    inv4, _ = load_or_combine_inventories([str(EP4_INVENTORY_PATH)])
+    colors = dict(EP4_ALDERAAN_DEFAULT_COLORS)
+    if speaker_colors:
+        colors.update(speaker_colors)
+    print(f"Speaker highlight colors: {colors}")
+    return synthesize_and_render_dialogue(
+        lines=lines,
+        inventory_index=inv4,
+        output_video_path=output_path,
+        audio_track="recombined",
+        pause_between_sec=0.45,
+        resolution=resolution,
+        burn_subtitles=True,
+        highlight_words=True,
+        speaker_colors=colors,
+        pronunciation_overrides=EP4_PRONUNCIATION_OVERRIDES,
+    )
+
+
+def render_episode_3_title_drops(
+    output_path: Path,
+    resolution: str = "1080p",
+    speaker_colors: Optional[Dict[str, str]] = None,
+) -> Path:
+    print("\n" + "=" * 60)
+    print("RENDERING EPISODE III MEME: TITLE DROPS (PADME & OBI-WAN)")
+    print("=" * 60)
+    lines = parse_script_text(EPISODE_3_TITLE_DROPS_SCRIPT)
+    print(f"Loading inventory: {EP3_INVENTORY_PATH}")
+    inv3, _ = load_or_combine_inventories([str(EP3_INVENTORY_PATH)])
+    colors = dict(EP3_TITLE_DROPS_DEFAULT_COLORS)
+    if speaker_colors:
+        colors.update(speaker_colors)
+    print(f"Speaker highlight colors: {colors}")
+    return synthesize_and_render_dialogue(
+        lines=lines,
+        inventory_index=inv3,
+        output_video_path=output_path,
+        audio_track="recombined",
+        pause_between_sec=0.45,
+        resolution=resolution,
+        burn_subtitles=True,
+        highlight_words=True,
+        speaker_colors=colors,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render multi-speaker dialogue scenes.")
     parser.add_argument(
         "--clip",
-        choices=["1", "2", "3", "4", "all"],
+        choices=["1", "2", "3", "4", "5", "6", "all"],
         default="all",
-        help="Which clip to render (1: Ep3 Anakin/Mace, 2: Ep6 Luke/Palpatine/Vader, 3: Ep3 Meme Wedding Vows, 4: Ep3 Meme Council Chambers, all: all clips)",
+        help="Which clip to render (1: Ep3 Anakin/Mace, 2: Ep6 Luke/Palpatine/Vader, 3: Ep3 Meme Wedding Vows, 4: Ep3 Meme Council Chambers, 5: Ep4 Meme Alderaan, 6: Ep3 Meme Title Drops, all: all clips)",
     )
     parser.add_argument(
         "--resolution",
@@ -255,6 +340,14 @@ def main() -> None:
     if args.clip in ("4", "all"):
         p4 = out_dir / "meme_council_chambers.mp4"
         render_episode_3_council_chambers(p4, resolution=args.resolution, speaker_colors=custom_colors)
+
+    if args.clip in ("5", "all"):
+        p5 = out_dir / "meme_alderaan_lost_planet.mp4"
+        render_episode_4_alderaan(p5, resolution=args.resolution, speaker_colors=custom_colors)
+
+    if args.clip in ("6", "all"):
+        p6 = out_dir / "meme_star_wars_title_drops.mp4"
+        render_episode_3_title_drops(p6, resolution=args.resolution, speaker_colors=custom_colors)
 
     print("\n[+] All requested clips rendered successfully.")
 

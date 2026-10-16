@@ -112,14 +112,23 @@ def apply_diphone_midpoint_transitions(
         if ev_curr and ev_succ:
             mid_curr = (ev_curr.start_sample + ev_curr.end_sample) // 2
             mid_succ = (ev_succ.start_sample + ev_succ.end_sample) // 2
+            can_trim_curr = curr.start_sample < mid_curr <= ev_curr.end_sample
+            can_trim_succ = ev_succ.start_sample <= mid_succ < succ.end_sample
 
-            # Deduplicate shared boundary node across the diphone join so realized_phones/target_phones
-            # don't repeat the phoneme twice in the EditPlan
+            # Deduplicate shared boundary node across the diphone join only when both sides
+            # trim at the midpoint and the shared node is still present on both sides (idempotent)
             curr_cov = list(new_spans[k].covered_nodes)
             succ_cov = list(new_spans[k + 1].covered_nodes)
             curr_rp = list(new_spans[k].realized_phones) if new_spans[k].realized_phones else []
             succ_rp = list(new_spans[k + 1].realized_phones) if new_spans[k + 1].realized_phones else []
-            if curr.target_node_end == succ.target_node_start:
+            if (
+                can_trim_curr
+                and can_trim_succ
+                and curr.target_node_end == succ.target_node_start
+                and curr_cov
+                and succ_cov
+                and curr_cov[-1] == succ_cov[0]
+            ):
                 if len(curr_cov) > 1:
                     curr_cov = curr_cov[:-1]
                     if len(curr_rp) > 1:
@@ -129,7 +138,7 @@ def apply_diphone_midpoint_transitions(
                     if len(succ_rp) > 1:
                         succ_rp = succ_rp[1:]
 
-            if curr.start_sample < mid_curr <= ev_curr.end_sample:
+            if can_trim_curr:
                 new_spans[k] = dataclasses.replace(
                     new_spans[k],
                     end_sample=mid_curr,
@@ -137,7 +146,7 @@ def apply_diphone_midpoint_transitions(
                     realized_phones=curr_rp,
                 )
 
-            if ev_succ.start_sample <= mid_succ < succ.end_sample:
+            if can_trim_succ:
                 new_spans[k + 1] = dataclasses.replace(
                     new_spans[k + 1],
                     start_sample=mid_succ,
@@ -265,8 +274,8 @@ class SpanSelector:
             tr_sr = int(tracks.get("sr", 16000))
             srec = self.inv.sources.get(wo.source_content_id)
             native_sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 48000
-            s_frame = max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop)))
-            e_frame = min(int(tracks["n_frames"]), int(round((wo.end_sample / float(native_sr)) * tr_sr / hop)))
+            s_frame = min(max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop))), max(0, int(tracks["n_frames"]) - 1))
+            e_frame = min(int(tracks["n_frames"]), max(s_frame + 1, int(round((wo.end_sample / float(native_sr)) * tr_sr / hop))))
             if e_frame > s_frame:
                 f0_sl = tracks["f0"][s_frame:e_frame]
                 vf_sl = tracks["voiced_flag"][s_frame:e_frame]
@@ -479,7 +488,7 @@ class SpanSelector:
                         phrase_dur = (matched_wos[-1].end_sample - matched_wos[0].start_sample) / float(s_rate)
 
                         expected_phrase_dur = sum(
-                            self._get_speaker_median_duration(speaker_id, tok, 0.25)
+                            self._get_speaker_median_duration(speaker_id or first_wo.speaker_id, tok, 0.25)
                             for tok in phrase_tokens
                         )
                         rush_penalty = 0.0
@@ -509,6 +518,8 @@ class SpanSelector:
                         exit_variant = 0
                         entry_variant = 0
 
+                        end_node = graph.nodes[covered[-1]]
+                        end_r_set = getattr(end_node, "right_context_phones", None) or ({end_node.right_context_phone} if end_node.right_context_phone else set())
                         if matched_wos[-1].phone_event_ids:
                             last_ev = self.inv.events.get(matched_wos[-1].phone_event_ids[-1])
                             if last_ev and last_ev.successor_id:
@@ -520,8 +531,6 @@ class SpanSelector:
 
                         # Guard 1: Pause / Gap & Phrase-Final Right Bleed Guard
                         phrase_right_bleed_cost = 0.0
-                        end_node = graph.nodes[covered[-1]]
-                        end_r_set = getattr(end_node, "right_context_phones", None) or ({end_node.right_context_phone} if end_node.right_context_phone else set())
                         if end_node.is_phrase_final or "sil" in end_r_set or end_node.right_context_phone == "sil":
                             last_wo = matched_wos[-1]
                             if last_wo.phone_event_ids:
@@ -541,6 +550,10 @@ class SpanSelector:
                                 if pred_ev and getattr(pred_ev, "kind", "") == "phone":
                                     pred_base = getattr(pred_ev, "base_phone", "") or strip_phone_stress(pred_ev.label)
                                     first_node = graph.nodes[covered[0]]
+                                    first_l_set = getattr(first_node, "left_context_phones", None) or ({first_node.left_context_phone} if first_node.left_context_phone else set())
+                                    phrase_l_bases = {strip_phone_stress(p) for p in first_l_set if p}
+                                    if pred_base in ("P", "T", "K", "B", "D", "G") and not (phrase_l_bases & {"P", "T", "K", "B", "D", "G"}):
+                                        entry_variant = max(entry_variant, int(round(0.012 * s_rate)))
                                     if first_node.base_phone in VOWEL_PHONES:
                                         if pred_base == "V":
                                             phrase_left_bleed_cost = 0.80
@@ -897,7 +910,8 @@ class SpanSelector:
                                     if prev_base in VOWEL_PHONES:
                                         flap_c = 0.35
                             r_bl, l_bl, coda_p, franken_p = _compute_subword_bleed_and_guards(wo_it, s_i, e_i, sr_it)
-                            return r_c + d_cost + ctx_c + swallow_c + floor_pen + flap_c + r_bl + l_bl + coda_p + franken_p
+                            heur_c = min(0.65, swallow_c + flap_c + r_bl + l_bl + coda_p)
+                            return r_c + d_cost + ctx_c + floor_pen + heur_c + franken_p
 
                         all_matches.sort(key=_subword_sort_key)
 
@@ -1075,7 +1089,7 @@ class SpanSelector:
 
                 return coda_pen, r_bleed, l_bleed
 
-            phone_median = self._get_speaker_phone_median_duration(speaker_id, node.base_phone, node.duration_prior_sec or 0.10)
+            phone_median = self._get_speaker_phone_median_duration(speaker_id, node.phone, node.duration_prior_sec or 0.10)
 
             def _phone_sort_key(item: Tuple[Any, float]) -> float:
                 ev_it, stress_c = item
@@ -1301,7 +1315,7 @@ class SpanSelector:
             hop = int(tracks.get("hop_length", 160))
             tr_sr = int(tracks.get("sr", 16000))
             native_sr = src_rec.native_sample_rate or 48000
-            s_frame = max(0, int(round((start_sample / float(native_sr)) * tr_sr / hop)))
+            s_frame = min(max(0, int(round((start_sample / float(native_sr)) * tr_sr / hop))), max(0, int(tracks["n_frames"]) - 1))
             e_frame = min(int(tracks["n_frames"]), max(s_frame + 1, int(round((end_sample / float(native_sr)) * tr_sr / hop))))
             if e_frame > s_frame:
                 rms_slice = tracks["rms"][s_frame:e_frame]
@@ -1501,10 +1515,10 @@ class SpanSelector:
                 right_match = any(b in ("sil", "sp", "") for b in target_right_bases)
 
         stop_consonants = {"P", "T", "K", "B", "D", "G"}
-        d_l_base = getattr(donor_left_ev, "base_phone", "") if donor_left_ev else ""
+        d_l_base = (getattr(donor_left_ev, "base_phone", "") or strip_phone_stress(getattr(donor_left_ev, "label", ""))) if donor_left_ev else ""
         severe_l_mismatch = (d_l_base in stop_consonants and not any(b in stop_consonants for b in target_left_bases))
 
-        d_r_base = getattr(donor_right_ev, "base_phone", "") if donor_right_ev else ""
+        d_r_base = (getattr(donor_right_ev, "base_phone", "") or strip_phone_stress(getattr(donor_right_ev, "label", ""))) if donor_right_ev else ""
         severe_r_mismatch = (d_r_base in stop_consonants and not any(b in stop_consonants for b in target_right_bases))
 
         has_left = bool(target_left_bases)

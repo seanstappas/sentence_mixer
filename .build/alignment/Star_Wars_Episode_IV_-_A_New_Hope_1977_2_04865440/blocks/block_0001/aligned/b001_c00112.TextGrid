@@ -1,0 +1,84 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0 
+xmax = 1.179 
+tiers? <exists> 
+size = 2 
+item []: 
+    item [1]:
+        class = "IntervalTier" 
+        name = "words" 
+        xmin = 0 
+        xmax = 1.179 
+        intervals: size = 5 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.27 
+            text = "" 
+        intervals [2]:
+            xmin = 0.27 
+            xmax = 0.38 
+            text = "can" 
+        intervals [3]:
+            xmin = 0.38 
+            xmax = 0.46 
+            text = "you" 
+        intervals [4]:
+            xmin = 0.46 
+            xmax = 0.76 
+            text = "speak" 
+        intervals [5]:
+            xmin = 0.76 
+            xmax = 1.179 
+            text = "bocce" 
+    item [2]:
+        class = "IntervalTier" 
+        name = "phones" 
+        xmin = 0 
+        xmax = 1.179 
+        intervals: size = 11 
+        intervals [1]:
+            xmin = 0.0 
+            xmax = 0.27 
+            text = "" 
+        intervals [2]:
+            xmin = 0.27 
+            xmax = 0.31 
+            text = "K" 
+        intervals [3]:
+            xmin = 0.31 
+            xmax = 0.35 
+            text = "AH0" 
+        intervals [4]:
+            xmin = 0.35 
+            xmax = 0.38 
+            text = "N" 
+        intervals [5]:
+            xmin = 0.38 
+            xmax = 0.42 
+            text = "Y" 
+        intervals [6]:
+            xmin = 0.42 
+            xmax = 0.46 
+            text = "UW1" 
+        intervals [7]:
+            xmin = 0.46 
+            xmax = 0.52 
+            text = "S" 
+        intervals [8]:
+            xmin = 0.52 
+            xmax = 0.6 
+            text = "P" 
+        intervals [9]:
+            xmin = 0.6 
+            xmax = 0.68 
+            text = "IY1" 
+        intervals [10]:
+            xmin = 0.68 
+            xmax = 0.76 
+            text = "K" 
+        intervals [11]:
+            xmin = 0.76 
+            xmax = 1.179 
+            text = "spn" 
