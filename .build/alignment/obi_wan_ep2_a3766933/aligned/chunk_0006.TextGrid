@@ -92,10 +92,10 @@ item []:
             text = "P" 
         intervals [11]:
             xmin = 1.33 
-            xmax = 1.37 
+            xmax = 1.38 
             text = "R" 
         intervals [12]:
-            xmin = 1.37 
+            xmin = 1.38 
             xmax = 1.42 
             text = "EH1" 
         intervals [13]:

@@ -22,10 +22,10 @@ item []:
             text = "" 
         intervals [3]:
             xmin = 0.89 
-            xmax = 1.02 
+            xmax = 1.03 
             text = "no" 
         intervals [4]:
-            xmin = 1.02 
+            xmin = 1.03 
             xmax = 1.44 
             text = "assassin" 
         intervals [5]:
@@ -88,10 +88,10 @@ item []:
             text = "N" 
         intervals [11]:
             xmin = 0.92 
-            xmax = 1.02 
+            xmax = 1.03 
             text = "OW1" 
         intervals [12]:
-            xmin = 1.02 
+            xmin = 1.03 
             xmax = 1.07 
             text = "AH0" 
         intervals [13]:
@@ -128,10 +128,10 @@ item []:
             text = "D" 
         intervals [21]:
             xmin = 1.54 
-            xmax = 1.6 
+            xmax = 1.59 
             text = "T" 
         intervals [22]:
-            xmin = 1.6 
+            xmin = 1.59 
             xmax = 1.65 
             text = "R" 
         intervals [23]:

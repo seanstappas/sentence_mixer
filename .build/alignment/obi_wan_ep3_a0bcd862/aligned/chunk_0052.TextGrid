@@ -38,10 +38,10 @@ item []:
             text = "the" 
         intervals [7]:
             xmin = 1.42 
-            xmax = 1.7 
+            xmax = 1.68 
             text = "bus" 
         intervals [8]:
-            xmin = 1.7 
+            xmin = 1.68 
             xmax = 1.91 
             text = "droids" 
         intervals [9]:
@@ -57,7 +57,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 2.31 
-        intervals: size = 25 
+        intervals: size = 29 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.12 
@@ -136,25 +136,41 @@ item []:
             text = "AH1" 
         intervals [20]:
             xmin = 1.6 
-            xmax = 1.7 
+            xmax = 1.68 
             text = "S" 
         intervals [21]:
-            xmin = 1.7 
-            xmax = 1.91 
-            text = "spn" 
+            xmin = 1.68 
+            xmax = 1.77 
+            text = "D" 
         intervals [22]:
+            xmin = 1.77 
+            xmax = 1.81 
+            text = "R" 
+        intervals [23]:
+            xmin = 1.81 
+            xmax = 1.85 
+            text = "OY1" 
+        intervals [24]:
+            xmin = 1.85 
+            xmax = 1.88 
+            text = "D" 
+        intervals [25]:
+            xmin = 1.88 
+            xmax = 1.91 
+            text = "Z" 
+        intervals [26]:
             xmin = 1.91 
             xmax = 1.94 
             text = "AH0" 
-        intervals [23]:
+        intervals [27]:
             xmin = 1.94 
             xmax = 1.97 
             text = "N" 
-        intervals [24]:
+        intervals [28]:
             xmin = 1.97 
             xmax = 2.15 
             text = "D" 
-        intervals [25]:
+        intervals [29]:
             xmin = 2.15 
             xmax = 2.31 
             text = "" 

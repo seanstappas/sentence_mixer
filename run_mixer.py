@@ -56,6 +56,8 @@ from cache import (
     compute_labeled_inventory_cache_key,
     hash_file_content,
     hash_dict,
+    load_inventory_json,
+    resolve_inventory_path,
 )
 
 
@@ -492,7 +494,7 @@ def ensure_source_aligned(
     alignment_meta_path = alignment_base / "alignment_metadata.json"
 
     inventory_base = CACHE_BASE_DIR / "inventory" / source_id
-    inventory_path = inventory_base / "units_index.json"
+    inventory_path = resolve_inventory_path(inventory_base / "units_index.json.gz")
     inventory_meta_path = inventory_base / "inventory_metadata.json"
 
     # Stage MFA dictionary combining merged_dictionary.dict and custom_pronunciations.txt
@@ -594,8 +596,7 @@ def ensure_source_aligned(
                 inv_hit = False
             else:
                 try:
-                    with open(inventory_path, "r", encoding="utf-8") as f:
-                        inv_data = json.load(f)
+                    inv_data = load_inventory_json(inventory_path)
                     srcs = inv_data.get("sources", {})
                     if not any(s.get("cached_vocal_pcm_path") for s in srcs.values()):
                         inv_hit = False
@@ -785,8 +786,7 @@ def load_or_combine_inventories(
 
     for path_str in inventory_paths:
         p = Path(path_str).resolve()
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_inventory_json(p)
 
         if ("events" in data and ("schema_version" in data or "metadata" in data)):
             inv = InventoryIndex.from_dict(data)
@@ -830,9 +830,11 @@ def load_or_combine_inventories(
             src = combined_inv.sources.get(wo.source_content_id)
             src_path = src.source_path if src else ""
             sr = src.native_sample_rate if src and src.native_sample_rate else 16000
+            first_ev = combined_inv.events.get(wo.phone_event_ids[0]) if wo.phone_event_ids else None
+            chunk_id = first_ev.utterance_id if first_ev else wo.source_content_id
             legacy_words.setdefault(w_norm, []).append({
                 "source_video": src_path,
-                "chunk_id": wo.source_content_id,
+                "chunk_id": chunk_id,
                 "label": w_norm,
                 "start_sec": wo.start_sample / sr,
                 "end_sec": wo.end_sample / sr,
@@ -852,7 +854,7 @@ def load_or_combine_inventories(
                 sr = src.native_sample_rate if src and src.native_sample_rate else 16000
                 legacy_phones.setdefault(ev.label, []).append({
                     "source_video": src_path,
-                    "chunk_id": ev.source_content_id,
+                    "chunk_id": ev.utterance_id,
                     "label": ev.label,
                     "start_sec": ev.start_sample / sr,
                     "end_sec": ev.end_sample / sr,
@@ -2013,7 +2015,7 @@ def main():
                 item.get("vtt"),
                 force_realign=args.force_realign,
                 force_inventory_rebuild=(args.diarize == "force"),
-                speaker_id=item.get("speaker_id") if item.get("single_speaker_verified") else None,
+                speaker_id=(item.get("speaker_id") if item.get("single_speaker_verified") else None) or ((item.get("speaker_id") or args.speaker) if args.assume_single_speaker else None),
                 single_speaker_verified=item.get("single_speaker_verified", False) or args.assume_single_speaker,
                 assume_single_speaker=args.assume_single_speaker,
                 speaker_intervals=item.get("speaker_intervals"),
@@ -2042,18 +2044,21 @@ def main():
                     )
             elif not inventory_paths:
                 if getattr(args, "speaker", None):
-                    spk_candidates = _resolve_character_alias(args.speaker, custom_char_path=getattr(args, "characters", None))
+                    raw_spks = [s.strip() for s in args.speaker.split(",") if s.strip()]
                     discovered_invs = []
-                    for cand_spk in spk_candidates:
-                        for inv_p in find_cached_inventories_for_speaker(
-                            cand_spk,
-                            cache_dir=CACHE_BASE_DIR,
-                            registry_path=registry_path,
-                        ):
-                            if inv_p not in discovered_invs:
-                                discovered_invs.append(inv_p)
+                    for raw_spk in raw_spks:
+                        spk_candidates = _resolve_character_alias(raw_spk, custom_char_path=getattr(args, "characters", None))
+                        for cand_spk in spk_candidates:
+                            for inv_p in find_cached_inventories_for_speaker(
+                                cand_spk,
+                                cache_dir=CACHE_BASE_DIR,
+                                registry_path=registry_path,
+                            ):
+                                if inv_p not in discovered_invs:
+                                    discovered_invs.append(inv_p)
+                    spk_word = "speaker" if "," not in args.speaker else "speaker(s)"
                     if discovered_invs:
-                        print(f"[*] Discovered {len(discovered_invs)} ingested source inventory/inventories containing speaker '{args.speaker}'.")
+                        print(f"[*] Discovered {len(discovered_invs)} ingested source inventory/inventories containing {spk_word} '{args.speaker}'.")
                         inventory_paths.extend(discovered_invs)
                     else:
                         from speaker_registry import SpeakerRegistry
@@ -2061,7 +2066,7 @@ def main():
                         known_speakers = [s.speaker_id for s in reg.list_speakers()]
                         avail_spk_str = f" Available registered speakers: {', '.join(sorted(known_speakers))}." if known_speakers else ""
                         parser.error(
-                            f"No ingested sources found for speaker '{args.speaker}'.{avail_spk_str} "
+                            f"No ingested sources found for {spk_word} '{args.speaker}'.{avail_spk_str} "
                             "Please ingest source media first with 'run_mixer.py ingest <source>' or specify source(s) via --video / --folder / --manifest."
                         )
                 else:
@@ -2100,19 +2105,23 @@ def main():
         }))
 
         if args.speaker is not None:
-            cand_speakers = _resolve_character_alias(args.speaker, custom_char_path=getattr(args, "characters", None))
-            cand_norms = {c.strip().lower().replace(" ", "_").replace("-", "_") for c in cand_speakers}
-            matched_spk = next(
-                (s for s in unique_speakers if s.lower().replace("-", "_") in cand_norms),
-                None,
-            )
-            if matched_spk is None:
-                avail_str = ", ".join(sorted(unique_speakers)) if unique_speakers else "none"
-                parser.error(
-                    f"Requested speaker '{args.speaker}' not found in inventory. "
-                    f"Available speakers: {avail_str}"
+            raw_spks = [s.strip() for s in args.speaker.split(",") if s.strip()]
+            matched_speakers: Set[str] = set()
+            for raw_spk in raw_spks:
+                cand_speakers = _resolve_character_alias(raw_spk, custom_char_path=getattr(args, "characters", None))
+                cand_norms = {c.strip().lower().replace(" ", "_").replace("-", "_") for c in cand_speakers}
+                m_spk = next(
+                    (s for s in unique_speakers if s.lower().replace("-", "_") in cand_norms),
+                    None,
                 )
-            effective_speaker = matched_spk
+                if m_spk is None:
+                    avail_str = ", ".join(sorted(unique_speakers)) if unique_speakers else "none"
+                    parser.error(
+                        f"Requested speaker '{raw_spk}' not found in inventory. "
+                        f"Available speakers: {avail_str}"
+                    )
+                matched_speakers.add(m_spk)
+            effective_speaker: Union[str, Set[str], None] = matched_speakers if len(matched_speakers) > 1 else (next(iter(matched_speakers)) if matched_speakers else None)
         elif len(unique_speakers) > 1:
             parser.error(
                 f"Multiple speakers found in inventory ({', '.join(unique_speakers)}). "
@@ -2248,7 +2257,7 @@ def main():
             from features import ContinuousFeatureExtractor
             feature_extractor = ContinuousFeatureExtractor(sr=16000)
 
-            selector = SpanSelector(inventory_index)
+            selector = SpanSelector(inventory_index, speaker_id=effective_speaker)
 
             selected_spans = selector.select(
                 graph,

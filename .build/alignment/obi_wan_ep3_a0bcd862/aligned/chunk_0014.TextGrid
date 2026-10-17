@@ -30,10 +30,10 @@ item []:
             text = "anakin" 
         intervals [5]:
             xmin = 0.93 
-            xmax = 1.25 
+            xmax = 1.24 
             text = "" 
         intervals [6]:
-            xmin = 1.25 
+            xmin = 1.24 
             xmax = 1.33 
             text = "you're" 
         intervals [7]:
@@ -112,10 +112,10 @@ item []:
             text = "N" 
         intervals [14]:
             xmin = 0.93 
-            xmax = 1.25 
+            xmax = 1.24 
             text = "" 
         intervals [15]:
-            xmin = 1.25 
+            xmin = 1.24 
             xmax = 1.29 
             text = "Y" 
         intervals [16]:

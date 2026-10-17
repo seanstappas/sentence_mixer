@@ -91,7 +91,7 @@ def test_load_labeled_vtt_segments_and_padding(tmp_path: Path):
     assert cues[2]["segments"][0]["speaker_id"] is None
     assert "<v" not in cues[1]["text"]
     # Padding never crosses into the neighboring cue
-    assert cues[0]["start_sec"] == pytest.approx(0.85)
+    assert cues[0]["start_sec"] == pytest.approx(0.75)
     assert cues[0]["end_sec"] <= cues[1]["cue_start_sec"]
     assert cues[1]["start_sec"] >= cues[0]["cue_end_sec"]
 

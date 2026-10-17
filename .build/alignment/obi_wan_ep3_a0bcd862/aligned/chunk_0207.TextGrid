@@ -38,10 +38,10 @@ item []:
             text = "" 
         intervals [7]:
             xmin = 0.96 
-            xmax = 1.7 
+            xmax = 1.74 
             text = "darkness" 
         intervals [8]:
-            xmin = 1.7 
+            xmin = 1.74 
             xmax = 2.39 
             text = "" 
     item [2]:
@@ -124,9 +124,9 @@ item []:
             text = "AH0" 
         intervals [19]:
             xmin = 1.56 
-            xmax = 1.7 
+            xmax = 1.74 
             text = "S" 
         intervals [20]:
-            xmin = 1.7 
+            xmin = 1.74 
             xmax = 2.39 
             text = "" 

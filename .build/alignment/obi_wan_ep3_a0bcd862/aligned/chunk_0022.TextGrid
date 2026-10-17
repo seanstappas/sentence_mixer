@@ -124,10 +124,10 @@ item []:
             text = "AO2" 
         intervals [19]:
             xmin = 1.21 
-            xmax = 1.25 
+            xmax = 1.24 
             text = "R" 
         intervals [20]:
-            xmin = 1.25 
+            xmin = 1.24 
             xmax = 1.3 
             text = "M" 
         intervals [21]:

@@ -96,10 +96,10 @@ item []:
             text = "F" 
         intervals [15]:
             xmin = 0.98 
-            xmax = 1.16 
+            xmax = 1.17 
             text = "AO1" 
         intervals [16]:
-            xmin = 1.16 
+            xmin = 1.17 
             xmax = 1.28 
             text = "R" 
         intervals [17]:

@@ -34,10 +34,10 @@ item []:
             text = "chancellor's" 
         intervals [6]:
             xmin = 1.81 
-            xmax = 2.44 
+            xmax = 2.43 
             text = "dealings" 
         intervals [7]:
-            xmin = 2.44 
+            xmin = 2.43 
             xmax = 2.87 
             text = "" 
     item [2]:
@@ -148,9 +148,9 @@ item []:
             text = "NG" 
         intervals [26]:
             xmin = 2.25 
-            xmax = 2.44 
+            xmax = 2.43 
             text = "Z" 
         intervals [27]:
-            xmin = 2.44 
+            xmin = 2.43 
             xmax = 2.87 
             text = "" 

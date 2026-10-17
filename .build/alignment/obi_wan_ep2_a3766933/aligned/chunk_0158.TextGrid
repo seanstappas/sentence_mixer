@@ -14,10 +14,10 @@ item []:
         intervals: size = 7 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.14 
+            xmax = 0.13 
             text = "" 
         intervals [2]:
-            xmin = 0.14 
+            xmin = 0.13 
             xmax = 0.52 
             text = "seismic" 
         intervals [3]:
@@ -48,10 +48,10 @@ item []:
         intervals: size = 22 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.14 
+            xmax = 0.13 
             text = "" 
         intervals [2]:
-            xmin = 0.14 
+            xmin = 0.13 
             xmax = 0.26 
             text = "S" 
         intervals [3]:

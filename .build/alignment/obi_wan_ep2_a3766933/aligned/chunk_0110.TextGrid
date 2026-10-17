@@ -132,10 +132,10 @@ item []:
             text = "R" 
         intervals [20]:
             xmin = 1.25 
-            xmax = 1.29 
+            xmax = 1.3 
             text = "D" 
         intervals [21]:
-            xmin = 1.29 
+            xmin = 1.3 
             xmax = 1.36 
             text = "Z" 
         intervals [22]:

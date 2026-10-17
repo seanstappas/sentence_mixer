@@ -68,10 +68,10 @@ item []:
             text = "Z" 
         intervals [7]:
             xmin = 0.67 
-            xmax = 0.75 
+            xmax = 0.73 
             text = "AA1" 
         intervals [8]:
-            xmin = 0.75 
+            xmin = 0.73 
             xmax = 0.87 
             text = "N" 
         intervals [9]:

@@ -14,9 +14,12 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-# Ensure NLTK data path does not touch locked BitLocker drives
-DEFAULT_NLTK_DIR = Path(__file__).resolve().parent.parent / ".build" / "nltk"
-if "NLTK_DATA" not in os.environ:
+# Ensure NLTK data path does not touch locked BitLocker drives and is always an absolute path
+DEFAULT_NLTK_DIR = (Path(__file__).resolve().parent.parent / ".build" / "nltk").resolve()
+_nltk_raw = os.environ.get("NLTK_DATA")
+if _nltk_raw:
+    os.environ["NLTK_DATA"] = str(Path(_nltk_raw).resolve())
+else:
     os.environ["NLTK_DATA"] = str(DEFAULT_NLTK_DIR)
 
 try:
@@ -35,7 +38,8 @@ def get_g2p():
     if _G2P_INSTANCE is None:
         try:
             import nltk
-            nltk.data.path = [os.environ.get("NLTK_DATA", str(DEFAULT_NLTK_DIR))]
+            abs_nltk = str(Path(os.environ.get("NLTK_DATA", str(DEFAULT_NLTK_DIR))).resolve())
+            nltk.data.path = [abs_nltk]
             from g2p_en import G2p
             _G2P_INSTANCE = G2p()
         except Exception:
@@ -485,7 +489,7 @@ def stage_mfa_dictionary(
     staged_lines: List[str] = []
     seen: set[str] = set()
 
-    for p in (b_path, c_path):
+    for p in (c_path, b_path):
         if not p.exists():
             continue
         with open(p, "r", encoding="utf-8", errors="replace") as f:
@@ -531,7 +535,7 @@ def stage_mfa_dictionary(
             if any(f"{w_clean}\t" in s or f"{w_clean.upper()}\t" in s for s in staged_lines):
                 continue
             if lex_instance is None:
-                lex_instance = Lexicon([p for p in (b_path, c_path) if p.exists()])
+                lex_instance = Lexicon([p for p in (c_path, b_path) if p.exists()])
             prons = lex_instance.get_pronunciations(w_clean)
             if prons:
                 for p_var in prons:

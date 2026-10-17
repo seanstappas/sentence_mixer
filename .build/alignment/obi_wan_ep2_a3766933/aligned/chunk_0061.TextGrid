@@ -50,10 +50,10 @@ item []:
             text = "" 
         intervals [10]:
             xmin = 1.73 
-            xmax = 2.0 
+            xmax = 2.03 
             text = "this" 
         intervals [11]:
-            xmin = 2.0 
+            xmin = 2.03 
             xmax = 2.23 
             text = "weapon" 
     item [2]:
@@ -160,10 +160,10 @@ item []:
             text = "IH1" 
         intervals [25]:
             xmin = 1.84 
-            xmax = 2.0 
+            xmax = 2.03 
             text = "S" 
         intervals [26]:
-            xmin = 2.0 
+            xmin = 2.03 
             xmax = 2.09 
             text = "W" 
         intervals [27]:

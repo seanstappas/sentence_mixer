@@ -76,10 +76,10 @@ item []:
             text = "S" 
         intervals [7]:
             xmin = 0.62 
-            xmax = 0.66 
+            xmax = 0.67 
             text = "AH0" 
         intervals [8]:
-            xmin = 0.66 
+            xmin = 0.67 
             xmax = 0.72 
             text = "K" 
         intervals [9]:

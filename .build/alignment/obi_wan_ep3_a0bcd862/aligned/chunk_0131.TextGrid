@@ -22,10 +22,10 @@ item []:
             text = "now" 
         intervals [3]:
             xmin = 0.41 
-            xmax = 0.53 
+            xmax = 0.52 
             text = "is" 
         intervals [4]:
-            xmin = 0.53 
+            xmin = 0.52 
             xmax = 0.64 
             text = "the" 
         intervals [5]:
@@ -34,10 +34,10 @@ item []:
             text = "time" 
         intervals [6]:
             xmin = 0.9 
-            xmax = 1.31 
+            xmax = 1.3 
             text = "" 
         intervals [7]:
-            xmin = 1.31 
+            xmin = 1.3 
             xmax = 1.53 
             text = "take" 
         intervals [8]:
@@ -80,10 +80,10 @@ item []:
             text = "IH0" 
         intervals [5]:
             xmin = 0.47 
-            xmax = 0.53 
+            xmax = 0.52 
             text = "Z" 
         intervals [6]:
-            xmin = 0.53 
+            xmin = 0.52 
             xmax = 0.58 
             text = "DH" 
         intervals [7]:
@@ -104,10 +104,10 @@ item []:
             text = "M" 
         intervals [11]:
             xmin = 0.9 
-            xmax = 1.31 
+            xmax = 1.3 
             text = "" 
         intervals [12]:
-            xmin = 1.31 
+            xmin = 1.3 
             xmax = 1.37 
             text = "T" 
         intervals [13]:

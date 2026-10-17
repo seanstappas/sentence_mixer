@@ -11,7 +11,7 @@ item []:
         name = "words" 
         xmin = 0 
         xmax = 2.55 
-        intervals: size = 8 
+        intervals: size = 7 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.21 
@@ -38,18 +38,14 @@ item []:
             text = "evil" 
         intervals [7]:
             xmin = 2.36 
-            xmax = 2.52 
-            text = "well" 
-        intervals [8]:
-            xmin = 2.52 
             xmax = 2.55 
-            text = "" 
+            text = "well" 
     item [2]:
         class = "IntervalTier" 
         name = "phones" 
         xmin = 0 
         xmax = 2.55 
-        intervals: size = 32 
+        intervals: size = 31 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.21 
@@ -172,9 +168,5 @@ item []:
             text = "EH1" 
         intervals [31]:
             xmin = 2.42 
-            xmax = 2.52 
-            text = "L" 
-        intervals [32]:
-            xmin = 2.52 
             xmax = 2.55 
-            text = "" 
+            text = "L" 

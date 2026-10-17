@@ -17,5 +17,35 @@
     11,
     12
   ],
-  "blocks_total": 13
+  "blocks_total": 13,
+  "schema_version": "2.0.0",
+  "word_count": 9753,
+  "event_count": 35944,
+  "speakers": {
+    "c-3po": 1399,
+    "role-stormtrooper": 172,
+    "vader": 471,
+    "role-officer": 220,
+    "role-pilot": 319,
+    "role-captain": 12,
+    "leia": 557,
+    "role-commander": 42,
+    "praji": 31,
+    "beru": 74,
+    "luke": 1891,
+    "owen": 268,
+    "obi-wan": 963,
+    "tagge": 76,
+    "motti": 90,
+    "tarkin": 401,
+    "role-bartender": 20,
+    "role-man": 231,
+    "han": 1636,
+    "role-voice": 35,
+    "willard": 11,
+    "dodonna": 184,
+    "wedge": 62,
+    "biggs": 99,
+    "role-technician": 8
+  }
 }

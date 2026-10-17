@@ -38,10 +38,10 @@ item []:
             text = "speeder" 
         intervals [7]:
             xmin = 2.14 
-            xmax = 2.19 
+            xmax = 2.18 
             text = "" 
         intervals [8]:
-            xmin = 2.19 
+            xmin = 2.18 
             xmax = 2.28 
             text = "i" 
         intervals [9]:
@@ -128,10 +128,10 @@ item []:
             text = "ER0" 
         intervals [18]:
             xmin = 2.14 
-            xmax = 2.19 
+            xmax = 2.18 
             text = "" 
         intervals [19]:
-            xmin = 2.19 
+            xmin = 2.18 
             xmax = 2.28 
             text = "AY1" 
         intervals [20]:

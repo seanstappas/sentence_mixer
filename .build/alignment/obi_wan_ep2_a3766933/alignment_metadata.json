@@ -1,8 +1,8 @@
 {
-  "alignment_key": "c86486e45409699bd7521928ee2b8cf375ebcf131fe584f644799316e6a194e6",
+  "alignment_key": "f3b5798801cd75dbb1523e56cf643f1554c7c2377d6f5ba834e36eb8a15c0ecf",
   "media_hash": "a3766933dca09985f36c93afa180bcb6372b0a9018cb9c46e988a47871fce37c",
   "transcript_hash": "7b5efbc570f531d7fdd195fe5e0a82a88310463144d94141ae8c40c1af5cb400",
-  "dict_hash": "ae37c633a46d3e9ca9d418fa3e067188161245c7faf8930240eb3e7cd9cdd1b9",
+  "dict_hash": "9114b90b2a0bf3399aab00fb6c68fa470d380ce6889ae49903bf25fb954f43cd",
   "acoustic_model": "english_us_arpa",
   "mfa_options": {
     "asr_tail_enrichment": false

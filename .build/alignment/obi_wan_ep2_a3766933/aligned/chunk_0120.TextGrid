@@ -14,10 +14,10 @@ item []:
         intervals: size = 10 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.34 
+            xmax = 0.35 
             text = "the" 
         intervals [2]:
-            xmin = 0.34 
+            xmin = 0.35 
             xmax = 0.69 
             text = "army" 
         intervals [3]:
@@ -64,10 +64,10 @@ item []:
             text = "DH" 
         intervals [2]:
             xmin = 0.03 
-            xmax = 0.34 
+            xmax = 0.35 
             text = "AH0" 
         intervals [3]:
-            xmin = 0.34 
+            xmin = 0.35 
             xmax = 0.5 
             text = "AA1" 
         intervals [4]:

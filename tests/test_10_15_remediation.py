@@ -98,8 +98,8 @@ class _FakeEmbedder:
         pass
 
 
-def test_minor_speaker_contamination_beats_own():
-    """A 3-line minor character with 1 contaminated line spoken by a major speaker is flagged via beats_own."""
+def test_minor_speaker_thin_evidence_requires_unanimous_major():
+    """Minor character lines (< 5 lines) require unanimous match across all lines to be flagged as voice_mismatch; non-unanimous contamination is preserved under thin-evidence safeguard."""
     rng = np.random.default_rng(123)
     dim = 16
 

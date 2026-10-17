@@ -26,10 +26,10 @@ item []:
             text = "my" 
         intervals [4]:
             xmin = 0.94 
-            xmax = 1.52 
+            xmax = 1.53 
             text = "padawan" 
         intervals [5]:
-            xmin = 1.52 
+            xmin = 1.53 
             xmax = 1.751 
             text = "" 
     item [2]:
@@ -37,7 +37,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 1.751 
-        intervals: size = 13 
+        intervals: size = 19 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.15 
@@ -84,9 +84,33 @@ item []:
             text = "AY1" 
         intervals [12]:
             xmin = 0.94 
-            xmax = 1.52 
-            text = "spn" 
+            xmax = 1.05 
+            text = "P" 
         intervals [13]:
-            xmin = 1.52 
+            xmin = 1.05 
+            xmax = 1.17 
+            text = "AE1" 
+        intervals [14]:
+            xmin = 1.17 
+            xmax = 1.21 
+            text = "D" 
+        intervals [15]:
+            xmin = 1.21 
+            xmax = 1.27 
+            text = "AH0" 
+        intervals [16]:
+            xmin = 1.27 
+            xmax = 1.34 
+            text = "W" 
+        intervals [17]:
+            xmin = 1.34 
+            xmax = 1.45 
+            text = "AA2" 
+        intervals [18]:
+            xmin = 1.45 
+            xmax = 1.53 
+            text = "N" 
+        intervals [19]:
+            xmin = 1.53 
             xmax = 1.751 
             text = "" 

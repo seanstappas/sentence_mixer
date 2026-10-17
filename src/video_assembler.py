@@ -61,6 +61,13 @@ def resolve_output_dims(plan: Any, output_resolution: str = "1080p") -> Tuple[in
     raise ValueError(f"Unknown output resolution: {output_resolution}")
 
 
+def _is_audio_only_path(p: Optional[Union[str, Path]]) -> bool:
+    if not p:
+        return True
+    s = str(p).lower()
+    return any(s.endswith(ext) for ext in (".wav", ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".aiff", ".wma"))
+
+
 class LazyAudio:
     """
     Seekable view of an audio file (WAV/FLAC) that reads only the requested sample
@@ -569,12 +576,16 @@ def render_master_pcm(
 
         # Tier 1 Speech Leveling across disparate cuts using frozen plan gain_db
         if not seg.is_silence:
-            if seg.gain_db is None:
+            raw_gains = getattr(plan, "metadata", {}).get("raw_segment_gains_db") if getattr(plan, "metadata", None) else None
+            if audio_track == "raw" and raw_gains and seg.segment_index in raw_gains:
+                gain_to_apply_db = raw_gains[seg.segment_index]
+            elif seg.gain_db is None:
                 raise ValueError(
                     f"Segment {seg.segment_index} ('{seg.target_text}') has undecided gain_db (None). "
                     "All non-silence segments must have a frozen float gain_db in the EditPlan before rendering."
                 )
-            gain_to_apply_db = seg.gain_db
+            else:
+                gain_to_apply_db = seg.gain_db
         else:
             gain_to_apply_db = 0.0
 
@@ -998,6 +1009,7 @@ def render_sentence_mix(
                             elif not has_valid_source and (
                                 not seg.source_video_path
                                 or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                                or _is_audio_only_path(seg.source_video_path)
                             ):
                                 input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])
                                 filter_chains.append(f"[{current_in_idx}:v]trim=end_frame={frame_count},format=yuv420p[v{k}]")
@@ -1020,6 +1032,7 @@ def render_sentence_mix(
                             is_audio_only = (
                                 not seg.source_video_path
                                 or getattr(plan, "metadata", {}).get("visual_policy") == "audio-only"
+                                or _is_audio_only_path(seg.source_video_path)
                             )
                             if is_audio_only:
                                 input_args.extend(["-f", "lavfi", "-t", f"{dur_sec:.6f}", "-i", f"color=c=black:s={out_w}x{out_h}:r={fps_str}"])

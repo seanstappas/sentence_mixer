@@ -38,10 +38,10 @@ item []:
             text = "yourself" 
         intervals [7]:
             xmin = 1.92 
-            xmax = 2.16 
+            xmax = 2.1 
             text = "" 
         intervals [8]:
-            xmin = 2.16 
+            xmin = 2.1 
             xmax = 2.56 
             text = "your" 
         intervals [9]:
@@ -80,10 +80,10 @@ item []:
             text = "V" 
         intervals [7]:
             xmin = 0.62 
-            xmax = 0.68 
+            xmax = 0.67 
             text = "D" 
         intervals [8]:
-            xmin = 0.68 
+            xmin = 0.67 
             xmax = 0.81 
             text = "AH1" 
         intervals [9]:
@@ -132,10 +132,10 @@ item []:
             text = "F" 
         intervals [20]:
             xmin = 1.92 
-            xmax = 2.16 
+            xmax = 2.1 
             text = "" 
         intervals [21]:
-            xmin = 2.16 
+            xmin = 2.1 
             xmax = 2.24 
             text = "Y" 
         intervals [22]:

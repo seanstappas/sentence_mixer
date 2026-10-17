@@ -131,6 +131,9 @@ def generate_fcp_xml(
             is_freeze = getattr(seg, "freeze_video", False) or getattr(seg, "is_silence", False) or unit_type == "pause"
             src_content_id = getattr(seg, "source_content_id", "")
 
+        if duration_frames <= 0:
+            continue
+
         # Handle freeze frame / pause holds
         if is_freeze:
             holds_dir = out_p.parent / f"{out_p.stem}_holds"

@@ -333,10 +333,13 @@ def run_voice_checks(
             r.voice_best = best
             r.voice_sim = round(best_sim, 4)
             r.voice_margin = round(best_sim - second, 4)
-            other_vecs = [emb[rec.key] for rec in named if rec.label == r.label and rec.key != r.key]
-            if other_vecs:
-                m_other = np.mean(np.stack(other_vecs), axis=0)
-                own_sim = float(e @ (m_other / (np.linalg.norm(m_other) + 1e-9)))
+            if r.label in cents:
+                other_vecs = [emb[rec.key] for rec in named if rec.label == r.label and rec.key != r.key]
+                if other_vecs:
+                    m_other = np.mean(np.stack(other_vecs), axis=0)
+                    own_sim = float(e @ (m_other / (np.linalg.norm(m_other) + 1e-9)))
+                else:
+                    own_sim = 0.0
             else:
                 own_sim = 0.0
             r.voice_own_sim = round(own_sim, 4)
@@ -907,7 +910,9 @@ def ensure_movie_aligned(
     )
 
     inv_dir = build / "inventory" / source_id
-    inv_path = inv_dir / "units_index.json"
+    from cache import resolve_inventory_path
+    inv_path = inv_dir / "units_index.json.gz"
+    resolved_inv = resolve_inventory_path(inv_dir)
     inv_meta_path = inv_dir / "inventory_metadata.json"
     inv_key = hash_dict({
         "blocks": {b: block_key(b) for b in done_blocks},
@@ -918,9 +923,10 @@ def ensure_movie_aligned(
         "version": MOVIE_PREPROCESSOR_VERSION,
     })
     hit = False
-    if inv_path.exists() and inv_meta_path.exists() and not force_realign:
+    if resolved_inv.exists() and inv_meta_path.exists() and not force_realign:
         try:
             hit = json.loads(inv_meta_path.read_text(encoding="utf-8")).get("inventory_key") == inv_key
+            inv_path = resolved_inv
         except Exception:
             hit = False
     if not hit:
@@ -930,10 +936,17 @@ def ensure_movie_aligned(
             str(blocks_root), str(manifest_path), str(inv_path), source_record=src_rec,
             recover_oov_words=True,
         )
-        inv_meta_path.write_text(json.dumps({
+        meta_dict = {}
+        if inv_meta_path.exists():
+            try:
+                meta_dict = json.loads(inv_meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta_dict = {}
+        meta_dict.update({
             "inventory_key": inv_key, "movie": True, "media_hash": media_hash,
             "blocks_aligned": done_blocks, "blocks_total": len(blocks),
-        }, indent=2), encoding="utf-8")
+        })
+        inv_meta_path.write_text(json.dumps(meta_dict, indent=2), encoding="utf-8")
     else:
         log(f"[+] Using cached movie inventory: {inv_path}")
 

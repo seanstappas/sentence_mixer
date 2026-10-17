@@ -18,10 +18,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.12 
-            xmax = 0.5 
+            xmax = 0.53 
             text = "jango" 
         intervals [3]:
-            xmin = 0.5 
+            xmin = 0.53 
             xmax = 0.63 
             text = "" 
         intervals [4]:
@@ -64,10 +64,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.12 
-            xmax = 0.5 
+            xmax = 0.53 
             text = "spn" 
         intervals [3]:
-            xmin = 0.5 
+            xmin = 0.53 
             xmax = 0.63 
             text = "" 
         intervals [4]:

@@ -54,10 +54,10 @@ item []:
             text = "for" 
         intervals [11]:
             xmin = 2.38 
-            xmax = 2.79 
+            xmax = 2.78 
             text = "orders" 
         intervals [12]:
-            xmin = 2.79 
+            xmin = 2.78 
             xmax = 2.9 
             text = "did" 
         intervals [13]:
@@ -180,18 +180,18 @@ item []:
             text = "ER0" 
         intervals [28]:
             xmin = 2.64 
-            xmax = 2.79 
+            xmax = 2.78 
             text = "Z" 
         intervals [29]:
-            xmin = 2.79 
-            xmax = 2.83 
+            xmin = 2.78 
+            xmax = 2.82 
             text = "D" 
         intervals [30]:
-            xmin = 2.83 
-            xmax = 2.86 
+            xmin = 2.82 
+            xmax = 2.85 
             text = "IH0" 
         intervals [31]:
-            xmin = 2.86 
+            xmin = 2.85 
             xmax = 2.9 
             text = "D" 
         intervals [32]:

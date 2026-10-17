@@ -34,10 +34,10 @@ item []:
             text = "ready" 
         intervals [6]:
             xmin = 0.98 
-            xmax = 1.07 
+            xmax = 1.08 
             text = "to" 
         intervals [7]:
-            xmin = 1.07 
+            xmin = 1.08 
             xmax = 1.15 
             text = "be" 
         intervals [8]:
@@ -104,14 +104,14 @@ item []:
             text = "IY0" 
         intervals [13]:
             xmin = 0.98 
-            xmax = 1.04 
+            xmax = 1.03 
             text = "T" 
         intervals [14]:
-            xmin = 1.04 
-            xmax = 1.07 
-            text = "AH0" 
+            xmin = 1.03 
+            xmax = 1.08 
+            text = "IH0" 
         intervals [15]:
-            xmin = 1.07 
+            xmin = 1.08 
             xmax = 1.12 
             text = "B" 
         intervals [16]:

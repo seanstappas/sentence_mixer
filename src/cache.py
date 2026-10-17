@@ -6,6 +6,7 @@ Ensures atomic publishing and invalidation.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -640,14 +641,74 @@ def _normalize_speaker_id(speaker: str) -> str:
     return re.sub(r"[-\s]+", "_", speaker.strip().lower())
 
 
+def resolve_inventory_path(path_or_dir: Union[str, Path]) -> Path:
+    """Resolve an inventory directory or file path to units_index.json.gz (preferred) or units_index.json."""
+    p = Path(path_or_dir)
+    if p.is_dir():
+        gz = p / "units_index.json.gz"
+        return gz if gz.exists() else (p / "units_index.json")
+    if p.exists():
+        return p
+    if p.name == "units_index.json":
+        gz = p.with_name("units_index.json.gz")
+        if gz.exists():
+            return gz
+    elif p.name == "units_index.json.gz":
+        raw = p.with_name("units_index.json")
+        if raw.exists():
+            return raw
+    return p
+
+
+def load_inventory_json(path_or_dir: Union[str, Path]) -> Dict[str, Any]:
+    """Load JSON dict transparently from units_index.json.gz or units_index.json."""
+    p = resolve_inventory_path(path_or_dir)
+    if p.name.endswith(".gz"):
+        with gzip.open(p, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    with open(p, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_inventory_json(
+    data: Dict[str, Any],
+    output_path: Union[str, Path],
+    compress: Optional[bool] = None,
+) -> Path:
+    """Write compact JSON to .json.gz (if output_path ends with .gz or compress=True) or .json."""
+    p = Path(output_path)
+    do_compress = str(p).endswith(".gz") if compress is None else compress
+    if do_compress:
+        if not str(p).endswith(".gz"):
+            p = p.with_name(p.name + ".gz")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(p, "wt", encoding="utf-8", compresslevel=6) as f:
+            json.dump(data, f, separators=(",", ":"))
+    else:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+    return p
+
+
 def is_valid_inventory(inventory_file: Union[str, Path]) -> bool:
     """Check if an inventory file exists, is readable, and contains actual units."""
-    p = Path(inventory_file)
-    if not p.exists() or p.stat().st_size < 30:
+    p = resolve_inventory_path(inventory_file)
+    if not p.exists() or p.stat().st_size < 20:
         return False
+
+    # Check sibling inventory_metadata.json for instant (< 1 ms) validation
+    meta_p = p.parent / "inventory_metadata.json"
+    if meta_p.exists():
+        try:
+            meta = json.loads(meta_p.read_text(encoding="utf-8"))
+            if "word_count" in meta or "event_count" in meta or "speakers" in meta:
+                return bool(meta.get("word_count", 0) > 0 or meta.get("event_count", 0) > 0 or meta.get("speakers"))
+        except Exception:
+            pass
+
     try:
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_inventory_json(p)
     except Exception:
         return False
 
@@ -665,16 +726,27 @@ def is_valid_inventory(inventory_file: Union[str, Path]) -> bool:
 
 def inventory_has_speaker(inventory_file: Union[str, Path], target_speaker: str) -> bool:
     """Check if an inventory contains any eligible units for target_speaker."""
-    p = Path(inventory_file)
-    if not p.exists() or p.stat().st_size < 30:
-        return False
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
+    p = resolve_inventory_path(inventory_file)
+    if not p.exists() or p.stat().st_size < 20:
         return False
 
     norm_target = _normalize_speaker_id(target_speaker)
+
+    # Check sibling inventory_metadata.json for instant (< 0.1 ms) speaker check
+    meta_p = p.parent / "inventory_metadata.json"
+    if meta_p.exists():
+        try:
+            meta = json.loads(meta_p.read_text(encoding="utf-8"))
+            spks = meta.get("speakers")
+            if isinstance(spks, dict):
+                return any(_normalize_speaker_id(k) == norm_target and cnt > 0 for k, cnt in spks.items())
+        except Exception:
+            pass
+
+    try:
+        data = load_inventory_json(p)
+    except Exception:
+        return False
 
     # 1. Check words
     if "words" in data and isinstance(data["words"], dict):
@@ -721,7 +793,7 @@ def find_cached_inventories_for_speaker(
     registry_path: Optional[Union[str, Path]] = None,
 ) -> List[str]:
     """
-    Find all cached units_index.json paths that contain units for a given speaker.
+    Find all cached units_index paths (.json.gz or .json) that contain units for a given speaker.
     Checks SpeakerRegistry for associated source_ids first, and scans cache_dir/inventory.
     """
     base_cache = Path(cache_dir).resolve()
@@ -742,7 +814,8 @@ def find_cached_inventories_for_speaker(
                 for spk_key, prof in reg.speakers.items():
                     if _normalize_speaker_id(spk_key) == norm_spk or _normalize_speaker_id(prof.display_name) == norm_spk:
                         for sid in getattr(prof, "source_ids", []):
-                            cand = inv_dir / sid / "units_index.json"
+                            cand_dir = inv_dir / sid
+                            cand = resolve_inventory_path(cand_dir)
                             if cand.exists() and is_valid_inventory(cand) and inventory_has_speaker(cand, speaker_id):
                                 matched_paths.add(str(cand.resolve()))
             except Exception:
@@ -751,7 +824,7 @@ def find_cached_inventories_for_speaker(
     # 2. Scan all subdirectories in inv_dir
     for sub in inv_dir.iterdir():
         if sub.is_dir() and not sub.name.startswith("."):
-            cand = sub / "units_index.json"
+            cand = resolve_inventory_path(sub)
             cand_resolved = str(cand.resolve())
             if cand_resolved not in matched_paths:
                 if cand.exists() and is_valid_inventory(cand) and inventory_has_speaker(cand, speaker_id):
@@ -761,7 +834,7 @@ def find_cached_inventories_for_speaker(
 
 
 def find_all_cached_inventories(cache_dir: Union[str, Path]) -> List[str]:
-    """Find all valid cached units_index.json files in cache_dir/inventory."""
+    """Find all valid cached units_index paths (.json.gz or .json) in cache_dir/inventory."""
     base_cache = Path(cache_dir).resolve()
     inv_dir = base_cache / "inventory"
     if not inv_dir.exists():
@@ -770,7 +843,7 @@ def find_all_cached_inventories(cache_dir: Union[str, Path]) -> List[str]:
     valid_paths: List[str] = []
     for sub in sorted(inv_dir.iterdir()):
         if sub.is_dir() and not sub.name.startswith("."):
-            cand = sub / "units_index.json"
+            cand = resolve_inventory_path(sub)
             if cand.exists() and is_valid_inventory(cand):
                 valid_paths.append(str(cand.resolve()))
 

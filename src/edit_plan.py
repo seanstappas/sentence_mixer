@@ -66,7 +66,10 @@ def release_tail_samples(
     sr = src.native_sample_rate if src and src.native_sample_rate else 48000
     base_end = max(succ.start_sample, end_s)
     room = succ.end_sample - base_end - int(round(RELEASE_GUARD_SEC * sr))
-    return max(0, (base_end - end_s) + max(0, min(int(round(tail_sec * sr)), room)))
+    ext = min(int(round(tail_sec * sr)), room)
+    if ext <= 0:
+        return 0
+    return max(0, (base_end - end_s) + ext)
 
 
 class _SpeechIndex:
@@ -319,6 +322,25 @@ def _refine_spans_in_native_audio(
     span_starts = [s.start_sample for s in selected_spans]
     span_ends = [s.end_sample for s in selected_spans]
 
+    # Apply release tail before zero-crossing snaps if tail_sec > 0
+    if tail_sec > 0.0:
+        for i, span in enumerate(selected_spans):
+            is_cont_succ = False
+            if i < len(selected_spans) - 1:
+                succ = selected_spans[i + 1]
+                if succ.source_content_id == span.source_content_id and span.end_sample == succ.start_sample:
+                    if not (span.event_ids and succ.event_ids):
+                        is_cont_succ = True
+                    else:
+                        c_last_ev = inventory.events.get(span.event_ids[-1])
+                        s_first_ev = inventory.events.get(succ.event_ids[0])
+                        if c_last_ev and s_first_ev and c_last_ev.successor_id == s_first_ev.event_id:
+                            is_cont_succ = True
+            if not is_cont_succ:
+                t = release_tail_samples(span, inventory, tail_sec, nominal_end=span_ends[i])
+                if t > 0:
+                    span_ends[i] += t
+
     # Quick check if files exist on disk for all referenced sources
     can_refine = True
     src_paths: Dict[str, str] = {}
@@ -333,8 +355,7 @@ def _refine_spans_in_native_audio(
             vp = getattr(src_rec, "cached_vocal_pcm_path", "") or ""
             if vp and Path(vp).exists():
                 try:
-                    if int(sf.info(vp).samplerate) == int(src_rec.native_sample_rate or 48000):
-                        p = vp
+                    p = vp
                 except Exception:
                     pass
         if not p:
@@ -346,6 +367,30 @@ def _refine_spans_in_native_audio(
 
     if not can_refine or len(selected_spans) == 0:
         return span_starts, span_ends
+
+    def _read_audio_at_native_sr(path: str, start_sample: int, stop_sample: int, target_sr: int) -> np.ndarray:
+        info = sf.info(path)
+        file_sr = int(info.samplerate)
+        n_frames = int(info.frames)
+        if file_sr != target_sr:
+            st = int(round(start_sample * file_sr / float(target_sr)))
+            en = int(round(stop_sample * file_sr / float(target_sr)))
+        else:
+            st = start_sample
+            en = stop_sample
+        st = max(0, min(n_frames, st))
+        en = max(0, min(n_frames, en))
+        if en <= st:
+            return np.zeros(0, dtype=np.float32)
+        chunk, _ = sf.read(path, start=st, stop=en)
+        if chunk.ndim > 1:
+            chunk = np.mean(chunk, axis=1)
+        if file_sr != target_sr and len(chunk) > 0:
+            import math
+            import scipy.signal
+            g = math.gcd(int(target_sr), int(file_sr))
+            chunk = scipy.signal.resample_poly(chunk, int(target_sr // g), int(file_sr // g), axis=0)
+        return chunk
 
     # Apply variant samples when flagged during candidate retrieval
     for i, span in enumerate(selected_spans):
@@ -394,10 +439,9 @@ def _refine_spans_in_native_audio(
         try:
             first_sr = inventory.sources[first_span.source_content_id].native_sample_rate or 48000
             st_0 = span_starts[0]
-            info_first = sf.info(p_first)
-            en_0 = min(info_first.frames, span_ends[0], st_0 + int(round(0.025 * first_sr)))
+            en_0 = min(span_ends[0], st_0 + int(round(0.025 * first_sr)))
             if en_0 > st_0:
-                head_audio, _ = sf.read(p_first, start=st_0, stop=en_0)
+                head_audio = _read_audio_at_native_sr(p_first, st_0, en_0, first_sr)
                 if len(head_audio) >= 16:
                     _, shift_head = refine_splice_boundary(
                         np.zeros(len(head_audio), dtype=np.float32), head_audio, sr=first_sr, max_shift_ms=2.0, is_unvoiced=True
@@ -465,15 +509,14 @@ def _refine_spans_in_native_audio(
             curr_en = span_ends[i]
             next_st = span_starts[i + 1]
 
-            info_next = sf.info(p_next)
             read_st_curr = max(span_starts[i], curr_en - win_curr)
-            read_en_next = min(info_next.frames, span_ends[i + 1], next_st + win_next)
+            read_en_next = min(span_ends[i + 1], next_st + win_next)
 
             if curr_en <= read_st_curr or read_en_next <= next_st:
                 continue
 
-            audio_curr, _ = sf.read(p_curr, start=read_st_curr, stop=curr_en)
-            audio_next, _ = sf.read(p_next, start=next_st, stop=read_en_next)
+            audio_curr = _read_audio_at_native_sr(p_curr, read_st_curr, curr_en, curr_sr)
+            audio_next = _read_audio_at_native_sr(p_next, next_st, read_en_next, next_sr)
 
             if len(audio_curr) < 16 or len(audio_next) < 16:
                 continue
@@ -512,7 +555,7 @@ def _refine_spans_in_native_audio(
             en_last = span_ends[-1]
             st_last = max(span_starts[-1], en_last - int(round(0.025 * last_sr)))
             if en_last > st_last:
-                tail_audio, _ = sf.read(p_last, start=st_last, stop=en_last)
+                tail_audio = _read_audio_at_native_sr(p_last, st_last, en_last, last_sr)
                 if len(tail_audio) >= 16:
                     shift_tail, _ = refine_splice_boundary(
                         tail_audio, np.zeros(len(tail_audio), dtype=np.float32), sr=last_sr, max_shift_ms=2.0, is_unvoiced=True
@@ -752,8 +795,8 @@ def build_edit_plan(
                     if last_ev and first_ev and last_ev.successor_id == first_ev.event_id:
                         is_cont = True
 
-        tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec, nominal_end=span_nominal_end)
-        span_end = span_nominal_end + tail
+        tail = 0 if is_cont else release_tail_samples(span, inventory, tail_sec, nominal_end=span.end_sample)
+        span_end = span_nominal_end
 
         # Duration in native samples
         native_duration = span_end - span_start
@@ -778,12 +821,19 @@ def build_edit_plan(
             realized = list(target_phones)
 
         target_words_covered: List[str] = []
+        covered_token_indices: List[int] = []
         if graph and hasattr(graph, "nodes"):
+            seen_tokens = set()
             for nid in span.covered_nodes:
                 if nid < len(graph.nodes):
-                    w_txt = getattr(graph.nodes[nid], "word_text", "")
-                    if w_txt and (not target_words_covered or target_words_covered[-1] != w_txt):
-                        target_words_covered.append(w_txt)
+                    node = graph.nodes[nid]
+                    t_idx = getattr(node, "token_index", None)
+                    if t_idx is not None and t_idx not in seen_tokens:
+                        seen_tokens.add(t_idx)
+                        covered_token_indices.append(t_idx)
+                        w_txt = getattr(node, "word_text", "")
+                        if w_txt:
+                            target_words_covered.append(w_txt)
         target_label = " ".join(target_words_covered) if target_words_covered else span.matched_word
 
         seg = PlanSegment(
@@ -805,6 +855,7 @@ def build_edit_plan(
             realized_phones=realized,
             entry_variant_samples=getattr(span, "entry_variant_samples", 0),
             exit_variant_samples=getattr(span, "exit_variant_samples", 0),
+            covered_token_indices=covered_token_indices,
         )
         segments.append(seg)
         seg_idx += 1
@@ -991,6 +1042,9 @@ def finalize_edit_plan(
         runs.append(curr_run)
 
     segment_rms_db: Dict[int, float] = {}
+    effective_rms_track = "vocals" if audio_track in ("both", "all") else audio_track
+    plan.metadata["rms_analysis_track"] = effective_rms_track
+    raw_segment_gains_db: Optional[Dict[int, float]] = {} if audio_track in ("both", "all") else None
 
     for run in runs:
         if is_cuts_only or not normalize_loudness:
@@ -1001,9 +1055,10 @@ def finalize_edit_plan(
         first_seg = run[0]
         src_rec = plan.sources.get(first_seg.source_content_id) if plan.sources else None
         src_path = None
+        effective_rms_track = "vocals" if audio_track in ("both", "all") else audio_track
+        plan.metadata["rms_analysis_track"] = effective_rms_track
         if src_rec:
             # When audio_track is vocals, recombined, both, or all, prefer vocal stem if available
-            effective_rms_track = "vocals" if audio_track in ("both", "all") else audio_track
             if effective_rms_track in ("vocals", "isolated", "recombined") and getattr(src_rec, "cached_vocal_pcm_path", None):
                 if Path(src_rec.cached_vocal_pcm_path).exists():
                     src_path = src_rec.cached_vocal_pcm_path
@@ -1065,6 +1120,66 @@ def finalize_edit_plan(
         else:
             rms_db = -20.0
             gain_val = 0.0
+
+        # When in both/all modes, also compute raw-mix gains
+        if raw_segment_gains_db is not None:
+            raw_path = None
+            if src_rec:
+                if src_rec.cached_pcm_path and Path(src_rec.cached_pcm_path).exists():
+                    raw_path = src_rec.cached_pcm_path
+                elif src_rec.source_path and Path(src_rec.source_path).exists():
+                    raw_path = src_rec.source_path
+            elif first_seg.source_video_path and Path(first_seg.source_video_path).exists():
+                raw_path = first_seg.source_video_path
+
+            raw_chunks = []
+            if raw_path:
+                try:
+                    r_rate = int(sf.info(str(raw_path)).samplerate)
+                    r_frames = int(sf.info(str(raw_path)).frames)
+                    rec_sr = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else r_rate
+                    for s in run:
+                        if r_rate != rec_sr:
+                            st = int(round(s.source_start_sample * r_rate / rec_sr))
+                            en = int(round(s.source_end_sample * r_rate / rec_sr))
+                        else:
+                            st = s.source_start_sample
+                            en = s.source_end_sample
+                        st = max(0, min(r_frames, st))
+                        en = max(0, min(r_frames, en))
+                        chunk, _ = sf.read(str(raw_path), start=st, stop=en) if en > st else (np.zeros(0), r_rate)
+                        if r_rate != plan.project_sample_rate and len(chunk) > 0:
+                            import math
+                            import scipy.signal
+                            g = math.gcd(int(plan.project_sample_rate), int(r_rate))
+                            chunk = scipy.signal.resample_poly(chunk, int(plan.project_sample_rate // g), int(r_rate // g), axis=0)
+                        raw_chunks.append(chunk)
+                except Exception:
+                    pass
+
+            if raw_chunks:
+                raw_audio = np.concatenate(raw_chunks, axis=0)
+                if raw_audio.ndim > 1:
+                    raw_audio = np.mean(raw_audio, axis=1)
+                active_mask = np.abs(raw_audio) > 1e-4
+                if np.sum(active_mask) > 50:
+                    raw_rms = float(np.sqrt(np.mean(raw_audio[active_mask] ** 2)))
+                else:
+                    raw_rms = float(np.sqrt(np.mean(raw_audio ** 2))) if len(raw_audio) > 0 else 0.0
+
+                if raw_rms > 1e-4:
+                    raw_rms_db = 20.0 * np.log10(raw_rms)
+                    raw_auto_gain_db = -20.0 - raw_rms_db
+                    is_subword_or_phone = any(s.span_type in ("subword", "phone") for s in run)
+                    limit_db = 12.0 if is_subword_or_phone else 9.0
+                    raw_gain_val = float(max(-limit_db, min(limit_db, raw_auto_gain_db)))
+                else:
+                    raw_gain_val = 0.0
+            else:
+                raw_gain_val = 0.0
+
+            for s in run:
+                raw_segment_gains_db[s.segment_index] = raw_gain_val
 
         for s in run:
             s.gain_db = gain_val
@@ -1147,6 +1262,11 @@ def finalize_edit_plan(
     for k, s in enumerate(plan.segments):
         if s.span_type == CONTINUE_SPAN_TYPE and k > 0:
             s.gain_db = plan.segments[k - 1].gain_db or 0.0
+            if raw_segment_gains_db is not None and (k - 1) in raw_segment_gains_db:
+                raw_segment_gains_db[s.segment_index] = raw_segment_gains_db[k - 1]
+
+    if raw_segment_gains_db is not None:
+        plan.metadata["raw_segment_gains_db"] = raw_segment_gains_db
 
     # Step 2: Measure loudness on an unpublished analysis master and record metadata
     if not is_cuts_only and normalize_loudness:

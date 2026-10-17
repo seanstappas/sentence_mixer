@@ -40,10 +40,15 @@ def clean_segment_label(text: str) -> str:
     - 'investigation[IH0-N-V-EH1-S-T]' -> 'invest'
     - '[pause]' -> ''
     - '<gap:...>' -> ''
-    - '{...}' -> ''
+    - '{DH EH1 R}' -> 'DH EH1 R'
     """
-    if not text or text.startswith("[pause]") or text.startswith("<gap:") or text.startswith("{"):
+    if not text or text.startswith("[pause]") or text.startswith("<gap:"):
         return ""
+    text = text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        text = text[1:-1].strip()
+        if not text:
+            return ""
     # Strip subword phone brackets e.g. 'investigation[IH0-N-V-EH1-S-T]'
     m = re.match(r"^([^\[]+)\[", text)
     if m:
@@ -134,10 +139,21 @@ def extract_cues_from_plan(
         start_s = curr_group[0].output_start_sample / sr
         end_s = curr_group[-1].output_end_sample / sr
         words = []
+        last_tokens: Optional[List[int]] = None
         for s in curr_group:
             txt = clean_segment_label(s.target_text)
-            if txt and (not words or words[-1] != txt):
+            if not txt:
+                continue
+            tokens = getattr(s, "covered_token_indices", None) or []
+            if tokens and last_tokens:
+                if set(tokens) == set(last_tokens):
+                    continue
                 words.append(txt)
+                last_tokens = list(tokens)
+            else:
+                if not words or words[-1] != txt or s.span_type == "word":
+                    words.append(txt)
+                last_tokens = list(tokens) if tokens else None
         cue_text = " ".join(words)
         if cue_text and end_s > start_s:
             cues.append(SubtitleCue(cue_idx, start_s, end_s, cue_text))

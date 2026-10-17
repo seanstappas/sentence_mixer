@@ -34,10 +34,10 @@ item []:
             text = "home" 
         intervals [6]:
             xmin = 0.76 
-            xmax = 0.9 
+            xmax = 0.91 
             text = "and" 
         intervals [7]:
-            xmin = 0.9 
+            xmin = 0.91 
             xmax = 1.28 
             text = "rethink" 
         intervals [8]:
@@ -120,14 +120,14 @@ item []:
             text = "AH0" 
         intervals [14]:
             xmin = 0.8 
-            xmax = 0.87 
+            xmax = 0.88 
             text = "N" 
         intervals [15]:
-            xmin = 0.87 
-            xmax = 0.9 
+            xmin = 0.88 
+            xmax = 0.91 
             text = "D" 
         intervals [16]:
-            xmin = 0.9 
+            xmin = 0.91 
             xmax = 1.28 
             text = "spn" 
         intervals [17]:

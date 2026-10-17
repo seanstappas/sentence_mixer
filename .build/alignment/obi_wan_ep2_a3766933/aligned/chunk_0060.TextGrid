@@ -26,10 +26,10 @@ item []:
             text = "to" 
         intervals [4]:
             xmin = 0.78 
-            xmax = 0.98 
+            xmax = 0.95 
             text = "run" 
         intervals [5]:
-            xmin = 0.98 
+            xmin = 0.95 
             xmax = 1.11 
             text = "" 
     item [2]:
@@ -76,13 +76,13 @@ item []:
             text = "R" 
         intervals [10]:
             xmin = 0.86 
-            xmax = 0.95 
+            xmax = 0.92 
             text = "AH1" 
         intervals [11]:
-            xmin = 0.95 
-            xmax = 0.98 
+            xmin = 0.92 
+            xmax = 0.95 
             text = "N" 
         intervals [12]:
-            xmin = 0.98 
+            xmin = 0.95 
             xmax = 1.11 
             text = "" 

@@ -22,14 +22,14 @@ item []:
             text = "anakin" 
         intervals [3]:
             xmin = 0.81 
-            xmax = 0.84 
+            xmax = 0.88 
             text = "" 
         intervals [4]:
-            xmin = 0.84 
-            xmax = 1.35 
+            xmin = 0.88 
+            xmax = 1.33 
             text = "r4" 
         intervals [5]:
-            xmin = 1.35 
+            xmin = 1.33 
             xmax = 1.42 
             text = "be" 
         intervals [6]:
@@ -45,7 +45,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 2.31 
-        intervals: size = 18 
+        intervals: size = 22 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.19 
@@ -76,45 +76,61 @@ item []:
             text = "N" 
         intervals [8]:
             xmin = 0.81 
-            xmax = 0.84 
+            xmax = 0.88 
             text = "" 
         intervals [9]:
-            xmin = 0.84 
-            xmax = 1.35 
-            text = "spn" 
+            xmin = 0.88 
+            xmax = 1.02 
+            text = "AA1" 
         intervals [10]:
-            xmin = 1.35 
+            xmin = 1.02 
+            xmax = 1.05 
+            text = "R" 
+        intervals [11]:
+            xmin = 1.05 
+            xmax = 1.14 
+            text = "F" 
+        intervals [12]:
+            xmin = 1.14 
+            xmax = 1.29 
+            text = "AO1" 
+        intervals [13]:
+            xmin = 1.29 
+            xmax = 1.33 
+            text = "R" 
+        intervals [14]:
+            xmin = 1.33 
             xmax = 1.38 
             text = "B" 
-        intervals [11]:
+        intervals [15]:
             xmin = 1.38 
             xmax = 1.42 
             text = "IY0" 
-        intervals [12]:
+        intervals [16]:
             xmin = 1.42 
             xmax = 1.5 
             text = "K" 
-        intervals [13]:
+        intervals [17]:
             xmin = 1.5 
             xmax = 1.58 
             text = "EH1" 
-        intervals [14]:
+        intervals [18]:
             xmin = 1.58 
             xmax = 1.65 
             text = "R" 
-        intervals [15]:
+        intervals [19]:
             xmin = 1.65 
             xmax = 1.72 
             text = "F" 
-        intervals [16]:
+        intervals [20]:
             xmin = 1.72 
             xmax = 1.76 
             text = "AH0" 
-        intervals [17]:
+        intervals [21]:
             xmin = 1.76 
             xmax = 1.86 
             text = "L" 
-        intervals [18]:
+        intervals [22]:
             xmin = 1.86 
             xmax = 2.31 
             text = "" 

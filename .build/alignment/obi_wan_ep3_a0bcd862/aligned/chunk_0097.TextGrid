@@ -68,10 +68,10 @@ item []:
             text = "K" 
         intervals [3]:
             xmin = 0.22 
-            xmax = 0.3 
+            xmax = 0.29 
             text = "S" 
         intervals [4]:
-            xmin = 0.3 
+            xmin = 0.29 
             xmax = 0.37 
             text = "P" 
         intervals [5]:

@@ -132,3 +132,6 @@ r4	AA1 R F AO1 R
 c-3po	S IY1 TH R IY1 P IY1 OW0
 wesa	W IY1 S AH0
 yousa	Y UW1 S AH0
+deadass	D EH1 D AE2 S
+wha	W AH0
+

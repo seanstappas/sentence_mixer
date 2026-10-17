@@ -14,10 +14,10 @@ item []:
         intervals: size = 6 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.64 
+            xmax = 0.65 
             text = "canisters" 
         intervals [2]:
-            xmin = 0.64 
+            xmin = 0.65 
             xmax = 1.14 
             text = "" 
         intervals [3]:
@@ -64,18 +64,18 @@ item []:
             text = "S" 
         intervals [6]:
             xmin = 0.42 
-            xmax = 0.46 
+            xmax = 0.45 
             text = "T" 
         intervals [7]:
-            xmin = 0.46 
+            xmin = 0.45 
             xmax = 0.49 
             text = "ER0" 
         intervals [8]:
             xmin = 0.49 
-            xmax = 0.64 
+            xmax = 0.65 
             text = "Z" 
         intervals [9]:
-            xmin = 0.64 
+            xmin = 0.65 
             xmax = 1.14 
             text = "" 
         intervals [10]:

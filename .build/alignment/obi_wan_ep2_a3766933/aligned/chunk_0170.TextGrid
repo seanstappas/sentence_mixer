@@ -18,10 +18,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.15 
-            xmax = 0.34 
+            xmax = 0.33 
             text = "it's" 
         intervals [3]:
-            xmin = 0.34 
+            xmin = 0.33 
             xmax = 0.61 
             text = "much" 
         intervals [4]:
@@ -72,10 +72,10 @@ item []:
             text = "T" 
         intervals [4]:
             xmin = 0.24 
-            xmax = 0.34 
+            xmax = 0.33 
             text = "S" 
         intervals [5]:
-            xmin = 0.34 
+            xmin = 0.33 
             xmax = 0.4 
             text = "M" 
         intervals [6]:
@@ -112,10 +112,10 @@ item []:
             text = "" 
         intervals [14]:
             xmin = 1.42 
-            xmax = 1.54 
+            xmax = 1.53 
             text = "AE1" 
         intervals [15]:
-            xmin = 1.54 
+            xmin = 1.53 
             xmax = 1.59 
             text = "N" 
         intervals [16]:

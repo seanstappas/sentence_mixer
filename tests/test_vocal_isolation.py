@@ -556,6 +556,8 @@ def test_ensure_source_aligned_with_isolate_vocals(
         out_inv.write_text(json.dumps({"words": {}, "phones": {}}), encoding="utf-8")
 
     import run_mixer
+    fake_build = tmp_path / ".build"
+    monkeypatch.setattr("run_mixer.CACHE_BASE_DIR", fake_build)
     monkeypatch.setattr("vocal_isolation.isolate_vocals", mock_isolate)
     monkeypatch.setattr(run_mixer, "preprocess_source", mock_preprocess)
     monkeypatch.setattr(run_mixer, "run_mfa_align", mock_mfa)

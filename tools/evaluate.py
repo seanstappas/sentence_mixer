@@ -249,6 +249,7 @@ def evaluate_suite(
         "summary": {
             "cases_evaluated": len(results),
             "total_asr_evaluated": total_asr_evaluated,
+            "asr_passes": asr_passes,
             "mean_wer": mean_wer,
             "mean_cer": mean_cer,
             "asr_pass_rate": asr_pass_rate,

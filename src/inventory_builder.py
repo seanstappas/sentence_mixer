@@ -12,8 +12,18 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
+
+_OCR_WORD_FIXES = {"nol": "no", "itl": "it", "ohl": "oh", "ahl": "ah", "uhl": "uh"}
+
+
+def _normalize_textgrid_word(raw_w: str) -> str:
+    folded = unicodedata.normalize("NFKD", raw_w.strip())
+    ascii_w = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    clean = re.sub(r"[^\w\'-]", "", ascii_w).lower()
+    return _OCR_WORD_FIXES.get(clean, clean)
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -113,6 +123,7 @@ def build_units_inventory(
     speaker_intervals: Optional[List[Any]] = None,
     lexicon: Optional[Any] = None,
     recover_oov_words: bool = False,
+    assume_single_speaker: bool = False,
 ) -> Dict[str, Any]:
     """
     Builds a JSON unit inventory of all words and phonemes from aligned TextGrids.
@@ -138,11 +149,26 @@ def build_units_inventory(
 
     # Resolve source video path relative to manifest's parent directory
     rel_video = manifest.get("source_video", "")
-    source_video_path = (manifest_p.parent / rel_video).resolve() if rel_video else manifest_p.parent
+    if rel_video:
+        rel_video_norm = rel_video.replace("\\", "/")
+        p_cand = Path(rel_video)
+        if not p_cand.exists():
+            repo_root = Path(__file__).resolve().parent.parent
+            for anchor in ("/input/", "/.build/"):
+                if anchor in rel_video_norm:
+                    sub_part = rel_video_norm.split(anchor, 1)[1]
+                    cand_local = repo_root / anchor.strip("/") / sub_part
+                    if cand_local.exists():
+                        p_cand = cand_local
+                        break
+        source_video_path = p_cand.resolve() if p_cand.is_absolute() else (manifest_p.parent / p_cand).resolve()
+    else:
+        source_video_path = manifest_p.parent
 
     # Determine speaker identity & verification
     is_verified = bool(
         single_speaker_verified
+        or assume_single_speaker
         or manifest.get("single_speaker_verified", False)
         or manifest.get("assume_single_speaker", False)
     )
@@ -329,7 +355,7 @@ def build_units_inventory(
         words_to_reconcile = []
         for w_idx, w_entry in enumerate(words_tier):
             raw_w = w_entry["text"].strip()
-            clean_word = re.sub(r"[^\w\'-]", "", raw_w).lower()
+            clean_word = _normalize_textgrid_word(raw_w)
             if not clean_word or clean_word in {"sil", "sp", "spn", "eps", "<eps>"}:
                 continue
             w_loc_xmin = float(w_entry["xmin"])
@@ -350,7 +376,7 @@ def build_units_inventory(
             # matched by token order (exact for two-speaker dialogue-dash cues).
             from movie_subtitles import assign_word_speakers
             seg_words = [w for w in words_tier if w["text"].strip()]
-            assigned = assign_word_speakers([w["text"].strip() for w in seg_words], chunk_segments)
+            assigned = assign_word_speakers([_normalize_textgrid_word(w["text"]) for w in seg_words], chunk_segments)
             pos_by_id = {id(w): i for i, w in enumerate(seg_words)}
             for w_idx, w_entry in enumerate(words_tier):
                 pos = pos_by_id.get(id(w_entry))
@@ -368,7 +394,7 @@ def build_units_inventory(
         # 2. Process words tier and associate with constituent phone events
         for w_idx, w_entry in enumerate(words_tier):
             raw_w = w_entry["text"].strip()
-            clean_word = re.sub(r"[^\w\'-]", "", raw_w).lower()
+            clean_word = _normalize_textgrid_word(raw_w)
             if not clean_word or clean_word in {"sil", "sp", "spn", "eps", "<eps>"}:
                 continue
 
@@ -399,88 +425,101 @@ def build_units_inventory(
                     # Subtitle-Anchored OOV Recovery:
                     # When MFA assigns 'spn' to a valid subtitle word, synthesize phone events
                     # across the word interval from Lexicon / G2P so the word is not lost.
-                    import unicodedata
-                    norm_w = unicodedata.normalize("NFKD", clean_word).encode("ASCII", "ignore").decode("utf-8")
-                    prons = lexicon.get_pronunciations(clean_word) or (lexicon.get_pronunciations(norm_w) if norm_w != clean_word else [])
-                    if prons:
-                        chosen_phones = prons[0]
-                        num_p = len(chosen_phones)
-                        from target_graph import DEFAULT_DURATION_PRIORS
-                        priors = [DEFAULT_DURATION_PRIORS.get(strip_phone_stress(p), 0.10) for p in chosen_phones]
-                        total_prior = sum(priors) if sum(priors) > 0 else 1.0
-                        total_samples = max(num_p, w_end_sample - w_start_sample)
+                    chosen_phones: List[str] = []
+                    if clean_word.isdigit():
+                        from lexicon import normalize_numerals
+                        num_words = normalize_numerals(clean_word).split()
+                        for nw in num_words:
+                            nw_prons = lexicon.get_pronunciations(nw)
+                            if nw_prons:
+                                chosen_phones.extend(nw_prons[0])
+                    else:
+                        norm_w = unicodedata.normalize("NFKD", clean_word).encode("ASCII", "ignore").decode("utf-8")
+                        prons = lexicon.get_pronunciations(clean_word) or (lexicon.get_pronunciations(norm_w) if norm_w != clean_word else [])
+                        if prons:
+                            chosen_phones = list(prons[0])
 
-                        curr_sample = w_start_sample
-                        synth_event_ids: List[str] = []
-                        word_occ_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
+                    if chosen_phones:
+                        word_dur_sec = w_glob_end - w_glob_start
+                        max_oov_dur = max(0.80, 0.35 * len(chosen_phones))
+                        if word_dur_sec <= max_oov_dur:
+                            num_p = len(chosen_phones)
+                            from target_graph import DEFAULT_DURATION_PRIORS
+                            priors = [DEFAULT_DURATION_PRIORS.get(strip_phone_stress(p), 0.10) for p in chosen_phones]
+                            total_prior = sum(priors) if sum(priors) > 0 else 1.0
+                            total_samples = max(num_p, w_end_sample - w_start_sample)
 
-                        for p_i, ph in enumerate(chosen_phones):
-                            ph_clean = ph.upper()
-                            ph_dur_samples = int(round(total_samples * (priors[p_i] / total_prior)))
-                            if p_i == num_p - 1:
-                                next_sample = w_end_sample
-                            else:
-                                next_sample = min(w_end_sample, curr_sample + max(1, ph_dur_samples))
+                            curr_sample = w_start_sample
+                            synth_event_ids: List[str] = []
+                            word_occ_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
 
-                            ev_id = f"ev_{content_id}_{chunk_id}_syn_{w_idx:04d}_{p_i:02d}"
-                            base_p = strip_phone_stress(ph_clean)
-                            stress_p = get_phone_stress(ph_clean)
+                            for p_i, ph in enumerate(chosen_phones):
+                                ph_clean = ph.upper()
+                                ph_dur_samples = int(round(total_samples * (priors[p_i] / total_prior)))
+                                if p_i == num_p - 1:
+                                    next_sample = w_end_sample
+                                else:
+                                    next_sample = min(w_end_sample, curr_sample + max(1, ph_dur_samples))
 
-                            ev = AlignedEvent(
-                                event_id=ev_id,
-                                source_content_id=content_id,
-                                utterance_id=chunk_id,
-                                speaker_id=chunk_speaker,
-                                kind="phone",
-                                start_sample=curr_sample,
-                                end_sample=next_sample,
-                                label=ph_clean,
-                                base_phone=base_p,
-                                stress=stress_p,
-                                word_occurrence_id=word_occ_id,
-                            )
-                            if synth_event_ids:
-                                prev_id = synth_event_ids[-1]
-                                ev.predecessor_id = prev_id
-                                events_dict[prev_id].successor_id = ev_id
+                                ev_id = f"ev_{content_id}_{chunk_id}_syn_{w_idx:04d}_{p_i:02d}"
+                                base_p = strip_phone_stress(ph_clean)
+                                stress_p = get_phone_stress(ph_clean)
 
-                            events_dict[ev_id] = ev
-                            synth_event_ids.append(ev_id)
-                            constituent_ids.append(ev_id)
-                            realized_phones.append(ph_clean)
+                                ev = AlignedEvent(
+                                    event_id=ev_id,
+                                    source_content_id=content_id,
+                                    utterance_id=chunk_id,
+                                    speaker_id=chunk_speaker,
+                                    kind="phone",
+                                    start_sample=curr_sample,
+                                    end_sample=next_sample,
+                                    label=ph_clean,
+                                    base_phone=base_p,
+                                    stress=stress_p,
+                                    word_occurrence_id=word_occ_id,
+                                )
+                                if synth_event_ids:
+                                    prev_id = synth_event_ids[-1]
+                                    ev.predecessor_id = prev_id
+                                    events_dict[prev_id].successor_id = ev_id
 
-                            if ph_clean not in phone_to_event_ids:
-                                phone_to_event_ids[ph_clean] = []
-                            phone_to_event_ids[ph_clean].append(ev_id)
+                                events_dict[ev_id] = ev
+                                synth_event_ids.append(ev_id)
+                                constituent_ids.append(ev_id)
+                                realized_phones.append(ph_clean)
 
-                            if base_p not in base_phone_to_event_ids:
-                                base_phone_to_event_ids[base_p] = []
-                            base_phone_to_event_ids[base_p].append(ev_id)
+                                if ph_clean not in phone_to_event_ids:
+                                    phone_to_event_ids[ph_clean] = []
+                                phone_to_event_ids[ph_clean].append(ev_id)
 
-                            # Legacy phone entry
-                            if ph_clean not in legacy_phones:
-                                legacy_phones[ph_clean] = []
-                            legacy_phones[ph_clean].append({
-                                "source_video": str(source_video_path),
-                                "chunk_id": chunk_id,
-                                "label": ph_clean,
-                                "start_sec": curr_sample / float(sr),
-                                "end_sec": next_sample / float(sr),
-                                "duration": (next_sample - curr_sample) / float(sr),
-                                "sample_start": curr_sample,
-                                "sample_end": next_sample,
-                                "speaker_id": chunk_speaker,
-                                "source_content_id": content_id,
-                            })
+                                if base_p not in base_phone_to_event_ids:
+                                    base_phone_to_event_ids[base_p] = []
+                                base_phone_to_event_ids[base_p].append(ev_id)
 
-                            total_events_indexed += 1
-                            curr_sample = next_sample
+                                # Legacy phone entry
+                                if ph_clean not in legacy_phones:
+                                    legacy_phones[ph_clean] = []
+                                legacy_phones[ph_clean].append({
+                                    "source_video": str(source_video_path),
+                                    "chunk_id": chunk_id,
+                                    "label": ph_clean,
+                                    "start_sec": curr_sample / float(sr),
+                                    "end_sec": next_sample / float(sr),
+                                    "duration": (next_sample - curr_sample) / float(sr),
+                                    "sample_start": curr_sample,
+                                    "sample_end": next_sample,
+                                    "speaker_id": chunk_speaker,
+                                    "source_content_id": content_id,
+                                })
 
-                        if chunk_event_ids and synth_event_ids:
-                            prev_ch_id = chunk_event_ids[-1]
-                            events_dict[prev_ch_id].successor_id = synth_event_ids[0]
-                            events_dict[synth_event_ids[0]].predecessor_id = prev_ch_id
-                        chunk_event_ids.extend(synth_event_ids)
+                                total_events_indexed += 1
+                                curr_sample = next_sample
+
+                            if chunk_event_ids and synth_event_ids:
+                                prev_ch_id = chunk_event_ids[-1]
+                                events_dict[prev_ch_id].successor_id = synth_event_ids[0]
+                                events_dict[synth_event_ids[0]].predecessor_id = prev_ch_id
+                            chunk_event_ids.extend(synth_event_ids)
 
             if not constituent_ids:
                 continue
@@ -501,16 +540,55 @@ def build_units_inventory(
                 w_reason = rw.get("eligibility_reason", "unassigned")
                 w_status = "diarized" if w_eligible else ("unreviewed" if w_reason == "unreviewed_identity" else "ineligible")
             else:
-                if is_verified and effective_speaker:
-                    w_spk = effective_speaker
+                curr_spk = chunk_speaker or effective_speaker or ""
+                if is_verified and curr_spk:
+                    w_spk = curr_spk
                     w_eligible = True
                     w_reason = ""
                     w_status = "asserted" if manifest.get("assume_single_speaker") else "verified"
                 else:
-                    w_spk = effective_speaker or ""
-                    w_eligible = bool(is_verified and effective_speaker)
+                    w_spk = curr_spk
+                    w_eligible = bool(is_verified and curr_spk)
                     w_reason = "" if w_eligible else "unassigned"
                     w_status = "verified" if w_eligible else "unassigned"
+
+            # Enforce stretched, collapsed & boundary-piling eligibility guards
+            evs = [events_dict[eid] for eid in constituent_ids]
+            MAX_PHONE_DUR_SEC = 0.65
+            MIN_FLOOR_PHONE_SEC = 0.011
+            chunk_dur_sec = max(0.0, chunk_end_sec - chunk_start_sec)
+            from target_graph import DEFAULT_DURATION_PRIORS
+
+            for ev in evs:
+                ev_dur = (ev.end_sample - ev.start_sample) / float(sr)
+                loc_start = (ev.start_sample - utt_start_sample) / float(sr)
+                loc_end = (ev.end_sample - utt_start_sample) / float(sr)
+                prior = DEFAULT_DURATION_PRIORS.get(ev.base_phone, 0.10)
+                if ev_dur > MAX_PHONE_DUR_SEC:
+                    if "mfa_stretched" not in ev.quality_flags:
+                        ev.quality_flags.append("mfa_stretched")
+                    ev.is_eligible = False
+                    ev.eligibility_reason = "mfa_stretched"
+                elif (loc_start <= 0.001 or (chunk_dur_sec > 0 and loc_end >= chunk_dur_sec - 0.001)) and ev_dur > max(0.20, 2.5 * prior):
+                    if "boundary_piling" not in ev.quality_flags:
+                        ev.quality_flags.append("boundary_piling")
+                    ev.is_eligible = False
+                    ev.eligibility_reason = "boundary_piling"
+
+            word_dur_sec = w_glob_end - w_glob_start
+            phone_durs = [(e.end_sample - e.start_sample) / float(sr) for e in evs]
+            if any("mfa_stretched" in e.quality_flags for e in evs) or word_dur_sec > max(1.20, 0.35 * len(evs)):
+                w_eligible = False
+                if w_reason in ("", "unassigned"):
+                    w_reason = "mfa_stretched"
+            elif all(d <= MIN_FLOOR_PHONE_SEC for d in phone_durs) or (len(evs) >= 2 and (sum(phone_durs) / len(evs)) < 0.018):
+                w_eligible = False
+                if w_reason in ("", "unassigned"):
+                    w_reason = "mfa_collapsed"
+            elif any("boundary_piling" in e.quality_flags for e in evs):
+                w_eligible = False
+                if w_reason in ("", "unassigned"):
+                    w_reason = "boundary_piling"
 
             word_id = f"w_{content_id}_{chunk_id}_{w_idx:04d}"
             wo = WordOccurrence(
@@ -530,11 +608,13 @@ def build_units_inventory(
             words_dict[word_id] = wo
             total_words_indexed += 1
 
-            for ev_id in constituent_ids:
-                ev = events_dict[ev_id]
+            for ev in evs:
                 ev.speaker_id = w_spk
-                ev.is_eligible = w_eligible
-                ev.eligibility_reason = w_reason
+                if not ev.is_eligible and ev.eligibility_reason in {"mfa_stretched", "boundary_piling"}:
+                    pass
+                else:
+                    ev.is_eligible = w_eligible
+                    ev.eligibility_reason = w_reason
                 ev.identity_status = w_status
 
             if clean_word not in word_to_word_ids:
@@ -590,20 +670,48 @@ def build_units_inventory(
                 "eligibility_reason": getattr(ev, "eligibility_reason", ""),
             })
 
-    out_dict = inv.to_dict()
-    # Add legacy compatibility fields
-    out_dict["source_video"] = str(source_video_path)
-    out_dict["words_inventory"] = legacy_words
-    out_dict["phones_inventory"] = reconciled_legacy_phones
-    out_dict["phones"] = reconciled_legacy_phones
-
     out_p = Path(output_index_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_p, "w", encoding="utf-8") as f:
-        if manifest.get("movie"):
-            json.dump(out_dict, f, separators=(",", ":"))
-        else:
-            json.dump(out_dict, f, indent=2)
+    is_compact = out_p.name.endswith(".gz")
+
+    if is_compact:
+        out_dict = inv.to_dict(compact=True)
+    else:
+        out_dict = inv.to_dict(compact=False)
+        out_dict["source_video"] = str(source_video_path)
+        out_dict["words_inventory"] = legacy_words
+        out_dict["phones_inventory"] = reconciled_legacy_phones
+        out_dict["phones"] = reconciled_legacy_phones
+
+    from cache import save_inventory_json
+    save_inventory_json(out_dict, out_p)
+
+    # Enrich inventory_metadata.json if in an inventory cache directory
+    eligible_spk_counts: Dict[str, int] = {}
+    for wo in words_dict.values():
+        if wo.is_eligible and wo.speaker_id:
+            norm_spk = wo.speaker_id.strip().lower()
+            eligible_spk_counts[norm_spk] = eligible_spk_counts.get(norm_spk, 0) + 1
+
+    meta_p = out_p.parent / "inventory_metadata.json"
+    meta_data: Dict[str, Any] = {}
+    if meta_p.exists():
+        try:
+            with open(meta_p, "r", encoding="utf-8") as f:
+                meta_data = json.load(f)
+        except Exception:
+            meta_data = {}
+    meta_data.update({
+        "schema_version": INVENTORY_SCHEMA_VERSION,
+        "word_count": total_words_indexed,
+        "event_count": total_events_indexed,
+        "speakers": eligible_spk_counts,
+    })
+    try:
+        with open(meta_p, "w", encoding="utf-8") as f:
+            json.dump(meta_data, f, indent=2)
+    except Exception:
+        pass
 
     uri_str = out_p.as_uri() if hasattr(out_p, "as_uri") else str(out_p)
     print(f"[+] Successfully indexed {total_words_indexed} words and {total_events_indexed} events to {uri_str}")

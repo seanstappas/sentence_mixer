@@ -2,7 +2,7 @@ File type = "ooTextFile"
 Object class = "TextGrid"
 
 xmin = 0 
-xmax = 1.589 
+xmax = 1.589063 
 tiers? <exists> 
 size = 2 
 item []: 
@@ -10,7 +10,7 @@ item []:
         class = "IntervalTier" 
         name = "words" 
         xmin = 0 
-        xmax = 1.589 
+        xmax = 1.589063 
         intervals: size = 3 
         intervals [1]:
             xmin = 0.0 
@@ -18,17 +18,17 @@ item []:
             text = "great" 
         intervals [2]:
             xmin = 0.49 
-            xmax = 1.05 
+            xmax = 1.06 
             text = "threat" 
         intervals [3]:
-            xmin = 1.05 
-            xmax = 1.589 
+            xmin = 1.06 
+            xmax = 1.589063 
             text = "" 
     item [2]:
         class = "IntervalTier" 
         name = "phones" 
         xmin = 0 
-        xmax = 1.589 
+        xmax = 1.589063 
         intervals: size = 9 
         intervals [1]:
             xmin = 0.0 
@@ -60,9 +60,9 @@ item []:
             text = "EH1" 
         intervals [8]:
             xmin = 0.79 
-            xmax = 1.05 
+            xmax = 1.06 
             text = "T" 
         intervals [9]:
-            xmin = 1.05 
-            xmax = 1.589 
+            xmin = 1.06 
+            xmax = 1.589063 
             text = "" 

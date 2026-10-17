@@ -14,10 +14,10 @@ item []:
         intervals: size = 11 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.29 
+            xmax = 0.3 
             text = "way" 
         intervals [2]:
-            xmin = 0.29 
+            xmin = 0.3 
             xmax = 0.93 
             text = "" 
         intervals [3]:
@@ -34,10 +34,10 @@ item []:
             text = "up" 
         intervals [6]:
             xmin = 1.66 
-            xmax = 1.89 
+            xmax = 1.9 
             text = "here" 
         intervals [7]:
-            xmin = 1.89 
+            xmin = 1.9 
             xmax = 2.5 
             text = "" 
         intervals [8]:
@@ -68,10 +68,10 @@ item []:
             text = "W" 
         intervals [2]:
             xmin = 0.03 
-            xmax = 0.29 
+            xmax = 0.3 
             text = "EY1" 
         intervals [3]:
-            xmin = 0.29 
+            xmin = 0.3 
             xmax = 0.93 
             text = "" 
         intervals [4]:
@@ -136,10 +136,10 @@ item []:
             text = "IY1" 
         intervals [19]:
             xmin = 1.72 
-            xmax = 1.89 
+            xmax = 1.9 
             text = "R" 
         intervals [20]:
-            xmin = 1.89 
+            xmin = 1.9 
             xmax = 2.5 
             text = "" 
         intervals [21]:

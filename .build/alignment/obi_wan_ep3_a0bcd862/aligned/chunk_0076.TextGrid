@@ -46,10 +46,10 @@ item []:
             text = "your" 
         intervals [9]:
             xmin = 1.62 
-            xmax = 1.74 
+            xmax = 1.78 
             text = "age" 
         intervals [10]:
-            xmin = 1.74 
+            xmin = 1.78 
             xmax = 1.83 
             text = "it's" 
     item [2]:
@@ -140,21 +140,21 @@ item []:
             text = "R" 
         intervals [21]:
             xmin = 1.62 
-            xmax = 1.71 
+            xmax = 1.72 
             text = "EY1" 
         intervals [22]:
-            xmin = 1.71 
-            xmax = 1.74 
+            xmin = 1.72 
+            xmax = 1.78 
             text = "JH" 
         intervals [23]:
-            xmin = 1.74 
-            xmax = 1.77 
+            xmin = 1.78 
+            xmax = 1.81 
             text = "IH0" 
         intervals [24]:
-            xmin = 1.77 
-            xmax = 1.8 
+            xmin = 1.81 
+            xmax = 1.82 
             text = "T" 
         intervals [25]:
-            xmin = 1.8 
+            xmin = 1.82 
             xmax = 1.83 
             text = "S" 

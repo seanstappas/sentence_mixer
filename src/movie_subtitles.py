@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -32,7 +33,7 @@ from subtitle_parsing import (
 VOICE_TAG_RE = re.compile(r"<v(?:\.[\w.-]+)?\s+([^>]+)>(.*?)(?:</v>|$)", re.IGNORECASE)
 MARKUP_RE = re.compile(r"</?[^>]+>")
 
-DEFAULT_PAD_BEFORE = 0.15
+DEFAULT_PAD_BEFORE = 0.25
 DEFAULT_PAD_AFTER = 0.25
 
 
@@ -49,6 +50,15 @@ def _spoken_text(text: str) -> str:
     text = MARKUP_RE.sub("", text)
     text = BRACKET_TAG_RE.sub(" ", text)
     text = text.replace("\u266a", " ")
+    # 1. Fold accented Latin characters
+    folded = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    # 2. Fix isolated OCR exclamation typos (nol -> no!, itl -> it!, etc.)
+    text = re.sub(r"\b(no|oh|ah|uh|it|stop|wait|help)l(?=[!.,?\s]|$)", r"\1!", text, flags=re.IGNORECASE)
+    # 3. Strip commas inside numbers and expand numerals to words
+    text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
+    from lexicon import normalize_numerals
+    text = normalize_numerals(text)
     return re.sub(r"\s+", " ", text).strip()
 
 

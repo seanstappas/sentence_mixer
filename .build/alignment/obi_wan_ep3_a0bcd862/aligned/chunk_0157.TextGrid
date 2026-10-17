@@ -34,10 +34,10 @@ item []:
             text = "stay" 
         intervals [6]:
             xmin = 1.67 
-            xmax = 2.1 
+            xmax = 2.09 
             text = "away" 
         intervals [7]:
-            xmin = 2.1 
+            xmin = 2.09 
             xmax = 2.55 
             text = "" 
     item [2]:
@@ -124,9 +124,9 @@ item []:
             text = "W" 
         intervals [20]:
             xmin = 1.86 
-            xmax = 2.1 
+            xmax = 2.09 
             text = "EY1" 
         intervals [21]:
-            xmin = 2.1 
+            xmin = 2.09 
             xmax = 2.55 
             text = "" 

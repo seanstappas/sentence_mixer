@@ -65,7 +65,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 3.27 
-        intervals: size = 25 
+        intervals: size = 29 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.2 
@@ -160,9 +160,25 @@ item []:
             text = "" 
         intervals [24]:
             xmin = 2.38 
-            xmax = 2.89 
-            text = "spn" 
+            xmax = 2.5 
+            text = "AA1" 
         intervals [25]:
+            xmin = 2.5 
+            xmax = 2.55 
+            text = "R" 
+        intervals [26]:
+            xmin = 2.55 
+            xmax = 2.64 
+            text = "F" 
+        intervals [27]:
+            xmin = 2.64 
+            xmax = 2.79 
+            text = "AO1" 
+        intervals [28]:
+            xmin = 2.79 
+            xmax = 2.89 
+            text = "R" 
+        intervals [29]:
             xmin = 2.89 
             xmax = 3.27 
             text = "" 

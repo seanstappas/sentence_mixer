@@ -45,7 +45,12 @@ def parse_script_text(text: str) -> List[Tuple[str, str]]:
             continue
         if ":" in line:
             spk, dia = line.split(":", 1)
-            spk_clean = spk.strip().lower().replace(" ", "-")
+            # Support comma-separated speakers e.g. "palpatine,sidious"
+            if "," in spk:
+                spk_parts = [p.strip().lower().replace(" ", "-") for p in spk.split(",") if p.strip()]
+                spk_clean = ",".join(spk_parts)
+            else:
+                spk_clean = spk.strip().lower().replace(" ", "-")
             dia_clean = dia.strip()
             if dia_clean:
                 # Replace lone hyphens with commas for clean tokenization
@@ -243,6 +248,7 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
     curr_word: Optional[str] = None
     curr_t0 = 0.0
     curr_t1 = 0.0
+    curr_token_indices: List[int] = []
 
     prev_span_type = ""
     for s in plan.segments:
@@ -250,23 +256,37 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
             if curr_word:
                 words.append((curr_word, time_offset_sec + curr_t0, time_offset_sec + curr_t1))
                 curr_word = None
+                curr_token_indices = []
             prev_span_type = s.span_type
             continue
         lbl = s.target_text.strip()
         t0 = s.output_start_sample / float(plan.project_sample_rate)
         t1 = s.output_end_sample / float(plan.project_sample_rate)
+        s_tokens = getattr(s, "covered_token_indices", None) or []
 
-        can_merge = (s.span_type in ("subword", "phone")) and (prev_span_type in ("subword", "phone"))
+        if s_tokens and curr_token_indices:
+            can_merge = (
+                (s.span_type in ("subword", "phone"))
+                and (prev_span_type in ("subword", "phone"))
+                and (set(s_tokens) == set(curr_token_indices))
+            )
+        else:
+            can_merge = (
+                (s.span_type in ("subword", "phone"))
+                and (prev_span_type in ("subword", "phone"))
+                and (lbl == curr_word)
+            )
 
-        if " " in lbl:
+        if " " in lbl and s.span_type == "phrase":
             if curr_word:
                 words.append((curr_word, time_offset_sec + curr_t0, time_offset_sec + curr_t1))
                 curr_word = None
+                curr_token_indices = []
             subwords = lbl.split()
             dur_per = (t1 - t0) / max(1, len(subwords))
             for idx, sw in enumerate(subwords):
                 words.append((sw, time_offset_sec + t0 + idx * dur_per, time_offset_sec + t0 + (idx + 1) * dur_per))
-        elif lbl == curr_word and can_merge:
+        elif can_merge:
             curr_t1 = max(curr_t1, t1)
         else:
             if curr_word:
@@ -274,6 +294,7 @@ def _extract_plan_words(plan: EditPlan, time_offset_sec: float = 0.0) -> List[Tu
             curr_word = lbl
             curr_t0 = t0
             curr_t1 = t1
+            curr_token_indices = list(s_tokens)
         prev_span_type = s.span_type
 
     if curr_word:
@@ -543,16 +564,31 @@ def synthesize_and_render_dialogue(
 
     # Resolve speaker aliases against inventory if needed
     avail_speakers = set(w.speaker_id for w in inventory_index.words.values() if w.speaker_id)
-    mapped_lines: List[Tuple[str, str]] = []
+    mapped_lines: List[Tuple[Any, str]] = []
     for spk, text in lines:
-        resolved = spk
-        if resolved not in avail_speakers:
-            if resolved == "sidious" and "palpatine" in avail_speakers:
-                resolved = "palpatine"
-            elif resolved == "palpatine" and "sidious" in avail_speakers:
-                resolved = "sidious"
-            elif resolved.replace("-", " ") in avail_speakers:
-                resolved = resolved.replace("-", " ")
+        if "," in spk:
+            sub_spks = [s.strip() for s in spk.split(",") if s.strip()]
+            resolved_set = set()
+            for s in sub_spks:
+                res = s
+                if res not in avail_speakers:
+                    if res == "sidious" and "palpatine" in avail_speakers:
+                        res = "palpatine"
+                    elif res == "palpatine" and "sidious" in avail_speakers:
+                        res = "sidious"
+                    elif res.replace("-", " ") in avail_speakers:
+                        res = res.replace("-", " ")
+                resolved_set.add(res)
+            resolved = resolved_set if len(resolved_set) > 1 else (next(iter(resolved_set)) if resolved_set else spk)
+        else:
+            resolved = spk
+            if resolved not in avail_speakers:
+                if resolved == "sidious" and "palpatine" in avail_speakers:
+                    resolved = "palpatine"
+                elif resolved == "palpatine" and "sidious" in avail_speakers:
+                    resolved = "sidious"
+                elif resolved.replace("-", " ") in avail_speakers:
+                    resolved = resolved.replace("-", " ")
         mapped_lines.append((resolved, text))
 
     plans: List[EditPlan] = []

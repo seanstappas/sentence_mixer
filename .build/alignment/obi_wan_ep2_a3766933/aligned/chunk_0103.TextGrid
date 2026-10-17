@@ -30,10 +30,10 @@ item []:
             text = "i'm" 
         intervals [5]:
             xmin = 1.43 
-            xmax = 1.67 
+            xmax = 1.66 
             text = "sorry" 
         intervals [6]:
-            xmin = 1.67 
+            xmin = 1.66 
             xmax = 1.79 
             text = "to" 
         intervals [7]:
@@ -104,10 +104,10 @@ item []:
             text = "R" 
         intervals [12]:
             xmin = 1.63 
-            xmax = 1.67 
+            xmax = 1.66 
             text = "IY0" 
         intervals [13]:
-            xmin = 1.67 
+            xmin = 1.66 
             xmax = 1.74 
             text = "T" 
         intervals [14]:

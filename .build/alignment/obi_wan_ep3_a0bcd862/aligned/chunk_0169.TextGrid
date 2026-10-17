@@ -38,10 +38,10 @@ item []:
             text = "your" 
         intervals [7]:
             xmin = 1.87 
-            xmax = 2.28 
+            xmax = 2.23 
             text = "help" 
         intervals [8]:
-            xmin = 2.28 
+            xmin = 2.23 
             xmax = 3.03 
             text = "" 
     item [2]:
@@ -120,9 +120,9 @@ item []:
             text = "L" 
         intervals [18]:
             xmin = 2.13 
-            xmax = 2.28 
+            xmax = 2.23 
             text = "P" 
         intervals [19]:
-            xmin = 2.28 
+            xmin = 2.23 
             xmax = 3.03 
             text = "" 

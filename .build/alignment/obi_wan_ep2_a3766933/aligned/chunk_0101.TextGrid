@@ -92,10 +92,10 @@ item []:
             text = "TH" 
         intervals [9]:
             xmin = 0.68 
-            xmax = 0.72 
+            xmax = 0.71 
             text = "AH0" 
         intervals [10]:
-            xmin = 0.72 
+            xmin = 0.71 
             xmax = 0.78 
             text = "V" 
         intervals [11]:

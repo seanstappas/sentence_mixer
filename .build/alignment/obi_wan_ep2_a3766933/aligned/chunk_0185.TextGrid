@@ -64,10 +64,10 @@ item []:
             text = "L" 
         intervals [5]:
             xmin = 0.41 
-            xmax = 0.46 
+            xmax = 0.45 
             text = "AO1" 
         intervals [6]:
-            xmin = 0.46 
+            xmin = 0.45 
             xmax = 0.54 
             text = "NG" 
         intervals [7]:

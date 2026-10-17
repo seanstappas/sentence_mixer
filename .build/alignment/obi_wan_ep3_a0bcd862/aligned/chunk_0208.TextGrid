@@ -34,10 +34,10 @@ item []:
             text = "brother" 
         intervals [6]:
             xmin = 1.18 
-            xmax = 1.66 
+            xmax = 1.67 
             text = "anakin" 
         intervals [7]:
-            xmin = 1.66 
+            xmin = 1.67 
             xmax = 2.59 
             text = "" 
         intervals [8]:
@@ -132,10 +132,10 @@ item []:
             text = "IH0" 
         intervals [18]:
             xmin = 1.58 
-            xmax = 1.66 
+            xmax = 1.67 
             text = "N" 
         intervals [19]:
-            xmin = 1.66 
+            xmin = 1.67 
             xmax = 2.59 
             text = "" 
         intervals [20]:

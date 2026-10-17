@@ -60,10 +60,10 @@ item []:
             text = "V" 
         intervals [2]:
             xmin = 0.17 
-            xmax = 0.26 
+            xmax = 0.25 
             text = "EH1" 
         intervals [3]:
-            xmin = 0.26 
+            xmin = 0.25 
             xmax = 0.33 
             text = "R" 
         intervals [4]:

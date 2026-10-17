@@ -104,14 +104,14 @@ item []:
             text = "S" 
         intervals [15]:
             xmin = 1.09 
-            xmax = 1.15 
+            xmax = 1.16 
             text = "EH2" 
         intervals [16]:
-            xmin = 1.15 
-            xmax = 1.21 
+            xmin = 1.16 
+            xmax = 1.22 
             text = "L" 
         intervals [17]:
-            xmin = 1.21 
+            xmin = 1.22 
             xmax = 1.33 
             text = "ER0" 
         intervals [18]:

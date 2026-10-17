@@ -4,5 +4,11 @@
   "speaker_id": "anakin",
   "single_speaker_verified": true,
   "assume_single_speaker": false,
-  "speaker_intervals_hash": ""
+  "speaker_intervals_hash": "",
+  "schema_version": "2.0.0",
+  "word_count": 672,
+  "event_count": 2363,
+  "speakers": {
+    "anakin": 655
+  }
 }

@@ -52,14 +52,14 @@ item []:
         intervals: size = 18 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.03 
+            xmax = 0.18 
             text = "DH" 
         intervals [2]:
-            xmin = 0.03 
-            xmax = 0.1 
-            text = "AE1" 
+            xmin = 0.18 
+            xmax = 0.21 
+            text = "AH0" 
         intervals [3]:
-            xmin = 0.1 
+            xmin = 0.21 
             xmax = 0.25 
             text = "N" 
         intervals [4]:

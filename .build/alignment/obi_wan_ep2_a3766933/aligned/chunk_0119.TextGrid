@@ -168,10 +168,10 @@ item []:
             text = "AA1" 
         intervals [29]:
             xmin = 2.44 
-            xmax = 2.52 
+            xmax = 2.53 
             text = "N" 
         intervals [30]:
-            xmin = 2.52 
+            xmin = 2.53 
             xmax = 2.61 
             text = "T" 
         intervals [31]:

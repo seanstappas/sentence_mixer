@@ -14,18 +14,18 @@ item []:
         intervals: size = 10 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.15 
+            xmax = 0.16 
             text = "" 
         intervals [2]:
-            xmin = 0.15 
+            xmin = 0.16 
             xmax = 0.37 
             text = "your" 
         intervals [3]:
             xmin = 0.37 
-            xmax = 0.66 
+            xmax = 0.69 
             text = "move" 
         intervals [4]:
-            xmin = 0.66 
+            xmin = 0.69 
             xmax = 0.94 
             text = "" 
         intervals [5]:
@@ -60,14 +60,14 @@ item []:
         intervals: size = 21 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.15 
+            xmax = 0.16 
             text = "" 
         intervals [2]:
-            xmin = 0.15 
-            xmax = 0.21 
+            xmin = 0.16 
+            xmax = 0.22 
             text = "Y" 
         intervals [3]:
-            xmin = 0.21 
+            xmin = 0.22 
             xmax = 0.33 
             text = "AO1" 
         intervals [4]:
@@ -80,14 +80,14 @@ item []:
             text = "M" 
         intervals [6]:
             xmin = 0.45 
-            xmax = 0.63 
+            xmax = 0.66 
             text = "UW1" 
         intervals [7]:
-            xmin = 0.63 
-            xmax = 0.66 
+            xmin = 0.66 
+            xmax = 0.69 
             text = "V" 
         intervals [8]:
-            xmin = 0.66 
+            xmin = 0.69 
             xmax = 0.94 
             text = "" 
         intervals [9]:
@@ -120,10 +120,10 @@ item []:
             text = "TH" 
         intervals [16]:
             xmin = 1.76 
-            xmax = 1.81 
+            xmax = 1.82 
             text = "IH1" 
         intervals [17]:
-            xmin = 1.81 
+            xmin = 1.82 
             xmax = 1.87 
             text = "NG" 
         intervals [18]:

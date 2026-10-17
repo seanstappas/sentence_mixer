@@ -22,10 +22,10 @@ item []:
             text = "repeat" 
         intervals [3]:
             xmin = 0.64 
-            xmax = 0.82 
+            xmax = 0.83 
             text = "" 
         intervals [4]:
-            xmin = 0.82 
+            xmin = 0.83 
             xmax = 1.31 
             text = "senator" 
         intervals [5]:
@@ -41,7 +41,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 2.55 
-        intervals: size = 15 
+        intervals: size = 20 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.18 
@@ -68,10 +68,10 @@ item []:
             text = "T" 
         intervals [7]:
             xmin = 0.64 
-            xmax = 0.82 
+            xmax = 0.83 
             text = "" 
         intervals [8]:
-            xmin = 0.82 
+            xmin = 0.83 
             xmax = 0.99 
             text = "S" 
         intervals [9]:
@@ -96,9 +96,29 @@ item []:
             text = "ER0" 
         intervals [14]:
             xmin = 1.31 
-            xmax = 1.89 
-            text = "spn" 
+            xmax = 1.45 
+            text = "AO0" 
         intervals [15]:
+            xmin = 1.45 
+            xmax = 1.5 
+            text = "R" 
+        intervals [16]:
+            xmin = 1.5 
+            xmax = 1.57 
+            text = "G" 
+        intervals [17]:
+            xmin = 1.57 
+            xmax = 1.68 
+            text = "AA1" 
+        intervals [18]:
+            xmin = 1.68 
+            xmax = 1.74 
+            text = "N" 
+        intervals [19]:
+            xmin = 1.74 
+            xmax = 1.89 
+            text = "AH0" 
+        intervals [20]:
             xmin = 1.89 
             xmax = 2.55 
             text = "" 

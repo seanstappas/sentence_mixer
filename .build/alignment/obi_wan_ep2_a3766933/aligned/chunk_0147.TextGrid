@@ -76,10 +76,10 @@ item []:
             text = "M" 
         intervals [5]:
             xmin = 0.34 
-            xmax = 0.65 
+            xmax = 0.64 
             text = "AE1" 
         intervals [6]:
-            xmin = 0.65 
+            xmin = 0.64 
             xmax = 0.68 
             text = "S" 
         intervals [7]:
@@ -108,10 +108,10 @@ item []:
             text = "AH0" 
         intervals [13]:
             xmin = 0.86 
-            xmax = 0.98 
+            xmax = 0.97 
             text = "P" 
         intervals [14]:
-            xmin = 0.98 
+            xmin = 0.97 
             xmax = 1.01 
             text = "IH1" 
         intervals [15]:

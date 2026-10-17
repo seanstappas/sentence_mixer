@@ -112,8 +112,8 @@ def apply_diphone_midpoint_transitions(
         if ev_curr and ev_succ:
             mid_curr = (ev_curr.start_sample + ev_curr.end_sample) // 2
             mid_succ = (ev_succ.start_sample + ev_succ.end_sample) // 2
-            can_trim_curr = curr.start_sample < mid_curr <= ev_curr.end_sample
-            can_trim_succ = ev_succ.start_sample <= mid_succ < succ.end_sample
+            can_trim_curr = (curr.start_sample < mid_curr <= ev_curr.end_sample) or (len(curr.event_ids) == 1 and curr.start_sample <= mid_curr <= ev_curr.end_sample)
+            can_trim_succ = (ev_succ.start_sample <= mid_succ < succ.end_sample) or (len(succ.event_ids) == 1 and ev_succ.start_sample <= mid_succ <= succ.end_sample)
 
             # Deduplicate shared boundary node across the diphone join only when both sides
             # trim at the midpoint and the shared node is still present on both sides (idempotent)
@@ -144,6 +144,7 @@ def apply_diphone_midpoint_transitions(
                     end_sample=mid_curr,
                     covered_nodes=curr_cov,
                     realized_phones=curr_rp,
+                    exit_variant_samples=0,
                 )
 
             if can_trim_succ:
@@ -152,6 +153,7 @@ def apply_diphone_midpoint_transitions(
                     start_sample=mid_succ,
                     covered_nodes=succ_cov,
                     realized_phones=succ_rp,
+                    entry_variant_samples=0,
                 )
 
     return new_spans
@@ -161,51 +163,52 @@ class SpanSelector:
     """
     Selects optimal variable-length units (Phrases, Words, Phones) to cover a TargetGraph.
     """
+    @staticmethod
+    def _normalize_speaker_filter(
+        speaker_id: Optional[Union[str, Set[str], List[str], Tuple[str, ...]]]
+    ) -> Optional[Set[str]]:
+        if speaker_id is None:
+            return None
+        if isinstance(speaker_id, str):
+            s = speaker_id.strip()
+            return {p.strip() for p in s.split(",") if p.strip()} if "," in s else ({s} if s else None)
+        return {str(s).strip() for s in speaker_id if str(s).strip()} or None
+
     def __init__(
         self,
         inventory: InventoryIndex,
         edit_penalty: float = 0.5,
         max_candidates_per_span: int = 50,
+        speaker_id: Optional[Union[str, Set[str], List[str], Tuple[str, ...]]] = None,
     ):
         self.inv = inventory
         self.edit_penalty = edit_penalty
         self.max_candidates_per_span = max_candidates_per_span
         self._wavlm_cache: Dict[Any, np.ndarray] = {}
         self._acoustic_metrics_cache: Dict[Tuple[str, int, int], AcousticMetrics] = {}
+        self.indexed_speakers = self._normalize_speaker_filter(speaker_id)
 
         # Reverse pronunciation index from realized phones to intact recorded WordOccurrences
         self.pron_to_words: Dict[Tuple[str, ...], List[WordOccurrence]] = {}
         self.base_pron_to_words: Dict[Tuple[str, ...], List[WordOccurrence]] = {}
-        for wo in self.inv.words.values():
-            if not getattr(wo, "is_eligible", True):
-                continue
-            if wo.realized_phones:
-                key = tuple(wo.realized_phones)
-                self.pron_to_words.setdefault(key, []).append(wo)
-                base_key = tuple(strip_phone_stress(p) for p in wo.realized_phones)
-                self.base_pron_to_words.setdefault(base_key, []).append(wo)
 
         # Reverse subword (n-phone) index for contiguous multi-phone slices within words
         self.subword_index: Dict[Tuple[str, ...], List[Tuple[WordOccurrence, int, int]]] = {}
         self.base_subword_index: Dict[Tuple[str, ...], List[Tuple[WordOccurrence, int, int]]] = {}
-        for wo in self.inv.words.values():
-            if not wo.phone_event_ids or not getattr(wo, "is_eligible", True):
-                continue
-            evs = [self.inv.events[eid] for eid in wo.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone"]
-            if len(evs) < 2:
-                continue
-            labels = tuple(e.label for e in evs)
-            base_labels = tuple(strip_phone_stress(p) for p in labels)
-            for length in range(2, min(len(evs) + 1, 9)):
-                for start_i in range(len(evs) - length + 1):
-                    end_i = start_i + length
-                    sub_key = labels[start_i:end_i]
-                    sub_base_key = base_labels[start_i:end_i]
-                    self.subword_index.setdefault(sub_key, []).append((wo, start_i, end_i))
-                    self.base_subword_index.setdefault(sub_base_key, []).append((wo, start_i, end_i))
 
-        # Speaker and global median duration modeling (Fix P3.2)
-        speaker_word_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
+        self._speaker_word_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
+        self.speaker_word_median: Dict[Tuple[Optional[str], str], float] = {}
+        self.global_word_median: Dict[str, float] = {}
+
+        self._speaker_phone_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
+        self.speaker_phone_median: Dict[Tuple[Optional[str], str], float] = {}
+        self.global_phone_median: Dict[str, float] = {}
+
+        self._preloaded_tracks: Dict[str, Dict[str, Any]] = {}
+        self.speaker_median_f0: Dict[Optional[str], float] = {}
+        self.global_median_f0: float = 150.0
+
+        # Global duration and F0 accumulation across all words/events (fast float math)
         global_word_durations: Dict[str, List[float]] = {}
         for wo in self.inv.words.values():
             if not getattr(wo, "is_eligible", True):
@@ -214,18 +217,12 @@ class SpanSelector:
             sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
             dur = (wo.end_sample - wo.start_sample) / float(sr)
             w_norm = wo.word_normalized.lower()
-            speaker_word_durations.setdefault((wo.speaker_id, w_norm), []).append(dur)
             global_word_durations.setdefault(w_norm, []).append(dur)
 
-        self.speaker_word_median: Dict[Tuple[Optional[str], str], float] = {
-            k: float(np.median(v)) for k, v in speaker_word_durations.items() if v
-        }
-        self.global_word_median: Dict[str, float] = {
+        self.global_word_median = {
             k: float(np.median(v)) for k, v in global_word_durations.items() if v
         }
 
-        # Speaker and global median duration modeling for phones
-        speaker_phone_durations: Dict[Tuple[Optional[str], str], List[float]] = {}
         global_phone_durations: Dict[str, List[float]] = {}
         for ev in self.inv.events.values():
             if getattr(ev, "kind", "") != "phone" or not getattr(ev, "is_eligible", True):
@@ -234,22 +231,12 @@ class SpanSelector:
             sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
             dur = (ev.end_sample - ev.start_sample) / float(sr)
             base_p = getattr(ev, "base_phone", "") or strip_phone_stress(ev.label)
-            speaker_phone_durations.setdefault((ev.speaker_id, ev.label), []).append(dur)
-            speaker_phone_durations.setdefault((ev.speaker_id, base_p), []).append(dur)
             global_phone_durations.setdefault(ev.label, []).append(dur)
             global_phone_durations.setdefault(base_p, []).append(dur)
 
-        self.speaker_phone_median: Dict[Tuple[Optional[str], str], float] = {
-            k: float(np.median(v)) for k, v in speaker_phone_durations.items() if v
-        }
-        self.global_phone_median: Dict[str, float] = {
+        self.global_phone_median = {
             k: float(np.median(v)) for k, v in global_phone_durations.items() if v
         }
-
-        # Preloaded feature tracks for zero-disk-seek candidate acoustic evaluation
-        self._preloaded_tracks: Dict[str, Dict[str, Any]] = {}
-        spk_f0_vals: Dict[Optional[str], List[float]] = {}
-        all_f0_vals: List[float] = []
 
         for src_id, srec in self.inv.sources.items():
             pcm_path = srec.cached_analysis_pcm_path or srec.cached_pcm_path or srec.source_path
@@ -264,31 +251,128 @@ class SpanSelector:
                     except Exception:
                         pass
 
+        all_f0_vals: List[float] = []
+        if self._preloaded_tracks:
+            for wo in self.inv.words.values():
+                if not getattr(wo, "is_eligible", True):
+                    continue
+                tracks = self._preloaded_tracks.get(wo.source_content_id)
+                if not tracks or "f0" not in tracks or "voiced_flag" not in tracks:
+                    continue
+                hop = int(tracks.get("hop_length", 160))
+                tr_sr = int(tracks.get("sr", 16000))
+                srec = self.inv.sources.get(wo.source_content_id)
+                native_sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 48000
+                s_frame = min(max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop))), max(0, int(tracks["n_frames"]) - 1))
+                e_frame = min(int(tracks["n_frames"]), max(s_frame + 1, int(round((wo.end_sample / float(native_sr)) * tr_sr / hop))))
+                if e_frame > s_frame:
+                    f0_sl = tracks["f0"][s_frame:e_frame]
+                    vf_sl = tracks["voiced_flag"][s_frame:e_frame]
+                    vp_sl = tracks["voiced_probs"][s_frame:e_frame] if "voiced_probs" in tracks else np.ones_like(vf_sl, dtype=float)
+                    for f, vf, vp in zip(f0_sl, vf_sl, vp_sl):
+                        if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80.0 <= f <= 500.0:
+                            all_f0_vals.append(float(f))
+        if all_f0_vals:
+            self.global_median_f0 = float(np.median(all_f0_vals))
+
+        self._index_speaker_units(self.indexed_speakers)
+
+    def _index_speaker_units(self, target_speakers: Optional[Set[str]]) -> None:
         for wo in self.inv.words.values():
             if not getattr(wo, "is_eligible", True):
                 continue
-            tracks = self._preloaded_tracks.get(wo.source_content_id)
-            if not tracks or "f0" not in tracks or "voiced_flag" not in tracks:
+            if target_speakers is not None and wo.speaker_id not in target_speakers:
                 continue
-            hop = int(tracks.get("hop_length", 160))
-            tr_sr = int(tracks.get("sr", 16000))
-            srec = self.inv.sources.get(wo.source_content_id)
-            native_sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 48000
-            s_frame = min(max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop))), max(0, int(tracks["n_frames"]) - 1))
-            e_frame = min(int(tracks["n_frames"]), max(s_frame + 1, int(round((wo.end_sample / float(native_sr)) * tr_sr / hop))))
-            if e_frame > s_frame:
-                f0_sl = tracks["f0"][s_frame:e_frame]
-                vf_sl = tracks["voiced_flag"][s_frame:e_frame]
-                vp_sl = tracks["voiced_probs"][s_frame:e_frame] if "voiced_probs" in tracks else np.ones_like(vf_sl, dtype=float)
-                for f, vf, vp in zip(f0_sl, vf_sl, vp_sl):
-                    if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80.0 <= f <= 500.0:
-                        spk_f0_vals.setdefault(wo.speaker_id, []).append(float(f))
-                        all_f0_vals.append(float(f))
+            if wo.realized_phones:
+                key = tuple(wo.realized_phones)
+                self.pron_to_words.setdefault(key, []).append(wo)
+                base_key = tuple(strip_phone_stress(p) for p in wo.realized_phones)
+                self.base_pron_to_words.setdefault(base_key, []).append(wo)
 
-        self.speaker_median_f0: Dict[Optional[str], float] = {
-            spk: float(np.median(vals)) for spk, vals in spk_f0_vals.items() if vals
-        }
-        self.global_median_f0: float = float(np.median(all_f0_vals)) if all_f0_vals else 150.0
+            if not wo.phone_event_ids:
+                continue
+            evs = [self.inv.events[eid] for eid in wo.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone"]
+            if len(evs) < 2:
+                continue
+            labels = tuple(e.label for e in evs)
+            base_labels = tuple(strip_phone_stress(p) for p in labels)
+            for length in range(2, min(len(evs) + 1, 9)):
+                for start_i in range(len(evs) - length + 1):
+                    end_i = start_i + length
+                    sub_key = labels[start_i:end_i]
+                    sub_base_key = base_labels[start_i:end_i]
+                    self.subword_index.setdefault(sub_key, []).append((wo, start_i, end_i))
+                    self.base_subword_index.setdefault(sub_base_key, []).append((wo, start_i, end_i))
+
+        for wo in self.inv.words.values():
+            if not getattr(wo, "is_eligible", True):
+                continue
+            if target_speakers is not None and wo.speaker_id not in target_speakers:
+                continue
+            srec = self.inv.sources.get(wo.source_content_id)
+            sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+            dur = (wo.end_sample - wo.start_sample) / float(sr)
+            w_norm = wo.word_normalized.lower()
+            self._speaker_word_durations.setdefault((wo.speaker_id, w_norm), []).append(dur)
+
+        for k, v in self._speaker_word_durations.items():
+            if v and k not in self.speaker_word_median:
+                self.speaker_word_median[k] = float(np.median(v))
+
+        for ev in self.inv.events.values():
+            if getattr(ev, "kind", "") != "phone" or not getattr(ev, "is_eligible", True):
+                continue
+            if target_speakers is not None and ev.speaker_id not in target_speakers:
+                continue
+            srec = self.inv.sources.get(ev.source_content_id)
+            sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
+            dur = (ev.end_sample - ev.start_sample) / float(sr)
+            base_p = getattr(ev, "base_phone", "") or strip_phone_stress(ev.label)
+            self._speaker_phone_durations.setdefault((ev.speaker_id, ev.label), []).append(dur)
+            self._speaker_phone_durations.setdefault((ev.speaker_id, base_p), []).append(dur)
+
+        for k, v in self._speaker_phone_durations.items():
+            if v and k not in self.speaker_phone_median:
+                self.speaker_phone_median[k] = float(np.median(v))
+
+        if self._preloaded_tracks:
+            spk_f0_vals: Dict[Optional[str], List[float]] = {}
+            for wo in self.inv.words.values():
+                if not getattr(wo, "is_eligible", True):
+                    continue
+                if target_speakers is not None and wo.speaker_id not in target_speakers:
+                    continue
+                tracks = self._preloaded_tracks.get(wo.source_content_id)
+                if not tracks or "f0" not in tracks or "voiced_flag" not in tracks:
+                    continue
+                hop = int(tracks.get("hop_length", 160))
+                tr_sr = int(tracks.get("sr", 16000))
+                srec = self.inv.sources.get(wo.source_content_id)
+                native_sr = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 48000
+                s_frame = min(max(0, int(round((wo.start_sample / float(native_sr)) * tr_sr / hop))), max(0, int(tracks["n_frames"]) - 1))
+                e_frame = min(int(tracks["n_frames"]), max(s_frame + 1, int(round((wo.end_sample / float(native_sr)) * tr_sr / hop))))
+                if e_frame > s_frame:
+                    f0_sl = tracks["f0"][s_frame:e_frame]
+                    vf_sl = tracks["voiced_flag"][s_frame:e_frame]
+                    vp_sl = tracks["voiced_probs"][s_frame:e_frame] if "voiced_probs" in tracks else np.ones_like(vf_sl, dtype=float)
+                    for f, vf, vp in zip(f0_sl, vf_sl, vp_sl):
+                        if vf and vp > 0.5 and f is not None and not np.isnan(f) and 80.0 <= f <= 500.0:
+                            spk_f0_vals.setdefault(wo.speaker_id, []).append(float(f))
+            for spk, vals in spk_f0_vals.items():
+                if vals:
+                    self.speaker_median_f0[spk] = float(np.median(vals))
+
+    def _ensure_speakers_indexed(self, requested_speakers: Optional[Set[str]]) -> None:
+        if self.indexed_speakers is None:
+            return
+        if requested_speakers is None:
+            self._index_speaker_units(None)
+            self.indexed_speakers = None
+        else:
+            missing = requested_speakers - self.indexed_speakers
+            if missing:
+                self._index_speaker_units(missing)
+                self.indexed_speakers.update(missing)
 
     @staticmethod
     def _compute_quadratic_duration_penalty(actual_dur: float, median_dur: float) -> float:
@@ -308,33 +392,51 @@ class SpanSelector:
         return 0.0
 
     def _get_speaker_median_duration(
-        self, speaker_id: Optional[str], word_norm: str, fallback: float
+        self, speaker_id: Any, word_norm: str, fallback: float
     ) -> float:
         w_norm = word_norm.lower()
-        if (speaker_id, w_norm) in self.speaker_word_median:
-            return self.speaker_word_median[(speaker_id, w_norm)]
+        if isinstance(speaker_id, str):
+            if (speaker_id, w_norm) in self.speaker_word_median:
+                return self.speaker_word_median[(speaker_id, w_norm)]
+        elif isinstance(speaker_id, (set, list, tuple)):
+            for spk in speaker_id:
+                if (spk, w_norm) in self.speaker_word_median:
+                    return self.speaker_word_median[(spk, w_norm)]
         if w_norm in self.global_word_median:
             return self.global_word_median[w_norm]
         return fallback
 
     def _get_speaker_phone_median_duration(
-        self, speaker_id: Optional[str], phone_label: str, fallback: float
+        self, speaker_id: Any, phone_label: str, fallback: float
     ) -> float:
         base_p = strip_phone_stress(phone_label)
-        if (speaker_id, phone_label) in self.speaker_phone_median:
-            return self.speaker_phone_median[(speaker_id, phone_label)]
-        if (speaker_id, base_p) in self.speaker_phone_median:
-            return self.speaker_phone_median[(speaker_id, base_p)]
+        if isinstance(speaker_id, str):
+            if (speaker_id, phone_label) in self.speaker_phone_median:
+                return self.speaker_phone_median[(speaker_id, phone_label)]
+            if (speaker_id, base_p) in self.speaker_phone_median:
+                return self.speaker_phone_median[(speaker_id, base_p)]
+        elif isinstance(speaker_id, (set, list, tuple)):
+            for spk in speaker_id:
+                if (spk, phone_label) in self.speaker_phone_median:
+                    return self.speaker_phone_median[(spk, phone_label)]
+                if (spk, base_p) in self.speaker_phone_median:
+                    return self.speaker_phone_median[(spk, base_p)]
         if phone_label in self.global_phone_median:
             return self.global_phone_median[phone_label]
         if base_p in self.global_phone_median:
             return self.global_phone_median[base_p]
         return fallback
 
-    def retrieve_candidates(self, graph: TargetGraph, speaker_id: Optional[str] = None) -> List[SpanCandidate]:
+    def retrieve_candidates(
+        self,
+        graph: TargetGraph,
+        speaker_id: Optional[Union[str, Set[str], List[str], Tuple[str, ...]]] = None,
+    ) -> List[SpanCandidate]:
         """
         Retrieves Phrase, Word, and Phone candidates covering contiguous segments of the target graph.
         """
+        allowed_speakers = self._normalize_speaker_filter(speaker_id)
+        self._ensure_speakers_indexed(allowed_speakers)
         candidates: List[SpanCandidate] = []
         cand_id_counter = 0
 
@@ -346,8 +448,8 @@ class SpanSelector:
         for w_norm in set(graph.normalized_words):
             word_ids = self.inv.word_to_word_ids.get(w_norm, [])
             matches = [self.inv.words[wid] for wid in word_ids if wid in self.inv.words]
-            if speaker_id is not None:
-                matches = [wo for wo in matches if wo.speaker_id == speaker_id and getattr(wo, "is_eligible", True)]
+            if allowed_speakers is not None:
+                matches = [wo for wo in matches if wo.speaker_id in allowed_speakers and getattr(wo, "is_eligible", True)]
             else:
                 matches = [wo for wo in matches if getattr(wo, "is_eligible", True)]
             if matches:
@@ -414,7 +516,7 @@ class SpanSelector:
                             break
 
                         next_wo = self.inv.words.get(succ_ev.word_occurrence_id)
-                        if next_wo and getattr(next_wo, "is_eligible", True) and next_wo.word_normalized == next_tok and (speaker_id is None or next_wo.speaker_id == speaker_id):
+                        if next_wo and getattr(next_wo, "is_eligible", True) and next_wo.word_normalized == next_tok and (allowed_speakers is None or next_wo.speaker_id in allowed_speakers):
                             matched_wos.append(next_wo)
                             curr_wo = next_wo
                         else:
@@ -488,7 +590,7 @@ class SpanSelector:
                         phrase_dur = (matched_wos[-1].end_sample - matched_wos[0].start_sample) / float(s_rate)
 
                         expected_phrase_dur = sum(
-                            self._get_speaker_median_duration(speaker_id or first_wo.speaker_id, tok, 0.25)
+                            self._get_speaker_median_duration(first_wo.speaker_id, tok, 0.25)
                             for tok in phrase_tokens
                         )
                         rush_penalty = 0.0
@@ -618,7 +720,7 @@ class SpanSelector:
                     pron_matches = self.base_pron_to_words.get(branch_base_phones, [])
 
                 for p_wo in pron_matches:
-                    if speaker_id is not None and p_wo.speaker_id != speaker_id:
+                    if allowed_speakers is not None and p_wo.speaker_id not in allowed_speakers:
                         continue
                     if p_wo not in word_candidates:
                         word_candidates.append(p_wo)
@@ -666,7 +768,6 @@ class SpanSelector:
                 )
                 target_word_text = graph.nodes[branch_nodes[0]].word_text.lower()
                 target_word_in_inv = target_word_text in self.inv.word_to_word_ids
-                expected_dur = self._get_speaker_median_duration(speaker_id, target_word_text, priors_sum)
 
                 end_node = graph.nodes[branch_nodes[-1]]
                 start_node = graph.nodes[branch_nodes[0]]
@@ -703,7 +804,8 @@ class SpanSelector:
                     srec = self.inv.sources.get(wo_it.source_content_id)
                     srate = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
                     w_dur = (wo_it.end_sample - wo_it.start_sample) / float(srate)
-                    d_cost = self._compute_quadratic_duration_penalty(w_dur, expected_dur)
+                    cand_exp_dur = self._get_speaker_median_duration(wo_it.speaker_id, target_word_text, priors_sum)
+                    d_cost = self._compute_quadratic_duration_penalty(w_dur, cand_exp_dur)
                     swallow_c = self._compute_swallowed_penalty(wo_it.phone_event_ids, srate)
                     lex_c = 0.0
                     if wo_it.word_normalized.lower() != target_word_text:
@@ -720,7 +822,8 @@ class SpanSelector:
                     srec = self.inv.sources.get(wo.source_content_id)
                     srate = srec.native_sample_rate if srec and srec.native_sample_rate > 0 else 44100
                     w_dur = (wo.end_sample - wo.start_sample) / float(srate)
-                    d_cost = self._compute_quadratic_duration_penalty(w_dur, expected_dur)
+                    cand_exp_dur = self._get_speaker_median_duration(wo.speaker_id, target_word_text, priors_sum)
+                    d_cost = self._compute_quadratic_duration_penalty(w_dur, cand_exp_dur)
                     swallow_c = self._compute_swallowed_penalty(wo.phone_event_ids, srate)
                     lex_c = 0.0
                     if wo.word_normalized.lower() != target_word_text:
@@ -799,9 +902,9 @@ class SpanSelector:
                         sub_matches = list(self.subword_index.get(sub_phones, []))
                         base_sub_matches = [m for m in self.base_subword_index.get(sub_base, []) if m not in sub_matches]
 
-                        if speaker_id is not None:
-                            sub_matches = [m for m in sub_matches if m[0].speaker_id == speaker_id]
-                            base_sub_matches = [m for m in base_sub_matches if m[0].speaker_id == speaker_id]
+                        if allowed_speakers is not None:
+                            sub_matches = [m for m in sub_matches if m[0].speaker_id in allowed_speakers]
+                            base_sub_matches = [m for m in base_sub_matches if m[0].speaker_id in allowed_speakers]
 
                         # If subword covers the entire target word, it must be a strict sub-slice of a larger donor word
                         if length == len(branch_nodes):
@@ -811,19 +914,13 @@ class SpanSelector:
                         all_matches: List[Tuple[Tuple[WordOccurrence, int, int], float]] = []
                         for m in sub_matches:
                             all_matches.append((m, 0.0))
-                        for m in base_sub_matches:
-                            if m not in sub_matches:
-                                all_matches.append((m, 0.05))
+                        if not is_constrained or not all_matches:
+                            for m in base_sub_matches:
+                                if m not in sub_matches:
+                                    all_matches.append((m, 0.05))
 
                         if not all_matches:
                             continue
-
-                        expected_dur = sum(
-                            self._get_speaker_phone_median_duration(
-                                speaker_id, graph.nodes[nid].phone, graph.nodes[nid].duration_prior_sec or 0.10
-                            )
-                            for nid in sub_nodes if nid < len(graph.nodes)
-                        )
                         target_l_phone = getattr(graph.nodes[sub_nodes[0]], "left_context_phones", None) or graph.nodes[sub_nodes[0]].left_context_phone
                         target_r_phone = getattr(graph.nodes[sub_nodes[-1]], "right_context_phones", None) or graph.nodes[sub_nodes[-1]].right_context_phone
                         target_l_phones = getattr(graph.nodes[sub_nodes[0]], "left_context_phones", None) or ({graph.nodes[sub_nodes[0]].left_context_phone} if graph.nodes[sub_nodes[0]].left_context_phone else set())
@@ -894,7 +991,13 @@ class SpanSelector:
                             sr_it = src_it.native_sample_rate if src_it and src_it.native_sample_rate > 0 else 44100
                             evs_it = [self.inv.events[eid] for eid in wo_it.phone_event_ids if eid in self.inv.events and self.inv.events[eid].kind == "phone"]
                             dur_it = (evs_it[e_i - 1].end_sample - evs_it[s_i].start_sample) / float(sr_it)
-                            d_cost = self._compute_quadratic_duration_penalty(dur_it, expected_dur)
+                            cand_exp_dur = sum(
+                                self._get_speaker_phone_median_duration(
+                                    wo_it.speaker_id, graph.nodes[nid].phone, graph.nodes[nid].duration_prior_sec or 0.10
+                                )
+                                for nid in sub_nodes if nid < len(graph.nodes)
+                            )
+                            d_cost = self._compute_quadratic_duration_penalty(dur_it, cand_exp_dur)
                             first_ev = evs_it[s_i]
                             last_ev = evs_it[e_i - 1]
                             l_ev = self.inv.events.get(first_ev.predecessor_id) if first_ev.predecessor_id else None
@@ -922,7 +1025,13 @@ class SpanSelector:
                             src_rec = self.inv.sources.get(wo.source_content_id)
                             s_rate = src_rec.native_sample_rate if src_rec and src_rec.native_sample_rate > 0 else 44100
                             actual_dur = (sub_evs[-1].end_sample - sub_evs[0].start_sample) / float(s_rate)
-                            dur_cost = self._compute_quadratic_duration_penalty(actual_dur, expected_dur)
+                            cand_exp_dur = sum(
+                                self._get_speaker_phone_median_duration(
+                                    wo.speaker_id, graph.nodes[nid].phone, graph.nodes[nid].duration_prior_sec or 0.10
+                                )
+                                for nid in sub_nodes if nid < len(graph.nodes)
+                            )
+                            dur_cost = self._compute_quadratic_duration_penalty(actual_dur, cand_exp_dur)
                             if actual_dur < 0.040:
                                 dur_cost += 3.0 * (0.040 - actual_dur) / 0.040
 
@@ -1004,7 +1113,7 @@ class SpanSelector:
 
 
         # 3. Whole phone candidates (Level 3 - fallback)
-        vowel_set = {"IY", "IH", "EY", "EH", "AE", "AA", "AO", "OW", "UH", "UW", "ER", "AY", "AW", "OY"}
+        vowel_set = set(VOWEL_PHONES)
         for node in graph.nodes:
             event_id_candidates: List[Tuple[str, float]] = []
             seen_eids = set()
@@ -1012,26 +1121,36 @@ class SpanSelector:
                 event_id_candidates.append((eid, 0.0))
                 seen_eids.add(eid)
 
-            for eid in self.inv.base_phone_to_event_ids.get(node.base_phone, []):
-                if eid not in seen_eids:
-                    event_id_candidates.append((eid, 0.03))
-                    seen_eids.add(eid)
+            if not node.is_constrained or not event_id_candidates:
+                for eid in self.inv.base_phone_to_event_ids.get(node.base_phone, []):
+                    if eid not in seen_eids:
+                        event_id_candidates.append((eid, 0.03))
+                        seen_eids.add(eid)
 
-            # Unstressed vowel reduction / schwa (stress 0): AH0 <-> IH0 <-> EH0
-            if node.phone in ("AH0", "IH0", "EH0"):
-                for reduced_p in ("AH0", "IH0", "EH0"):
-                    if reduced_p != node.phone:
-                        for eid in self.inv.phone_to_event_ids.get(reduced_p, []):
-                            if eid not in seen_eids:
-                                event_id_candidates.append((eid, 0.08))
-                                seen_eids.add(eid)
+                # Unstressed vowel reduction / schwa (stress 0): AH0 <-> IH0 <-> EH0
+                if node.phone in ("AH0", "IH0", "EH0"):
+                    for reduced_p in ("AH0", "IH0", "EH0"):
+                        if reduced_p != node.phone:
+                            for eid in self.inv.phone_to_event_ids.get(reduced_p, []):
+                                if eid not in seen_eids:
+                                    event_id_candidates.append((eid, 0.08))
+                                    seen_eids.add(eid)
 
             # Filter by speaker if applicable
             valid_events_and_costs: List[Tuple[Any, float]] = []
             for eid, stress_c in event_id_candidates:
                 ev = self.inv.events.get(eid)
-                if ev and getattr(ev, "is_eligible", True) and (speaker_id is None or ev.speaker_id == speaker_id):
+                if ev and getattr(ev, "is_eligible", True) and (allowed_speakers is None or ev.speaker_id in allowed_speakers):
                     valid_events_and_costs.append((ev, stress_c))
+
+            # If constrained was True and exact matches had no eligible speaker events, try base phone / schwa reduction
+            if not valid_events_and_costs and node.is_constrained:
+                for eid in self.inv.base_phone_to_event_ids.get(node.base_phone, []):
+                    if eid not in seen_eids:
+                        ev = self.inv.events.get(eid)
+                        if ev and getattr(ev, "is_eligible", True) and (allowed_speakers is None or ev.speaker_id in allowed_speakers):
+                            valid_events_and_costs.append((ev, 0.03))
+                            seen_eids.add(eid)
 
             # Acoustic cognate donor fallback for missing phonemes (e.g. G -> K, NG -> N, V -> F)
             if not valid_events_and_costs:
@@ -1044,7 +1163,7 @@ class SpanSelector:
                             cog_eids.append(ceid)
                     for ceid in cog_eids:
                         ev = self.inv.events.get(ceid)
-                        if ev and getattr(ev, "is_eligible", True) and (speaker_id is None or ev.speaker_id == speaker_id):
+                        if ev and getattr(ev, "is_eligible", True) and (allowed_speakers is None or ev.speaker_id in allowed_speakers):
                             valid_events_and_costs.append((ev, 0.35))
                     if valid_events_and_costs:
                         break
@@ -1089,13 +1208,12 @@ class SpanSelector:
 
                 return coda_pen, r_bleed, l_bleed
 
-            phone_median = self._get_speaker_phone_median_duration(speaker_id, node.phone, node.duration_prior_sec or 0.10)
-
             def _phone_sort_key(item: Tuple[Any, float]) -> float:
                 ev_it, stress_c = item
                 sr_it = self.inv.sources[ev_it.source_content_id].native_sample_rate
                 dur_it = (ev_it.end_sample - ev_it.start_sample) / float(sr_it)
-                d_cost = self._compute_quadratic_duration_penalty(dur_it, phone_median)
+                cand_phone_median = self._get_speaker_phone_median_duration(ev_it.speaker_id, node.phone, node.duration_prior_sec or 0.10)
+                d_cost = self._compute_quadratic_duration_penalty(dur_it, cand_phone_median)
                 l_ev = self.inv.events.get(ev_it.predecessor_id) if ev_it.predecessor_id else None
                 r_ev = self.inv.events.get(ev_it.successor_id) if ev_it.successor_id else None
                 ctx_c = self._compute_context_affinity(target_l_phone, target_r_phone, l_ev, r_ev)
@@ -1122,7 +1240,8 @@ class SpanSelector:
             for ev, stress_cost in ranked:
                 sr = self.inv.sources[ev.source_content_id].native_sample_rate
                 dur = (ev.end_sample - ev.start_sample) / float(sr)
-                dur_cost = self._compute_quadratic_duration_penalty(dur, phone_median)
+                cand_phone_median = self._get_speaker_phone_median_duration(ev.speaker_id, node.phone, node.duration_prior_sec or 0.10)
+                dur_cost = self._compute_quadratic_duration_penalty(dur, cand_phone_median)
 
                 p_start_sample = ev.start_sample
                 p_end_sample = ev.end_sample
@@ -1551,7 +1670,7 @@ class SpanSelector:
         """
         penalty = 0.0
         phone_count = 0
-        vowels = ("IY", "IH", "EY", "EH", "AE", "AA", "AO", "OW", "UH", "UW", "ER", "AY", "AW", "OY")
+        vowels = set(VOWEL_PHONES)
         for eid in event_ids:
             ev = self.inv.events.get(eid)
             if ev and ev.kind == "phone":
@@ -1706,7 +1825,7 @@ class SpanSelector:
     def select(
         self,
         graph: TargetGraph,
-        speaker_id: Optional[str] = None,
+        speaker_id: Optional[Union[str, Set[str], List[str], Tuple[str, ...]]] = None,
         feature_extractor: Optional[Any] = None,
         wavlm_backend: Optional[Any] = None,
         prosody_guide: Optional[Any] = None,

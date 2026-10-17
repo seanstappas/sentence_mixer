@@ -128,10 +128,10 @@ item []:
             text = "AH0" 
         intervals [18]:
             xmin = 1.34 
-            xmax = 1.38 
+            xmax = 1.39 
             text = "N" 
         intervals [19]:
-            xmin = 1.38 
+            xmin = 1.39 
             xmax = 1.51 
             text = "D" 
         intervals [20]:

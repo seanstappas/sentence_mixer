@@ -447,8 +447,8 @@ def test_diarization_padding_edge_limits(tmp_path):
     )
     assert len(intervals) == 3
 
-    # Turn 0: padding should be min(0.15, max(0.0, 1.05 - 1.0 - 0.04)) = 0.01s -> end = 1.01
-    assert abs(intervals[0].end_sec - 1.01) < 1e-3
+    # Turn 0: padding should be min(0.15, 0.5 * max(0.0, 1.05 - 1.0 - 0.04)) = 0.005s -> end = 1.005
+    assert abs(intervals[0].end_sec - 1.005) < 1e-3
 
     # Turn 1: padding should be min(0.15, max(0.0, 6.0 - 2.0 - 0.04)) = 0.15s -> end = 2.15
     assert abs(intervals[1].end_sec - 2.15) < 1e-3

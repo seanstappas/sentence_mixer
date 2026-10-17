@@ -4,5 +4,9 @@
   "speaker_id": null,
   "single_speaker_verified": false,
   "assume_single_speaker": false,
-  "speaker_intervals_hash": ""
+  "speaker_intervals_hash": "",
+  "schema_version": "2.0.0",
+  "word_count": 0,
+  "event_count": 0,
+  "speakers": {}
 }

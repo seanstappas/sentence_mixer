@@ -140,10 +140,10 @@ item []:
             text = "P" 
         intervals [22]:
             xmin = 2.12 
-            xmax = 2.21 
+            xmax = 2.22 
             text = "AA1" 
         intervals [23]:
-            xmin = 2.21 
+            xmin = 2.22 
             xmax = 2.26 
             text = "R" 
         intervals [24]:

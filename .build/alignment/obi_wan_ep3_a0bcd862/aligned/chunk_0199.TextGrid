@@ -30,10 +30,10 @@ item []:
             text = "are" 
         intervals [5]:
             xmin = 1.03 
-            xmax = 1.43 
+            xmax = 1.42 
             text = "lost" 
         intervals [6]:
-            xmin = 1.43 
+            xmin = 1.42 
             xmax = 1.67 
             text = "" 
     item [2]:
@@ -88,9 +88,9 @@ item []:
             text = "S" 
         intervals [12]:
             xmin = 1.36 
-            xmax = 1.43 
+            xmax = 1.42 
             text = "T" 
         intervals [13]:
-            xmin = 1.43 
+            xmin = 1.42 
             xmax = 1.67 
             text = "" 

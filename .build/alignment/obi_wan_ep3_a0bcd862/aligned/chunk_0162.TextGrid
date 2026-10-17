@@ -128,14 +128,14 @@ item []:
             text = "M" 
         intervals [17]:
             xmin = 1.49 
-            xmax = 1.6 
+            xmax = 1.59 
             text = "P" 
         intervals [18]:
-            xmin = 1.6 
-            xmax = 1.63 
+            xmin = 1.59 
+            xmax = 1.62 
             text = "ER0" 
         intervals [19]:
-            xmin = 1.63 
+            xmin = 1.62 
             xmax = 1.79 
             text = "ER0" 
         intervals [20]:

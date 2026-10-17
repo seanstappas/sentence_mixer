@@ -14,10 +14,10 @@ item []:
         intervals: size = 8 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.23 
+            xmax = 0.24 
             text = "" 
         intervals [2]:
-            xmin = 0.23 
+            xmin = 0.24 
             xmax = 0.5 
             text = "after" 
         intervals [3]:
@@ -52,10 +52,10 @@ item []:
         intervals: size = 26 
         intervals [1]:
             xmin = 0.0 
-            xmax = 0.23 
+            xmax = 0.24 
             text = "" 
         intervals [2]:
-            xmin = 0.23 
+            xmin = 0.24 
             xmax = 0.33 
             text = "AE1" 
         intervals [3]:
@@ -140,17 +140,17 @@ item []:
             text = "N" 
         intervals [23]:
             xmin = 1.77 
-            xmax = 1.82 
+            xmax = 1.83 
             text = "AH0" 
         intervals [24]:
-            xmin = 1.82 
-            xmax = 1.85 
+            xmin = 1.83 
+            xmax = 1.87 
             text = "K" 
         intervals [25]:
-            xmin = 1.85 
-            xmax = 1.88 
+            xmin = 1.87 
+            xmax = 1.9 
             text = "IH0" 
         intervals [26]:
-            xmin = 1.88 
+            xmin = 1.9 
             xmax = 1.911 
             text = "N" 

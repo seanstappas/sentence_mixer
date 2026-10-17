@@ -747,8 +747,10 @@ class SpeakerDiarizer:
             if candidate_turns is not None or not _sub_cues:
                 prev_e = valid_turns[idx - 1][1] if idx > 0 else 0.0
                 next_s = valid_turns[idx + 1][0] if idx + 1 < len(valid_turns) else total_audio_sec
-                pad_left = min(0.20, max(0.0, s - prev_e - 0.04))
-                pad_right = min(0.15, max(0.0, next_s - e - 0.04))
+                gap_left = max(0.0, s - prev_e)
+                gap_right = max(0.0, next_s - e)
+                pad_left = min(0.20, 0.5 * max(0.0, gap_left - 0.04))
+                pad_right = min(0.15, 0.5 * max(0.0, gap_right - 0.04))
                 padded_s = max(0.0, s - pad_left)
                 padded_e = min(total_audio_sec, e + pad_right)
             else:

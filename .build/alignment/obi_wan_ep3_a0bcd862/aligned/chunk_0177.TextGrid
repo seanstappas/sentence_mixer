@@ -52,10 +52,10 @@ item []:
             text = "R" 
         intervals [4]:
             xmin = 0.32 
-            xmax = 0.36 
+            xmax = 0.37 
             text = "IY0" 
         intervals [5]:
-            xmin = 0.36 
+            xmin = 0.37 
             xmax = 0.46 
             text = "TH" 
         intervals [6]:

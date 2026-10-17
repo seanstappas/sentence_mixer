@@ -26,10 +26,10 @@ item []:
             text = "i" 
         intervals [4]:
             xmin = 0.47 
-            xmax = 0.97 
+            xmax = 0.96 
             text = "agree" 
         intervals [5]:
-            xmin = 0.97 
+            xmin = 0.96 
             xmax = 1.22 
             text = "" 
         intervals [6]:
@@ -88,10 +88,10 @@ item []:
             text = "R" 
         intervals [7]:
             xmin = 0.76 
-            xmax = 0.97 
+            xmax = 0.96 
             text = "IY1" 
         intervals [8]:
-            xmin = 0.97 
+            xmin = 0.96 
             xmax = 1.22 
             text = "" 
         intervals [9]:

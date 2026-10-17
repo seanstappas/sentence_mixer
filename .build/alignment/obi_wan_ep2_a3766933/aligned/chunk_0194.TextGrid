@@ -18,10 +18,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.12 
-            xmax = 0.73 
+            xmax = 0.74 
             text = "alliance" 
         intervals [3]:
-            xmin = 0.73 
+            xmin = 0.74 
             xmax = 1.07 
             text = "" 
         intervals [4]:
@@ -34,10 +34,10 @@ item []:
             text = "both" 
         intervals [6]:
             xmin = 1.51 
-            xmax = 1.85 
+            xmax = 1.86 
             text = "pledged" 
         intervals [7]:
-            xmin = 1.85 
+            xmin = 1.86 
             xmax = 2.05 
             text = "their" 
         intervals [8]:
@@ -64,10 +64,10 @@ item []:
             text = "L" 
         intervals [4]:
             xmin = 0.27 
-            xmax = 0.43 
+            xmax = 0.44 
             text = "AY1" 
         intervals [5]:
-            xmin = 0.43 
+            xmin = 0.44 
             xmax = 0.53 
             text = "AH0" 
         intervals [6]:
@@ -76,10 +76,10 @@ item []:
             text = "N" 
         intervals [7]:
             xmin = 0.56 
-            xmax = 0.73 
+            xmax = 0.74 
             text = "S" 
         intervals [8]:
-            xmin = 0.73 
+            xmin = 0.74 
             xmax = 1.07 
             text = "" 
         intervals [9]:
@@ -124,14 +124,14 @@ item []:
             text = "JH" 
         intervals [19]:
             xmin = 1.79 
-            xmax = 1.85 
+            xmax = 1.86 
             text = "D" 
         intervals [20]:
-            xmin = 1.85 
-            xmax = 1.88 
+            xmin = 1.86 
+            xmax = 1.89 
             text = "DH" 
         intervals [21]:
-            xmin = 1.88 
+            xmin = 1.89 
             xmax = 1.95 
             text = "EH1" 
         intervals [22]:

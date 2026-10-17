@@ -2,7 +2,7 @@ File type = "ooTextFile"
 Object class = "TextGrid"
 
 xmin = 0 
-xmax = 2.469 
+xmax = 2.469063 
 tiers? <exists> 
 size = 2 
 item []: 
@@ -10,7 +10,7 @@ item []:
         class = "IntervalTier" 
         name = "words" 
         xmin = 0 
-        xmax = 2.469 
+        xmax = 2.469063 
         intervals: size = 9 
         intervals [1]:
             xmin = 0.0 
@@ -22,10 +22,10 @@ item []:
             text = "silicon" 
         intervals [3]:
             xmin = 0.55 
-            xmax = 0.85 
+            xmax = 0.86 
             text = "has" 
         intervals [4]:
-            xmin = 0.85 
+            xmin = 0.86 
             xmax = 1.3 
             text = "fallen" 
         intervals [5]:
@@ -34,10 +34,10 @@ item []:
             text = "" 
         intervals [6]:
             xmin = 1.54 
-            xmax = 1.66 
+            xmax = 1.67 
             text = "and" 
         intervals [7]:
-            xmin = 1.66 
+            xmin = 1.67 
             xmax = 1.97 
             text = "master" 
         intervals [8]:
@@ -46,13 +46,13 @@ item []:
             text = "vos" 
         intervals [9]:
             xmin = 2.42 
-            xmax = 2.469 
+            xmax = 2.469063 
             text = "has" 
     item [2]:
         class = "IntervalTier" 
         name = "phones" 
         xmin = 0 
-        xmax = 2.469 
+        xmax = 2.469063 
         intervals: size = 31 
         intervals [1]:
             xmin = 0.0 
@@ -96,18 +96,18 @@ item []:
             text = "AE1" 
         intervals [11]:
             xmin = 0.78 
-            xmax = 0.85 
+            xmax = 0.86 
             text = "Z" 
         intervals [12]:
-            xmin = 0.85 
+            xmin = 0.86 
             xmax = 0.97 
             text = "F" 
         intervals [13]:
             xmin = 0.97 
-            xmax = 1.06 
+            xmax = 1.07 
             text = "AA1" 
         intervals [14]:
-            xmin = 1.06 
+            xmin = 1.07 
             xmax = 1.15 
             text = "L" 
         intervals [15]:
@@ -132,10 +132,10 @@ item []:
             text = "N" 
         intervals [20]:
             xmin = 1.61 
-            xmax = 1.66 
+            xmax = 1.67 
             text = "D" 
         intervals [21]:
-            xmin = 1.66 
+            xmin = 1.67 
             xmax = 1.7 
             text = "M" 
         intervals [22]:
@@ -176,5 +176,5 @@ item []:
             text = "AE1" 
         intervals [31]:
             xmin = 2.46 
-            xmax = 2.469 
+            xmax = 2.469063 
             text = "Z" 

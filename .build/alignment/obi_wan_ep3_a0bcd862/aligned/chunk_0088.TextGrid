@@ -108,10 +108,10 @@ item []:
             text = "AH0" 
         intervals [15]:
             xmin = 1.28 
-            xmax = 1.38 
+            xmax = 1.39 
             text = "K" 
         intervals [16]:
-            xmin = 1.38 
+            xmin = 1.39 
             xmax = 1.47 
             text = "AW1" 
         intervals [17]:

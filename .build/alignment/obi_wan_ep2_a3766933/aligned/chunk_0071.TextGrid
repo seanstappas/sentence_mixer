@@ -18,10 +18,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.1 
-            xmax = 0.55 
+            xmax = 0.59 
             text = "senator" 
         intervals [3]:
-            xmin = 0.55 
+            xmin = 0.59 
             xmax = 1.24 
             text = "amidala" 
         intervals [4]:
@@ -33,7 +33,7 @@ item []:
         name = "phones" 
         xmin = 0 
         xmax = 1.27 
-        intervals: size = 9 
+        intervals: size = 15 
         intervals [1]:
             xmin = 0.0 
             xmax = 0.1 
@@ -60,13 +60,37 @@ item []:
             text = "T" 
         intervals [7]:
             xmin = 0.52 
-            xmax = 0.55 
+            xmax = 0.59 
             text = "ER0" 
         intervals [8]:
-            xmin = 0.55 
-            xmax = 1.24 
-            text = "spn" 
+            xmin = 0.59 
+            xmax = 0.68 
+            text = "AE2" 
         intervals [9]:
+            xmin = 0.68 
+            xmax = 0.75 
+            text = "M" 
+        intervals [10]:
+            xmin = 0.75 
+            xmax = 0.79 
+            text = "AH0" 
+        intervals [11]:
+            xmin = 0.79 
+            xmax = 0.88 
+            text = "D" 
+        intervals [12]:
+            xmin = 0.88 
+            xmax = 1.01 
+            text = "AA1" 
+        intervals [13]:
+            xmin = 1.01 
+            xmax = 1.08 
+            text = "L" 
+        intervals [14]:
+            xmin = 1.08 
+            xmax = 1.24 
+            text = "AH0" 
+        intervals [15]:
             xmin = 1.24 
             xmax = 1.27 
             text = "" 

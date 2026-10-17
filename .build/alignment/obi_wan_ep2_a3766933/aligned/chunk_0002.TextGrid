@@ -26,10 +26,10 @@ item []:
             text = "of" 
         intervals [4]:
             xmin = 0.67 
-            xmax = 0.9 
+            xmax = 0.91 
             text = "gun" 
         intervals [5]:
-            xmin = 0.9 
+            xmin = 0.91 
             xmax = 1.34 
             text = "darks" 
         intervals [6]:
@@ -88,10 +88,10 @@ item []:
             text = "AH1" 
         intervals [12]:
             xmin = 0.8 
-            xmax = 0.9 
+            xmax = 0.91 
             text = "N" 
         intervals [13]:
-            xmin = 0.9 
+            xmin = 0.91 
             xmax = 0.95 
             text = "D" 
         intervals [14]:

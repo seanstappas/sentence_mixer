@@ -34,10 +34,10 @@ item []:
             text = "the" 
         intervals [6]:
             xmin = 0.85 
-            xmax = 1.23 
+            xmax = 1.26 
             text = "boy" 
         intervals [7]:
-            xmin = 1.23 
+            xmin = 1.26 
             xmax = 1.74 
             text = "" 
         intervals [8]:
@@ -112,10 +112,10 @@ item []:
             text = "B" 
         intervals [13]:
             xmin = 0.94 
-            xmax = 1.23 
+            xmax = 1.26 
             text = "OY1" 
         intervals [14]:
-            xmin = 1.23 
+            xmin = 1.26 
             xmax = 1.74 
             text = "" 
         intervals [15]:

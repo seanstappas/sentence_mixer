@@ -38,10 +38,10 @@ item []:
             text = "time" 
         intervals [7]:
             xmin = 2.43 
-            xmax = 2.79 
+            xmax = 2.78 
             text = "" 
         intervals [8]:
-            xmin = 2.79 
+            xmin = 2.78 
             xmax = 2.9 
             text = "be" 
         intervals [9]:
@@ -108,10 +108,10 @@ item []:
             text = "P" 
         intervals [12]:
             xmin = 1.53 
-            xmax = 1.72 
+            xmax = 1.73 
             text = "AE1" 
         intervals [13]:
-            xmin = 1.72 
+            xmin = 1.73 
             xmax = 1.87 
             text = "S" 
         intervals [14]:
@@ -128,18 +128,18 @@ item []:
             text = "T" 
         intervals [17]:
             xmin = 2.12 
-            xmax = 2.3 
+            xmax = 2.31 
             text = "AY1" 
         intervals [18]:
-            xmin = 2.3 
+            xmin = 2.31 
             xmax = 2.43 
             text = "M" 
         intervals [19]:
             xmin = 2.43 
-            xmax = 2.79 
+            xmax = 2.78 
             text = "" 
         intervals [20]:
-            xmin = 2.79 
+            xmin = 2.78 
             xmax = 2.83 
             text = "B" 
         intervals [21]:
@@ -160,10 +160,10 @@ item []:
             text = "N" 
         intervals [25]:
             xmin = 3.13 
-            xmax = 3.18 
+            xmax = 3.2 
             text = "D" 
         intervals [26]:
-            xmin = 3.18 
+            xmin = 3.2 
             xmax = 3.23 
             text = "F" 
         intervals [27]:

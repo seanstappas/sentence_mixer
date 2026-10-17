@@ -30,10 +30,10 @@ item []:
             text = "me" 
         intervals [5]:
             xmin = 0.74 
-            xmax = 0.98 
+            xmax = 0.97 
             text = "death" 
         intervals [6]:
-            xmin = 0.98 
+            xmin = 0.97 
             xmax = 1.27 
             text = "sticks" 
     item [2]:
@@ -96,10 +96,10 @@ item []:
             text = "EH1" 
         intervals [14]:
             xmin = 0.92 
-            xmax = 0.98 
+            xmax = 0.97 
             text = "TH" 
         intervals [15]:
-            xmin = 0.98 
+            xmin = 0.97 
             xmax = 1.06 
             text = "S" 
         intervals [16]:

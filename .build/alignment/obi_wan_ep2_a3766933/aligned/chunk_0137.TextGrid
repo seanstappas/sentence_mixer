@@ -30,10 +30,10 @@ item []:
             text = "thank" 
         intervals [5]:
             xmin = 1.22 
-            xmax = 1.39 
+            xmax = 1.38 
             text = "you" 
         intervals [6]:
-            xmin = 1.39 
+            xmin = 1.38 
             xmax = 1.67 
             text = "" 
     item [2]:
@@ -104,9 +104,9 @@ item []:
             text = "Y" 
         intervals [16]:
             xmin = 1.26 
-            xmax = 1.39 
+            xmax = 1.38 
             text = "UW1" 
         intervals [17]:
-            xmin = 1.39 
+            xmin = 1.38 
             xmax = 1.67 
             text = "" 

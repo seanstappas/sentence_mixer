@@ -19,11 +19,12 @@ from typing import Dict, List, Optional
 
 from dialogue_mixer import parse_script_text, synthesize_and_render_dialogue
 from run_mixer import load_or_combine_inventories
+from cache import resolve_inventory_path
 
-EP2_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_II_-_Attack_Of_The_Clo_56214896/units_index.json")
-EP3_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3/units_index.json")
-EP4_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_IV_-_A_New_Hope_1977_2_04865440/units_index.json")
-EP6_INVENTORY_PATH = Path(".build/inventory/Star_Wars_Episode_VI_-_Return_Of_The_Jed_3d083b52/units_index.json")
+EP2_INVENTORY_PATH = resolve_inventory_path(".build/inventory/Star_Wars_Episode_II_-_Attack_Of_The_Clo_56214896")
+EP3_INVENTORY_PATH = resolve_inventory_path(".build/inventory/Star_Wars_Episode_III_-_Revenge_Of_The_S_a39114e3")
+EP4_INVENTORY_PATH = resolve_inventory_path(".build/inventory/Star_Wars_Episode_IV_-_A_New_Hope_1977_2_04865440")
+EP6_INVENTORY_PATH = resolve_inventory_path(".build/inventory/Star_Wars_Episode_VI_-_Return_Of_The_Jed_3d083b52")
 
 EPISODE_4_ALDERAAN_SCRIPT = """
 obi-wan: Alderaan ought to be here, but it isn't.

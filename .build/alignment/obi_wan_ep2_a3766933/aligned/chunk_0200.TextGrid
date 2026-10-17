@@ -22,10 +22,10 @@ item []:
             text = "have" 
         intervals [3]:
             xmin = 0.35 
-            xmax = 0.67 
+            xmax = 0.66 
             text = "work" 
         intervals [4]:
-            xmin = 0.67 
+            xmin = 0.66 
             xmax = 0.76 
             text = "to" 
         intervals [5]:
@@ -68,10 +68,10 @@ item []:
             text = "ER1" 
         intervals [7]:
             xmin = 0.55 
-            xmax = 0.67 
+            xmax = 0.66 
             text = "K" 
         intervals [8]:
-            xmin = 0.67 
+            xmin = 0.66 
             xmax = 0.72 
             text = "T" 
         intervals [9]:

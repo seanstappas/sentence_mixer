@@ -26,10 +26,10 @@ item []:
             text = "can't" 
         intervals [4]:
             xmin = 0.72 
-            xmax = 1.04 
+            xmax = 1.05 
             text = "be" 
         intervals [5]:
-            xmin = 1.04 
+            xmin = 1.05 
             xmax = 1.351 
             text = "" 
     item [2]:
@@ -72,9 +72,9 @@ item []:
             text = "B" 
         intervals [9]:
             xmin = 0.77 
-            xmax = 1.04 
+            xmax = 1.05 
             text = "IY0" 
         intervals [10]:
-            xmin = 1.04 
+            xmin = 1.05 
             xmax = 1.351 
             text = "" 

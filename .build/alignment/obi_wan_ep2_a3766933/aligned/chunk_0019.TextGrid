@@ -18,10 +18,10 @@ item []:
             text = "" 
         intervals [2]:
             xmin = 0.15 
-            xmax = 0.31 
+            xmax = 0.32 
             text = "she" 
         intervals [3]:
-            xmin = 0.31 
+            xmin = 0.32 
             xmax = 0.57 
             text = "was" 
         intervals [4]:
@@ -50,10 +50,10 @@ item []:
             text = "now" 
         intervals [10]:
             xmin = 2.31 
-            xmax = 2.43 
+            xmax = 2.44 
             text = "let's" 
         intervals [11]:
-            xmin = 2.43 
+            xmin = 2.44 
             xmax = 2.55 
             text = "" 
     item [2]:
@@ -72,10 +72,10 @@ item []:
             text = "SH" 
         intervals [3]:
             xmin = 0.28 
-            xmax = 0.31 
+            xmax = 0.32 
             text = "IY1" 
         intervals [4]:
-            xmin = 0.31 
+            xmin = 0.32 
             xmax = 0.44 
             text = "W" 
         intervals [5]:
@@ -152,13 +152,13 @@ item []:
             text = "EH1" 
         intervals [23]:
             xmin = 2.37 
-            xmax = 2.4 
+            xmax = 2.41 
             text = "T" 
         intervals [24]:
-            xmin = 2.4 
-            xmax = 2.43 
+            xmin = 2.41 
+            xmax = 2.44 
             text = "S" 
         intervals [25]:
-            xmin = 2.43 
+            xmin = 2.44 
             xmax = 2.55 
             text = "" 

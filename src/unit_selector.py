@@ -6,7 +6,6 @@ and falling back to G2P phonemes when words are unavailable.
 """
 
 import argparse
-import json
 import re
 import sys
 from typing import List, Dict, Any, Tuple, Optional
@@ -486,8 +485,8 @@ if __name__ == "__main__":
     parser.add_argument("--inventory", default="./inventory/units_index.json", help="Path to units_index.json")
     args = parser.parse_args()
 
-    with open(args.inventory, "r", encoding="utf-8") as f:
-        inv = json.load(f)
+    from cache import load_inventory_json
+    inv = load_inventory_json(args.inventory)
 
     units, plan = synthesize_sentence(args.text, inv)
     print("\n--- Mix Plan ---")

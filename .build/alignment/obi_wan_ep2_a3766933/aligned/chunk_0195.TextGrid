@@ -22,10 +22,10 @@ item []:
             text = "count" 
         intervals [3]:
             xmin = 0.61 
-            xmax = 0.97 
+            xmax = 0.98 
             text = "dooku" 
         intervals [4]:
-            xmin = 0.97 
+            xmin = 0.98 
             xmax = 1.03 
             text = "" 
     item [2]:
@@ -72,9 +72,9 @@ item []:
             text = "K" 
         intervals [10]:
             xmin = 0.84 
-            xmax = 0.97 
+            xmax = 0.98 
             text = "UW0" 
         intervals [11]:
-            xmin = 0.97 
+            xmin = 0.98 
             xmax = 1.03 
             text = "" 

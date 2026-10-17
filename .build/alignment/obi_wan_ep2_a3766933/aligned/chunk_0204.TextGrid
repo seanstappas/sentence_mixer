@@ -26,10 +26,10 @@ item []:
             text = "assure" 
         intervals [4]:
             xmin = 0.64 
-            xmax = 0.87 
+            xmax = 0.86 
             text = "you" 
         intervals [5]:
-            xmin = 0.87 
+            xmin = 0.86 
             xmax = 1.27 
             text = "" 
     item [2]:
@@ -76,9 +76,9 @@ item []:
             text = "Y" 
         intervals [10]:
             xmin = 0.67 
-            xmax = 0.87 
+            xmax = 0.86 
             text = "UW1" 
         intervals [11]:
-            xmin = 0.87 
+            xmin = 0.86 
             xmax = 1.27 
             text = "" 

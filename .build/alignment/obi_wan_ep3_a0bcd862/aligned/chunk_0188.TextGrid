@@ -18,10 +18,10 @@ item []:
             text = "done" 
         intervals [2]:
             xmin = 0.41 
-            xmax = 0.77 
+            xmax = 0.78 
             text = "that" 
         intervals [3]:
-            xmin = 0.77 
+            xmin = 0.78 
             xmax = 1.13 
             text = "" 
         intervals [4]:
@@ -76,10 +76,10 @@ item []:
             text = "AE1" 
         intervals [6]:
             xmin = 0.59 
-            xmax = 0.77 
+            xmax = 0.78 
             text = "T" 
         intervals [7]:
-            xmin = 0.77 
+            xmin = 0.78 
             xmax = 1.13 
             text = "" 
         intervals [8]:

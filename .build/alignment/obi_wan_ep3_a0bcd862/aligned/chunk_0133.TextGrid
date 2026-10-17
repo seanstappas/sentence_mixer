@@ -26,10 +26,10 @@ item []:
             text = "made" 
         intervals [4]:
             xmin = 0.63 
-            xmax = 1.2 
+            xmax = 1.21 
             text = "contact" 
         intervals [5]:
-            xmin = 1.2 
+            xmin = 1.21 
             xmax = 1.56 
             text = "" 
         intervals [6]:
@@ -96,14 +96,14 @@ item []:
             text = "AE2" 
         intervals [12]:
             xmin = 1.05 
-            xmax = 1.13 
+            xmax = 1.12 
             text = "K" 
         intervals [13]:
-            xmin = 1.13 
-            xmax = 1.2 
+            xmin = 1.12 
+            xmax = 1.21 
             text = "T" 
         intervals [14]:
-            xmin = 1.2 
+            xmin = 1.21 
             xmax = 1.56 
             text = "" 
         intervals [15]:

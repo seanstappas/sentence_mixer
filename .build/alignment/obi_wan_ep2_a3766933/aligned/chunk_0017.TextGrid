@@ -128,10 +128,10 @@ item []:
             text = "T" 
         intervals [21]:
             xmin = 1.29 
-            xmax = 1.33 
+            xmax = 1.32 
             text = "IH0" 
         intervals [22]:
-            xmin = 1.33 
+            xmin = 1.32 
             xmax = 1.39 
             text = "V" 
         intervals [23]:

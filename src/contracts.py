@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
@@ -194,24 +195,58 @@ class InventoryIndex:
         for w in self.words.values():
             w.validate()
 
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+    def to_dict(self, compact: bool = False) -> Dict[str, Any]:
+        d = asdict(self)
+        if compact:
+            d.pop("word_to_word_ids", None)
+            d.pop("phone_to_event_ids", None)
+            d.pop("base_phone_to_event_ids", None)
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "InventoryIndex":
         sources = {k: SourceRecord(**v) for k, v in data.get("sources", {}).items()}
         utterances = {k: UtteranceRecord(**v) for k, v in data.get("utterances", {}).items()}
-        events = {k: AlignedEvent(**v) for k, v in data.get("events", {}).items()}
-        words = {k: WordOccurrence(**v) for k, v in data.get("words", {}).items()}
+        events = {}
+        for k, v in data.get("events", {}).items():
+            ev_dict = dict(v)
+            if "utterance_id" not in ev_dict:
+                ev_dict["utterance_id"] = ""
+            events[k] = AlignedEvent(**ev_dict)
+        words = {}
+        for k, v in data.get("words", {}).items():
+            w_dict = dict(v)
+            if "word_id" not in w_dict:
+                w_dict["word_id"] = k
+            if "word_original" not in w_dict:
+                w_dict["word_original"] = w_dict.get("word_normalized", "")
+            if "phone_event_ids" not in w_dict:
+                w_dict["phone_event_ids"] = []
+            words[k] = WordOccurrence(**w_dict)
+
+        word_to_word_ids = dict(data.get("word_to_word_ids") or {})
+        phone_to_event_ids = dict(data.get("phone_to_event_ids") or {})
+        base_phone_to_event_ids = dict(data.get("base_phone_to_event_ids") or {})
+
+        if not word_to_word_ids and words:
+            for wid, wo in words.items():
+                word_to_word_ids.setdefault(wo.word_normalized, []).append(wid)
+        if not phone_to_event_ids and events:
+            for eid, ev in events.items():
+                if ev.kind == "phone":
+                    phone_to_event_ids.setdefault(ev.label, []).append(eid)
+                    bp = ev.base_phone or re.sub(r"\d+$", "", ev.label)
+                    base_phone_to_event_ids.setdefault(bp, []).append(eid)
+
         return cls(
             schema_version=data.get("schema_version", INVENTORY_SCHEMA_VERSION),
             sources=sources,
             utterances=utterances,
             events=events,
             words=words,
-            word_to_word_ids=data.get("word_to_word_ids", {}),
-            phone_to_event_ids=data.get("phone_to_event_ids", {}),
-            base_phone_to_event_ids=data.get("base_phone_to_event_ids", {}),
+            word_to_word_ids=word_to_word_ids,
+            phone_to_event_ids=phone_to_event_ids,
+            base_phone_to_event_ids=base_phone_to_event_ids,
             lexicon_fingerprint=data.get("lexicon_fingerprint", ""),
             alignment_fingerprint=data.get("alignment_fingerprint", ""),
         )
@@ -338,6 +373,7 @@ class PlanSegment:
     realized_phones: List[str] = field(default_factory=list)
     entry_variant_samples: int = 0
     exit_variant_samples: int = 0
+    covered_token_indices: List[int] = field(default_factory=list)
 
     @property
     def duration_samples(self) -> int:

@@ -132,10 +132,10 @@ item []:
             text = "F" 
         intervals [17]:
             xmin = 1.23 
-            xmax = 1.28 
+            xmax = 1.29 
             text = "L" 
         intervals [18]:
-            xmin = 1.28 
+            xmin = 1.29 
             xmax = 1.42 
             text = "AY1" 
         intervals [19]:

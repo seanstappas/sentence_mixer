@@ -50,14 +50,14 @@ item []:
             text = "long" 
         intervals [10]:
             xmin = 2.26 
-            xmax = 2.49 
+            xmax = 2.34 
             text = "" 
         intervals [11]:
-            xmin = 2.49 
-            xmax = 2.52 
+            xmin = 2.34 
+            xmax = 2.37 
             text = "i" 
         intervals [12]:
-            xmin = 2.52 
+            xmin = 2.37 
             xmax = 2.55 
             text = "" 
     item [2]:
@@ -164,13 +164,13 @@ item []:
             text = "NG" 
         intervals [25]:
             xmin = 2.26 
-            xmax = 2.49 
+            xmax = 2.34 
             text = "" 
         intervals [26]:
-            xmin = 2.49 
-            xmax = 2.52 
+            xmin = 2.34 
+            xmax = 2.37 
             text = "AY1" 
         intervals [27]:
-            xmin = 2.52 
+            xmin = 2.37 
             xmax = 2.55 
             text = "" 

@@ -30,10 +30,10 @@ item []:
             text = "over" 
         intervals [5]:
             xmin = 1.21 
-            xmax = 1.55 
+            xmax = 1.59 
             text = "him" 
         intervals [6]:
-            xmin = 1.55 
+            xmin = 1.59 
             xmax = 2.23 
             text = "" 
     item [2]:
@@ -104,9 +104,9 @@ item []:
             text = "IH1" 
         intervals [16]:
             xmin = 1.33 
-            xmax = 1.55 
+            xmax = 1.59 
             text = "M" 
         intervals [17]:
-            xmin = 1.55 
+            xmin = 1.59 
             xmax = 2.23 
             text = "" 

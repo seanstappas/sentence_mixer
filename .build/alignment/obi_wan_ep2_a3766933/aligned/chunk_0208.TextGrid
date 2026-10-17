@@ -30,10 +30,10 @@ item []:
             text = "believe" 
         intervals [5]:
             xmin = 0.89 
-            xmax = 1.18 
+            xmax = 1.2 
             text = "you" 
         intervals [6]:
-            xmin = 1.18 
+            xmin = 1.2 
             xmax = 1.76 
             text = "" 
         intervals [7]:
@@ -108,10 +108,10 @@ item []:
             text = "Y" 
         intervals [13]:
             xmin = 0.92 
-            xmax = 1.18 
+            xmax = 1.2 
             text = "UW1" 
         intervals [14]:
-            xmin = 1.18 
+            xmin = 1.2 
             xmax = 1.76 
             text = "" 
         intervals [15]:

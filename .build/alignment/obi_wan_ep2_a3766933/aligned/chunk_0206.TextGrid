@@ -34,10 +34,10 @@ item []:
             text = "not" 
         intervals [6]:
             xmin = 1.59 
-            xmax = 2.37 
+            xmax = 2.38 
             text = "possible" 
         intervals [7]:
-            xmin = 2.37 
+            xmin = 2.38 
             xmax = 2.5 
             text = "" 
         intervals [8]:
@@ -144,10 +144,10 @@ item []:
             text = "AH0" 
         intervals [21]:
             xmin = 1.91 
-            xmax = 2.37 
+            xmax = 2.38 
             text = "L" 
         intervals [22]:
-            xmin = 2.37 
+            xmin = 2.38 
             xmax = 2.5 
             text = "" 
         intervals [23]:

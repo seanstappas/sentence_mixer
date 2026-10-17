@@ -144,10 +144,10 @@ item []:
             text = "T" 
         intervals [21]:
             xmin = 1.52 
-            xmax = 1.59 
+            xmax = 1.6 
             text = "HH" 
         intervals [22]:
-            xmin = 1.59 
+            xmin = 1.6 
             xmax = 1.71 
             text = "IY1" 
         intervals [23]:
